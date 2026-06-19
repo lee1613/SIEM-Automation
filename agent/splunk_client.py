@@ -82,31 +82,31 @@ class SplunkClient:
         }
         return results
 
-    def list_indexes(self) -> list[str]:
-        """Return names of all indexes (excluding internal ones)."""
-        resp = self.session.get(
-            f"{self.host}/services/data/indexes",
-            params={"output_mode": "json", "count": 0},
-        )
-        resp.raise_for_status()
-        return [
-            e["name"]
-            for e in resp.json()["entry"]
-            if not e["name"].startswith("_")
-        ]
 
-    def get_sourcetypes(self, index: str = "botsv3", top_n: int = 30) -> dict:
-        """Return sourcetypes in an index sorted by event count."""
+    def get_field_values(self, field: str, index: str = "botsv3", top_n: int = 20, sourcetype: str = "") -> dict:
+        """Return top values for a field, optionally scoped to a sourcetype."""
+        st_filter = f' sourcetype="{sourcetype}"' if sourcetype else ""
         return self.search(
-            f"index={index} | stats count by sourcetype | sort -count | head {top_n}",
+            f"index={index}{st_filter} | top limit={top_n} {field}",
             earliest="0",
             max_results=top_n,
         )
 
-    def get_field_values(self, field: str, index: str = "botsv3", top_n: int = 20) -> dict:
-        """Return top values for a field in an index."""
+    def get_sourcetype_fields(self, sourcetype: str, index: str = "botsv3", min_count: int = 1) -> dict:
+        """Return all fields in a sourcetype ranked by event count — equivalent to SQL INFORMATION_SCHEMA."""
         return self.search(
-            f"index={index} | top limit={top_n} {field}",
+            f'index={index} sourcetype="{sourcetype}" | fieldsummary maxvals=3 '
+            f'| where count >= {min_count} '
+            f'| table field, count, distinct_count, values | sort -count',
             earliest="0",
-            max_results=top_n,
+            max_results=200,
+        )
+
+    def sample_events(self, sourcetype: str, index: str = "botsv3", keyword: str = "", count: int = 3) -> dict:
+        """Return raw events from a sourcetype, optionally filtered by a keyword."""
+        kw = f' "{keyword}"' if keyword else ""
+        return self.search(
+            f'index={index} sourcetype="{sourcetype}"{kw} | head {count} | table _time _raw',
+            earliest="0",
+            max_results=count,
         )

@@ -1,320 +1,504 @@
 #!/usr/bin/env python3
 """
-SIEM Automation Agent — connects Llama 3.3 (via NVIDIA NIM) to local Splunk Enterprise.
+SIEM Automation Agent — LangGraph stateful agent with two-stage tool dispatch.
 
-Model: meta/llama-3.3-70b-instruct
-Brain: NVIDIA NIM (OpenAI-compatible API at integrate.api.nvidia.com)
-Data:  Splunk Enterprise REST API (port 8089)
+Flow per tool call:
+    agent ──► verify_node ──(approved)──► execute_node ──► agent
+                           └─(rejected)──► agent  (self-correction)
 
-Usage:
-    python splunk_agent.py                  # interactive mode
-    python splunk_agent.py "your question"  # single query mode
+verify_node runs before any tool executes and rejects calls that:
+  - duplicate a prior failed call this turn (dedup guard)
+  - reference a sourcetype not in the manifest
+  - run_splunk_search without aggregation (| stats / | top / | rare)
+  - run_splunk_search with a leading wildcard (=*value forces full scan)
 
-Configure via .env (copy from .env.example):
-    NIM_API_KEY, SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS
+execute_node only runs approved calls and records execution errors in seen_errors.
+
+Model:  meta/llama-3.3-70b-instruct via NVIDIA NIM
+Brain:  LangGraph StateGraph + MemorySaver (cross-question statefulness)
+Data:   Splunk Enterprise REST API (port 8089)
 """
 
 import os
+import re
 import sys
 import json
 import textwrap
+from typing import Annotated, TypedDict
+
 from dotenv import load_dotenv
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+
 from splunk_client import SplunkClient
 
 load_dotenv()
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration ──────────────────────────────────────────────────────────────
 
-NIM_API_KEY  = os.getenv("NIM_API_KEY", "")
-SPLUNK_HOST  = os.getenv("SPLUNK_HOST", "https://localhost:8089")
-SPLUNK_USER  = os.getenv("SPLUNK_USER", "admin")
-SPLUNK_PASS  = os.getenv("SPLUNK_PASS", "")
+NIM_API_KEY   = os.getenv("NIM_API_KEY", "")
+SPLUNK_HOST   = os.getenv("SPLUNK_HOST", "https://localhost:8089")
+SPLUNK_USER   = os.getenv("SPLUNK_USER", "admin")
+SPLUNK_PASS   = os.getenv("SPLUNK_PASS", "")
+NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
+MODEL         = "meta/llama-3.3-70b-instruct"
+MAX_ITER      = 15
+MANIFEST_PATH = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
-NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-MODEL        = "meta/llama-3.3-70b-instruct"
+# ── Field manifest helpers ─────────────────────────────────────────────────────
 
-# ── Tool definitions (OpenAI / NIM format) ────────────────────────────────────
+def _load_manifest() -> dict:
+    with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "run_splunk_search",
-            "description": (
-                "Execute an SPL (Splunk Processing Language) search against local Splunk Enterprise. "
-                "Use this to search for events, aggregate data, or investigate security incidents. "
-                "The BOTSv3 dataset covers August 2018 security incidents in index=botsv3."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": (
-                            "SPL query to run. Examples: "
-                            "'index=botsv3 sourcetype=WinEventLog EventCode=4625 | stats count by host', "
-                            "'index=botsv3 src_ip=192.168.1.1 | head 20'"
-                        ),
-                    },
-                    "earliest": {
-                        "type": "string",
-                        "description": (
-                            "Start of time window. Use '0' for all-time, '-24h' for last 24 h, "
-                            "or ISO timestamps like '2018-08-01T00:00:00'. Default: '0'."
-                        ),
-                        "default": "0",
-                    },
-                    "latest": {
-                        "type": "string",
-                        "description": "End of time window. Default: 'now'.",
-                        "default": "now",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum rows to return (1–1000). Default: 50.",
-                        "default": 50,
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_indexes",
-            "description": "List all available Splunk indexes. Use this to discover what data is accessible.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_sourcetypes",
-            "description": (
-                "List all sourcetypes in a Splunk index with event counts. "
-                "Useful for understanding what kinds of log data are present."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "index": {
-                        "type": "string",
-                        "description": "Index name (default: botsv3)",
-                        "default": "botsv3",
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "description": "Number of sourcetypes to return (default: 30)",
-                        "default": 30,
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_field_values",
-            "description": (
-                "Get the most common values for a specific field in an index. "
-                "Useful for recon, pivoting on an IP/user/host, and building targeted queries."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "field": {
-                        "type": "string",
-                        "description": "Field name (e.g. 'src_ip', 'host', 'user', 'EventCode', 'uri_path')",
-                    },
-                    "index": {
-                        "type": "string",
-                        "description": "Index name (default: botsv3)",
-                        "default": "botsv3",
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "description": "How many top values to return (default: 20)",
-                        "default": 20,
-                    },
-                },
-                "required": ["field"],
-            },
-        },
-    },
-]
+def _save_manifest(manifest: dict) -> None:
+    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
 
-SYSTEM_PROMPT = """You are a SIEM (Security Information and Event Management) analyst agent connected to a local Splunk Enterprise instance.
+def _manifest_get_source_types() -> str:
+    manifest = _load_manifest()
+    source_types = list(manifest.get("source_types", {}).keys())
+    return json.dumps({"source_types": source_types, "count": len(source_types)})
 
-You have access to the BOTSv3 (Boss of the SOC v3) dataset — a realistic security incident dataset from August 2018. The primary index is `botsv3`.
-
-Your capabilities:
-- Search Splunk using SPL (Splunk Processing Language)
-- Investigate security incidents across Windows, Linux, network, DNS, HTTP, and cloud logs
-- Identify attack patterns, lateral movement, data exfiltration, and malware activity
-- Correlate events across multiple sourcetypes
-
-Key dataset facts:
-- Index: botsv3
-- Time range: August 2018
-- 50+ sourcetypes: WinEventLog, Sysmon, stream:http, stream:dns, suricata, linux_secure, aws:cloudtrail, iis, etc.
-- Key fields by sourcetype:
-  - WinEventLog/Sysmon: host, EventCode, User, ComputerName, CommandLine, Image, ParentImage
-  - aws:cloudtrail: userIdentity.userName, userIdentity.type, user_type, eventName, eventSource, errorCode, sourceIPAddress
-  - stream:http / iis: src_ip, dest_ip, uri_path, status, http_method, bytes
-  - stream:dns: query, src_ip, dest_ip
-  - linux_secure: user, src_ip, action
-  - ms:o365:management / ms:aad:signin: UserId, UserPrincipalName, IPAddress, Operation, Workload
-
-SPL tips:
-- Always scope with `index=botsv3` unless listing indexes
-- ALWAYS aggregate with `| stats` or `| top` — never fetch raw events unless you need a specific _raw field value
-- Use `| sort -count` and `| head N` to limit large results
-- Use `earliest=0` to search the full BOTSv3 time range
-- Wrap multi-word field values in quotes
-- Keep max_results at 50 or below for aggregated queries; never request 1000 raw events
-
-When answering:
-1. Think through what SPL queries will answer the question
-2. Run searches to gather evidence — if a search returns 0 results, try a different field name or broader query before concluding there is no data
-3. Synthesize findings into a clear, concise answer
-4. Highlight suspicious or notable findings"""
-
-
-# ── Tool execution ────────────────────────────────────────────────────────────
-
-def execute_tool(splunk: SplunkClient, tool_name: str, tool_input: dict) -> str:
+def _manifest_search(pattern: str) -> str:
     try:
-        if tool_name == "run_splunk_search":
-            result = splunk.search(
-                query=tool_input["query"],
-                earliest=tool_input.get("earliest", "0"),
-                latest=tool_input.get("latest", "now"),
-                max_results=tool_input.get("max_results", 50),
-            )
-        elif tool_name == "list_indexes":
-            return json.dumps({"indexes": splunk.list_indexes()})
-        elif tool_name == "get_sourcetypes":
-            result = splunk.get_sourcetypes(
-                index=tool_input.get("index", "botsv3"),
-                top_n=tool_input.get("top_n", 30),
-            )
-        elif tool_name == "get_field_values":
-            result = splunk.get_field_values(
-                field=tool_input["field"],
-                index=tool_input.get("index", "botsv3"),
-                top_n=tool_input.get("top_n", 20),
-            )
-        else:
-            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return json.dumps({"error": f"Invalid regex pattern: {e}"})
+    manifest = _load_manifest()
+    matches = []
+    for st_name, entry in manifest.get("source_types", {}).items():
+        for field in entry.get("fields", []):
+            if regex.search(field):
+                matches.append({"sourcetype": st_name, "type": "field", "value": field})
+        if regex.search(st_name):
+            matches.append({"sourcetype": st_name, "type": "sourcetype", "value": st_name})
+    return json.dumps({"matches": matches, "count": len(matches)})
 
-        if "results" in result:
-            # Strip internal Splunk metadata fields and the bulky _raw field
-            # from each row to keep token count manageable.
-            STRIP = {"_raw", "_bkt", "_cd", "_indextime", "_kv", "_si", "_sourcetype",
-                     "_serial", "_subsecond", "punct", "linecount", "splunk_server",
-                     "splunk_server_group", "timestartpos", "timeendpos"}
-            cleaned = [
-                {k: v for k, v in row.items() if k not in STRIP}
-                for row in result["results"]
-            ]
-            payload = json.dumps({"results": cleaned, "meta": result.get("_meta", {})})
-            # Hard cap: truncate to ~12 000 chars so we never blow the context window.
-            if len(payload) > 12_000:
-                payload = payload[:12_000] + '... [truncated — use a more specific query or aggregation]"}'
-            return payload
-        return json.dumps(result)
+def _manifest_expand(sourcetype: str, fields: list) -> str:
+    manifest = _load_manifest()
+    source_types = manifest.setdefault("source_types", {})
+    entry = source_types.setdefault(sourcetype, {"fields": []})
+    existing_fields = set(entry.get("fields", []))
+    new_fields = [f for f in fields if f not in existing_fields]
+    entry["fields"].extend(new_fields)
+    _save_manifest(manifest)
+    return json.dumps({"sourcetype": sourcetype, "fields_added": new_fields})
 
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+def _known_sourcetypes() -> set:
+    return set(json.loads(_manifest_get_source_types())["source_types"])
 
+# ── Result formatter ───────────────────────────────────────────────────────────
 
-# ── Agent loop (OpenAI / NIM tool-use protocol) ───────────────────────────────
+_STRIP = frozenset({
+    "_bkt", "_cd", "_indextime", "_kv", "_si", "_sourcetype",
+    "_serial", "_subsecond", "punct", "linecount", "splunk_server",
+    "splunk_server_group", "timestartpos", "timeendpos",
+})
 
-def run_agent(client: OpenAI, splunk: SplunkClient, user_query: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user",   "content": user_query},
+def _format_result(result: dict, keep_raw: bool = False) -> str:
+    strip_set = _STRIP if keep_raw else (_STRIP | {"_raw"})
+    if "results" in result:
+        cleaned = [
+            {k: v for k, v in row.items() if k not in strip_set}
+            for row in result["results"]
+        ]
+        payload = json.dumps({"results": cleaned, "meta": result.get("_meta", {})})
+        if len(payload) > 12_000:
+            payload = payload[:12_000] + '... [truncated — use a more specific query]"}'
+        return payload
+    return json.dumps(result)
+
+# ── Graph state ────────────────────────────────────────────────────────────────
+
+class AgentState(TypedDict):
+    messages:             Annotated[list, add_messages]  # grows across questions
+    seen_errors:          list   # [[name, args_str], ...] calls that errored — reset per question
+    seen_empty:           list   # [[name, args_str], ...] calls that returned 0 results — reset per question
+    step_count:           int    # agent-node calls — reset per question
+    verification_passed:  bool   # set by verify_node, read by after_verify router
+
+# ── Tool factory ───────────────────────────────────────────────────────────────
+
+def make_tools(splunk: SplunkClient) -> list:
+    """Return LangChain tool objects that close over the given Splunk client."""
+
+    @tool
+    def get_source_types() -> str:
+        """Return the full list of all known sourcetypes from the local manifest.
+        Call this FIRST — it is the entry point for all investigations.
+        No Splunk call, instant response."""
+        return _manifest_get_source_types()
+
+    @tool
+    def search_field_manifest(pattern: str) -> str:
+        """Search the BOTSv3 field registry by keyword or Python regex.
+        Call this FIRST for any field-related question — instant, no Splunk call.
+        Examples: 'MFA', 'bucket', 'cmdline', 'mfaAuth', 'process.*cpu'"""
+        return _manifest_search(pattern)
+
+    @tool
+    def get_sourcetype_fields(sourcetype: str, index: str = "botsv3",
+                               min_count: int = 1) -> str:
+        """Run Splunk fieldsummary on a sourcetype: every field with coverage %,
+        distinct value count, and sample values. Use when search_field_manifest
+        returns no match. Follow up with expand_field_manifest."""
+        result = splunk.get_sourcetype_fields(
+            sourcetype=sourcetype, index=index, min_count=min_count
+        )
+        return _format_result(result)
+
+    @tool
+    def get_field_values(field: str, index: str = "botsv3",
+                         sourcetype: str = "", top_n: int = 20) -> str:
+        """Get the top distinct values for a field, optionally scoped to a sourcetype.
+        Use to enumerate sub-types: all eventName values in aws:cloudtrail,
+        all EventCode values in WinEventLog."""
+        result = splunk.get_field_values(
+            field=field, index=index, top_n=int(top_n), sourcetype=sourcetype
+        )
+        return _format_result(result)
+
+    @tool
+    def sample_events(sourcetype: str, index: str = "botsv3",
+                      keyword: str = "", count: int = 3) -> str:
+        """Return raw event content from a sourcetype to discover embedded field names and log structure.
+        `sourcetype` MUST be a value returned by get_source_types (e.g. 'stream:udp', 'aws:cloudtrail').
+        `keyword` is an optional free-text filter within that sourcetype — it narrows which events are
+        returned but does NOT select the sourcetype. Supply a domain-specific term (e.g. 'memcached',
+        'PutObject', '.jpeg') when known; omit or leave blank to sample any events from the sourcetype."""
+        result = splunk.sample_events(
+            sourcetype=sourcetype, index=index, keyword=keyword, count=min(count, 5)
+        )
+        return _format_result(result, keep_raw=True)
+
+    @tool
+    def expand_field_manifest(sourcetype: str, fields: list) -> str:
+        """Persist newly discovered fields into the local registry for a sourcetype.
+        Call this whenever get_sourcetype_fields or sample_events reveals field names
+        that were not already returned by search_field_manifest — so they are available
+        to future searches without re-querying Splunk."""
+        return _manifest_expand(sourcetype, fields)
+
+    @tool
+    def run_splunk_search(query: str, max_results: int = 50) -> str:
+        """Execute an SPL search against Splunk.
+        Rules enforced by the pre-flight verifier:
+          - Must aggregate with | stats, | top, or | rare
+          - Sourcetype must be a known one (call get_source_types first)
+          - No leading wildcards (=*value forces full sequential scan)
+        Use dot-notation for nested fields. Max 50 results."""
+        result = splunk.search(
+            query=query, earliest="0", latest="now", max_results=int(max_results)
+        )
+        return _format_result(result)
+
+    return [
+        get_source_types,
+        search_field_manifest,
+        get_sourcetype_fields,
+        get_field_values,
+        sample_events,
+        expand_field_manifest,
+        run_splunk_search,
     ]
 
-    while True:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            max_tokens=4096,
+# ── System prompt ──────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise — the software vendor is Splunk.
+
+MANDATORY: Every SPL query MUST begin with `index=botsv3`. All BOTSv3 data lives in this index. A query without `index=botsv3` will search the wrong scope and return nothing.
+Correct:   index=botsv3 sourcetype=aws:cloudtrail eventName=PutBucketAcl | stats count by requestParameters.bucketName
+Incorrect: sourcetype=aws:cloudtrail eventName=PutBucketAcl | stats count by requestParameters.bucketName
+
+Always aggregate SPL results with | stats, | top, or | rare. Use dot-notation for nested fields (userIdentity.userName) and {} for multi-value arrays (attach_filename{}, Parameters{}.Value). Never return raw event streams. Max 50 results per query.
+
+SPL rules:
+- Use IN for multiple values: status IN (401,403,404)
+- Filter after aggregation with | search: | stats count by user | search count > 10
+- Boolean precedence in base search: NOT -> OR -> AND
+- Never use leading wildcards (=*value) — always trailing wildcards (value*)
+- Match exact tokens over substring wildcards (*error*)
+
+Field manifest workflow:
+1. Call search_field_manifest first — it searches the local registry of known fields (instant, no Splunk call).
+2. If the field you need is NOT found, call get_sourcetype_fields or sample_events to discover it from Splunk.
+3. After discovering new fields, call expand_field_manifest to persist them into the registry so they are available to future queries without re-querying Splunk.
+
+Cross-question memory: You retain full context from all prior questions in this session. When a follow-up question concerns the same data source or entity, reuse the sourcetypes, field names, and values you already found — do not rediscover from scratch."""
+
+# ── Verification helpers ───────────────────────────────────────────────────────
+
+def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
+    """Return a rejection reason string, or None if the call is approved."""
+    name     = tc["name"]
+    args     = tc["args"]
+    args_str = json.dumps(args, sort_keys=True, separators=(",", ":"))
+    call_key = (name, args_str)
+
+    # 1. Dedup guard — identical call already errored this turn
+    if call_key in seen_errors:
+        return (
+            "Rejected: this exact tool call already failed with an error this turn. "
+            "Try different arguments or a different approach."
         )
 
-        msg = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
+    # 2. Empty-result guard — identical call already returned 0 results this turn
+    if call_key in seen_empty:
+        return (
+            "Rejected: this exact tool call already returned zero results this turn. "
+            "Change the sourcetype, field name, filter value, or search strategy."
+        )
 
-        # Append assistant turn to history (preserves tool_calls for context)
-        messages.append(msg)
+    # Remaining checks only apply to run_splunk_search
+    if name != "run_splunk_search":
+        return None
 
-        # If no tool calls, we're done
-        if finish_reason != "tool_calls" or not msg.tool_calls:
-            return msg.content or ""
+    query = args.get("query", "")
 
-        # Print any inline text the model emitted before calling tools
-        if msg.content:
-            print(f"\n[Agent thinking]\n{msg.content}\n")
+    # 3. Must start with index=botsv3
+    if not re.match(r'\s*index\s*=\s*botsv3\b', query, re.IGNORECASE):
+        return (
+            "Rejected: every SPL query must begin with 'index=botsv3'. "
+            "All BOTSv3 data lives in that index. "
+            "Prepend 'index=botsv3' to the query."
+        )
 
-        # Execute every requested tool and collect results
-        for tc in msg.tool_calls:
-            args = json.loads(tc.function.arguments)
-            print(f"[Tool] {tc.function.name}({json.dumps(args, separators=(',', ':'))})")
-            output = execute_tool(splunk, tc.function.name, args)
-            preview = output[:300] + "..." if len(output) > 300 else output
-            print(f"       -> {preview}\n")
+    # 4. Must have aggregation
+    if not re.search(r'\|\s*(stats|top|rare)\b', query, re.IGNORECASE):
+        return (
+            "Rejected: SPL query must aggregate results with | stats, | top, or | rare. "
+            "Add an aggregation command before submitting."
+        )
 
-            # Each tool result is a separate message with role="tool"
-            messages.append({
-                "role":         "tool",
-                "tool_call_id": tc.id,
-                "content":      output,
-            })
+    # 5. Sourcetype must be in the manifest (if one is specified)
+    st_match = re.search(r'sourcetype\s*=\s*"?([^\s",|)]+)', query, re.IGNORECASE)
+    if st_match:
+        st = st_match.group(1).strip('"\'')
+        known = _known_sourcetypes()
+        if st not in known:
+            return (
+                f"Rejected: sourcetype '{st}' is not in the field manifest. "
+                f"Call get_source_types to see valid sourcetypes, then adjust the query."
+            )
+
+    # 6. No leading wildcards (=*word forces sequential scan)
+    if re.search(r'=\s*\*[^\s*|,)"\']', query):
+        return (
+            "Rejected: leading wildcard detected (=*value). "
+            "Leading wildcards force a full sequential scan. "
+            "Use a trailing wildcard (value*) or an exact value instead."
+        )
+
+    return None
+
+# ── Graph factory ──────────────────────────────────────────────────────────────
+
+def create_agent(api_key: str, splunk: SplunkClient):
+    """Build and compile the LangGraph agent. Returns (graph, checkpointer).
+
+    Graph topology:
+        agent ──► verify_node ──(approved)──► execute_node ──► agent
+                              └─(rejected)──► agent
+    """
+    tools    = make_tools(splunk)
+    tool_map = {t.name: t for t in tools}
+
+    llm = ChatOpenAI(
+        base_url=NIM_BASE_URL,
+        api_key=api_key,
+        model=MODEL,
+        max_tokens=4096,
+        temperature=0,
+    )
+    model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+    model_bare       = llm  # no tools — used when iteration cap is hit
+
+    system_msg = SystemMessage(content=SYSTEM_PROMPT)
+
+    # ── Node: agent ────────────────────────────────────────────────────────────
+    def agent_node(state: AgentState) -> dict:
+        step = state.get("step_count", 0) + 1
+        msgs = [system_msg] + list(state["messages"])
+
+        if step > MAX_ITER:
+            print("[Max iterations reached — forcing final answer]")
+            msgs = msgs + [HumanMessage(
+                "You have used the maximum number of tool calls. "
+                "Give your best final answer now based on everything found so far."
+            )]
+            response = model_bare.invoke(msgs)
+        else:
+            response = model_with_tools.invoke(msgs)
+
+        if response.content:
+            label = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
+            print(f"\n{label}\n{response.content}\n")
+
+        return {"messages": [response], "step_count": step}
+
+    # ── Node: verify ───────────────────────────────────────────────────────────
+    def verify_node(state: AgentState) -> dict:
+        """Pre-flight check: inspect proposed tool calls before execution.
+
+        Approves  → sets verification_passed=True, adds nothing to messages.
+        Rejects   → sets verification_passed=False, injects ToolMessage(error)
+                    for every rejected call so the agent can self-correct.
+        """
+        seen_errors = {(e[0], e[1]) for e in state.get("seen_errors", [])}
+        seen_empty  = {(e[0], e[1]) for e in state.get("seen_empty",  [])}
+        last        = state["messages"][-1]
+        rejections  = []
+
+        for tc in last.tool_calls:
+            reason = _verify_call(tc, seen_errors, seen_empty)
+            if reason:
+                print(f"[Verify REJECT] {tc['name']} — {reason}")
+                rejections.append(ToolMessage(
+                    content=json.dumps({"error": reason}),
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                ))
+            else:
+                print(f"[Verify OK]     {tc['name']}")
+
+        if rejections:
+            return {"messages": rejections, "verification_passed": False}
+        return {"verification_passed": True}
+
+    # ── Node: execute ──────────────────────────────────────────────────────────
+    def execute_node(state: AgentState) -> dict:
+        """Run verified tool calls; record execution errors and empty results."""
+        seen_errors = {(e[0], e[1]) for e in state.get("seen_errors", [])}
+        seen_empty  = {(e[0], e[1]) for e in state.get("seen_empty",  [])}
+        new_errors  = [list(e) for e in seen_errors]
+        new_empty   = [list(e) for e in seen_empty]
+        last        = state["messages"][-1]
+        results     = []
+
+        for tc in last.tool_calls:
+            args_str = json.dumps(tc["args"], sort_keys=True, separators=(",", ":"))
+            call_key  = (tc["name"], args_str)
+
+            try:
+                raw    = tool_map[tc["name"]].invoke(tc["args"])
+                output = raw if isinstance(raw, str) else json.dumps(raw)
+            except Exception as exc:
+                output = json.dumps({"error": str(exc)})
+
+            try:
+                parsed = json.loads(output)
+                if "error" in parsed:
+                    new_errors.append(list(call_key))
+                elif (parsed.get("results") is not None
+                      and len(parsed["results"]) == 0):
+                    new_empty.append(list(call_key))
+            except Exception:
+                pass
+
+            print(f"[Execute] {tc['name']}({args_str})")
+            print(f"          -> {output}\n")
+
+            results.append(ToolMessage(
+                content=output,
+                tool_call_id=tc["id"],
+                name=tc["name"],
+            ))
+
+        return {"messages": results, "seen_errors": new_errors, "seen_empty": new_empty}
+
+    # ── Routers ────────────────────────────────────────────────────────────────
+    def should_continue(state: AgentState) -> str:
+        """Route agent output: to verify if tool calls present, else END."""
+        if state.get("step_count", 0) > MAX_ITER:
+            return END
+        last = state["messages"][-1]
+        if getattr(last, "tool_calls", None):
+            return "verify"
+        return END
+
+    def after_verify(state: AgentState) -> str:
+        """Route verify output: to execute if approved, back to agent if rejected."""
+        return "execute" if state.get("verification_passed") else "agent"
+
+    # ── Assemble graph ─────────────────────────────────────────────────────────
+    checkpointer = MemorySaver()
+
+    g = StateGraph(AgentState)
+    g.add_node("agent",   agent_node)
+    g.add_node("verify",  verify_node)
+    g.add_node("execute", execute_node)
+
+    g.set_entry_point("agent")
+    g.add_conditional_edges("agent",  should_continue,
+                            {"verify": "verify", END: END})
+    g.add_conditional_edges("verify", after_verify,
+                            {"execute": "execute", "agent": "agent"})
+    g.add_edge("execute", "agent")
+
+    return g.compile(checkpointer=checkpointer), checkpointer
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Public run API ─────────────────────────────────────────────────────────────
 
-def connect_splunk() -> SplunkClient:
+def run_agent(graph, question: str, thread_id: str = "default") -> str:
+    """Invoke the agent on one question and return the final answer string.
+
+    Same thread_id across questions → model sees full prior Q&A history.
+    Fresh thread_id → clean conversation.
+    """
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": MAX_ITER * 4,
+    }
+    result = graph.invoke(
+        {
+            "messages":            [HumanMessage(content=question)],
+            "seen_errors":         [],
+            "seen_empty":          [],
+            "step_count":          0,
+            "verification_passed": False,
+        },
+        config=config,
+    )
+    last = result["messages"][-1]
+    return getattr(last, "content", "") or ""
+
+
+# ── CLI entry point ────────────────────────────────────────────────────────────
+
+def _connect_splunk() -> SplunkClient:
     if not SPLUNK_PASS:
-        raise SystemExit(
-            "SPLUNK_PASS is not set. Copy .env.example to .env and fill in your password."
-        )
+        raise SystemExit("SPLUNK_PASS not set — copy .env.example to .env.")
     print(f"Connecting to Splunk at {SPLUNK_HOST} as '{SPLUNK_USER}'...")
-    try:
-        c = SplunkClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
-        print("Connected.\n")
-        return c
-    except Exception as e:
-        raise SystemExit(f"Failed to connect to Splunk: {e}")
+    c = SplunkClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
+    print("Connected.\n")
+    return c
 
 
 def main():
     if not NIM_API_KEY:
-        raise SystemExit(
-            "NIM_API_KEY is not set. Copy .env.example to .env and add your NVIDIA NIM key."
-        )
+        raise SystemExit("NIM_API_KEY not set.")
 
-    nim_client = OpenAI(base_url=NIM_BASE_URL, api_key=NIM_API_KEY)
-    splunk     = connect_splunk()
+    splunk    = _connect_splunk()
+    graph, _  = create_agent(NIM_API_KEY, splunk)
+    thread_id = "interactive"
 
-    # Single-query mode
     if len(sys.argv) > 1:
-        query = " ".join(sys.argv[1:])
+        query  = " ".join(sys.argv[1:])
         print(f"Query: {query}\n")
-        answer = run_agent(nim_client, splunk, query)
+        answer = run_agent(graph, query, thread_id=thread_id)
         print("\n" + "=" * 60)
         print(answer)
         return
 
-    # Interactive mode
-    print(f"SIEM Agent ready  [model: {MODEL}]")
-    print("Type your question or 'exit' to quit.")
-    print("Example: 'What are the top source IPs hitting the web server?'\n")
+    print(f"SIEM Agent ready  [model: {MODEL}  |  LangGraph + verify gate]")
+    print("Type your question or 'exit' to quit. Context persists across turns.\n")
+
     while True:
         try:
             query = input("You: ").strip()
@@ -326,7 +510,7 @@ def main():
         if query.lower() in ("exit", "quit", "q"):
             print("Goodbye.")
             break
-        answer = run_agent(nim_client, splunk, query)
+        answer = run_agent(graph, query, thread_id=thread_id)
         print("\nAgent:", textwrap.fill(answer, width=100, subsequent_indent="       "))
         print()
 
