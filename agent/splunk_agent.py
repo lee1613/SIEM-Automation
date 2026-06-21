@@ -137,8 +137,7 @@ def make_tools(splunk: SplunkClient) -> list:
     @tool
     def search_field_manifest(pattern: str) -> str:
         """Search the BOTSv3 field registry by keyword or Python regex.
-        Call this FIRST for any field-related question — instant, no Splunk call.
-        Examples: 'MFA', 'bucket', 'cmdline', 'mfaAuth', 'process.*cpu'"""
+        Call this to check whether a field already exists in the local manifest before querying Splunk."""
         return _manifest_search(pattern)
 
     @tool
@@ -156,8 +155,7 @@ def make_tools(splunk: SplunkClient) -> list:
     def get_field_values(field: str, index: str = "botsv3",
                          sourcetype: str = "", top_n: int = 20) -> str:
         """Get the top distinct values for a field, optionally scoped to a sourcetype.
-        Use to enumerate sub-types: all eventName values in aws:cloudtrail,
-        all EventCode values in WinEventLog."""
+        Use to enumerate the range of values a field contains before filtering on it."""
         result = splunk.get_field_values(
             field=field, index=index, top_n=int(top_n), sourcetype=sourcetype
         )
@@ -167,10 +165,9 @@ def make_tools(splunk: SplunkClient) -> list:
     def sample_events(sourcetype: str, index: str = "botsv3",
                       keyword: str = "", count: int = 3) -> str:
         """Return raw event content from a sourcetype to discover embedded field names and log structure.
-        `sourcetype` MUST be a value returned by get_source_types (e.g. 'stream:udp', 'aws:cloudtrail').
+        `sourcetype` MUST be a value returned by get_source_types.
         `keyword` is an optional free-text filter within that sourcetype — it narrows which events are
-        returned but does NOT select the sourcetype. Supply a domain-specific term (e.g. 'memcached',
-        'PutObject', '.jpeg') when known; omit or leave blank to sample any events from the sourcetype."""
+        returned but does NOT select the sourcetype. Omit or leave blank to sample any events."""
         result = splunk.sample_events(
             sourcetype=sourcetype, index=index, keyword=keyword, count=min(count, 5)
         )
@@ -187,11 +184,9 @@ def make_tools(splunk: SplunkClient) -> list:
     @tool
     def run_splunk_search(query: str, max_results: int = 50) -> str:
         """Execute an SPL search against Splunk.
-        Rules enforced by the pre-flight verifier:
-          - Must aggregate with | stats, | top, or | rare
-          - Sourcetype must be a known one (call get_source_types first)
-          - No leading wildcards (=*value forces full sequential scan)
-        Use dot-notation for nested fields. Max 50 results."""
+        Only call this when you are certain the sourcetype exists — verified via get_source_types.
+        Always include a sourcetype filter. Must aggregate with | stats, | top, or | rare.
+        No leading wildcards. Max 50 results."""
         result = splunk.search(
             query=query, earliest="0", latest="now", max_results=int(max_results)
         )
@@ -209,28 +204,26 @@ def make_tools(splunk: SplunkClient) -> list:
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise — the software vendor is Splunk.
+SYSTEM_PROMPT = """You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise.
 
-MANDATORY: Every SPL query MUST begin with `index=botsv3`. All BOTSv3 data lives in this index. A query without `index=botsv3` will search the wrong scope and return nothing.
-Correct:   index=botsv3 sourcetype=aws:cloudtrail eventName=PutBucketAcl | stats count by requestParameters.bucketName
-Incorrect: sourcetype=aws:cloudtrail eventName=PutBucketAcl | stats count by requestParameters.bucketName
+MANDATORY: Every SPL query MUST begin with `index=botsv3`. All BOTSv3 data lives in this index.
 
-Always aggregate SPL results with | stats, | top, or | rare. Use dot-notation for nested fields (userIdentity.userName) and {} for multi-value arrays (attach_filename{}, Parameters{}.Value). Never return raw event streams. Max 50 results per query.
+Always aggregate SPL results with | stats, | top, or | rare. Use dot-notation for nested fields and {} for multi-value arrays. Never return raw event streams. Max 50 results per query.
 
 SPL rules:
-- Use IN for multiple values: status IN (401,403,404)
-- Filter after aggregation with | search: | stats count by user | search count > 10
+- Use IN for multiple literal values
+- Filter after aggregation with | search
 - Boolean precedence in base search: NOT -> OR -> AND
 - Never use leading wildcards (=*value) — always trailing wildcards (value*)
-- Match exact tokens over substring wildcards (*error*)
+- Match exact tokens over substring wildcards
 
-Field manifest workflow:
-1. Call search_field_manifest first — it searches the local registry of known fields (instant, no Splunk call).
-2. If the field you need is NOT found, call get_sourcetype_fields or sample_events to discover it from Splunk.
-3. After discovering new fields, call expand_field_manifest to persist them into the registry so they are available to future queries without re-querying Splunk.
+run_splunk_search rules — only invoke when you are certain the sourcetype exists.
+To be certain: call get_source_types first to confirm the sourcetype is present, then run the search.
+Never run a search without a sourcetype filter.
 
-Cross-question memory: You retain full context from all prior questions in this session. When a follow-up question concerns the same data source or entity, reuse the sourcetypes, field names, and values you already found — do not rediscover from scratch."""
+Use sample_events to inspect the raw structure of events inside a sourcetype before searching. This reveals actual field names, value formats, and keywords that can lead you to the answer. Call this whenever you are unsure what a sourcetype contains or what fields to search on.
 
+"""
 # ── Verification helpers ───────────────────────────────────────────────────────
 
 def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
@@ -275,16 +268,20 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
             "Add an aggregation command before submitting."
         )
 
-    # 5. Sourcetype must be in the manifest (if one is specified)
+    # 5. Sourcetype must be present and in the manifest
     st_match = re.search(r'sourcetype\s*=\s*"?([^\s",|)]+)', query, re.IGNORECASE)
-    if st_match:
-        st = st_match.group(1).strip('"\'')
-        known = _known_sourcetypes()
-        if st not in known:
-            return (
-                f"Rejected: sourcetype '{st}' is not in the field manifest. "
-                f"Call get_source_types to see valid sourcetypes, then adjust the query."
-            )
+    if not st_match:
+        return (
+            "Rejected: every run_splunk_search query must include a sourcetype filter. "
+            "Call get_source_types to find the right sourcetype, then add sourcetype=<value> to the query."
+        )
+    st = st_match.group(1).strip('"\'')
+    known = _known_sourcetypes()
+    if st not in known:
+        return (
+            f"Rejected: sourcetype '{st}' is not in the field manifest. "
+            f"Call get_source_types to see valid sourcetypes, then adjust the query."
+        )
 
     # 6. No leading wildcards (=*word forces sequential scan)
     if re.search(r'=\s*\*[^\s*|,)"\']', query):
