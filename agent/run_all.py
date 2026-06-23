@@ -154,6 +154,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default=None,
                         help="Question ID to start from (e.g. Q201). Skip earlier questions.")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Stop after attempting this many questions.")
     args = parser.parse_args()
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -201,8 +203,9 @@ def main():
         tee = Tee(sys.__stdout__, log_file)
 
         with tee:
+            limit_label = str(args.limit) if args.limit else "all"
             print(f"BOTSv3 Agent Full Run — {timestamp}")
-            print(f"Questions: {len(questions)}  |  Starting at index {start_idx}")
+            print(f"Questions: {len(questions)}  |  Starting at index {start_idx}  |  Limit: {limit_label}")
             print(f"Log: {log_path}")
             print("=" * 80 + "\n")
 
@@ -215,6 +218,8 @@ def main():
 
                 if idx < start_idx:
                     continue
+                if args.limit is not None and (idx - start_idx) >= args.limit:
+                    break
 
                 total_points += points
 

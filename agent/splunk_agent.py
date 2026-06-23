@@ -64,30 +64,29 @@ def _manifest_get_source_types() -> str:
     source_types = list(manifest.get("source_types", {}).keys())
     return json.dumps({"source_types": source_types, "count": len(source_types)})
 
-def _manifest_search(pattern: str) -> str:
-    try:
-        regex = re.compile(pattern, re.IGNORECASE)
-    except re.error as e:
-        return json.dumps({"error": f"Invalid regex pattern: {e}"})
-    manifest = _load_manifest()
-    matches = []
-    for st_name, entry in manifest.get("source_types", {}).items():
-        for field in entry.get("fields", []):
-            if regex.search(field):
-                matches.append({"sourcetype": st_name, "type": "field", "value": field})
-        if regex.search(st_name):
-            matches.append({"sourcetype": st_name, "type": "sourcetype", "value": st_name})
-    return json.dumps({"matches": matches, "count": len(matches)})
-
-def _manifest_expand(sourcetype: str, fields: list) -> str:
+def _manifest_expand(sourcetype: str, fields: list) -> None:
     manifest = _load_manifest()
     source_types = manifest.setdefault("source_types", {})
     entry = source_types.setdefault(sourcetype, {"fields": []})
-    existing_fields = set(entry.get("fields", []))
-    new_fields = [f for f in fields if f not in existing_fields]
-    entry["fields"].extend(new_fields)
-    _save_manifest(manifest)
-    return json.dumps({"sourcetype": sourcetype, "fields_added": new_fields})
+    existing = set(entry.get("fields", []))
+    new_fields = [f for f in fields if f not in existing]
+    if new_fields:
+        entry["fields"].extend(new_fields)
+        _save_manifest(manifest)
+
+def _search_keyword_in_manifest(keyword: str) -> list:
+    """Return [{sourcetype, field}] for every field containing keyword.
+    Skips entries where keyword exactly matches a sourcetype name."""
+    manifest = _load_manifest()
+    kw_lower = keyword.lower()
+    matches = []
+    for st_name, entry in manifest.get("source_types", {}).items():
+        if kw_lower == st_name.lower():
+            continue
+        for field in entry.get("fields", []):
+            if kw_lower in field.lower():
+                matches.append({"sourcetype": st_name, "field": field})
+    return matches
 
 def _known_sourcetypes() -> set:
     return set(json.loads(_manifest_get_source_types())["source_types"])
@@ -135,17 +134,37 @@ def make_tools(splunk: SplunkClient) -> list:
         return _manifest_get_source_types()
 
     @tool
-    def search_field_manifest(pattern: str) -> str:
-        """Search the BOTSv3 field registry by keyword or Python regex.
-        Call this to check whether a field already exists in the local manifest before querying Splunk."""
-        return _manifest_search(pattern)
+    def search_keyword(keyword: str) -> str:
+        """Search for a keyword across all BOTSv3 fields.
+        Returns every field (with its sourcetype path) whose name contains the keyword.
+        If nothing is found in the local manifest, falls back to a live Splunk fieldsummary.
+        Call this before run_splunk_search to discover which sourcetypes and fields
+        are relevant to a keyword."""
+        matches = _search_keyword_in_manifest(keyword)
+        if matches:
+            return json.dumps({"matches": matches, "count": len(matches), "source": "manifest"})
+        query = (
+            f"index=botsv3 *{keyword}* | fields sourcetype *{keyword}*"
+            f" | untable sourcetype field_name field_value"
+            f" | stats count values(field_value) as example_values by field_name, sourcetype"
+        )
+        result = splunk.search(query=query, earliest="0", latest="now", max_results=50)
+        try:
+            for row in result.get("results", []):
+                st = row.get("sourcetype")
+                field = row.get("field_name")
+                if st and field:
+                    _manifest_expand(st, [field])
+        except Exception:
+            pass
+        return _format_result(result)
 
     @tool
     def get_sourcetype_fields(sourcetype: str, index: str = "botsv3",
                                min_count: int = 1) -> str:
         """Run Splunk fieldsummary on a sourcetype: every field with coverage %,
-        distinct value count, and sample values. Use when search_field_manifest
-        returns no match. Follow up with expand_field_manifest."""
+        distinct value count, and sample values. Use when search_keyword returns
+        no match for a sourcetype you want to explore."""
         result = splunk.get_sourcetype_fields(
             sourcetype=sourcetype, index=index, min_count=min_count
         )
@@ -174,14 +193,6 @@ def make_tools(splunk: SplunkClient) -> list:
         return _format_result(result, keep_raw=True)
 
     @tool
-    def expand_field_manifest(sourcetype: str, fields: list) -> str:
-        """Persist newly discovered fields into the local registry for a sourcetype.
-        Call this whenever get_sourcetype_fields or sample_events reveals field names
-        that were not already returned by search_field_manifest — so they are available
-        to future searches without re-querying Splunk."""
-        return _manifest_expand(sourcetype, fields)
-
-    @tool
     def run_splunk_search(query: str, max_results: int = 50) -> str:
         """Execute an SPL search against Splunk.
         Only call this when you are certain the sourcetype exists — verified via get_source_types.
@@ -194,11 +205,10 @@ def make_tools(splunk: SplunkClient) -> list:
 
     return [
         get_source_types,
-        search_field_manifest,
+        search_keyword,
         get_sourcetype_fields,
         get_field_values,
         sample_events,
-        expand_field_manifest,
         run_splunk_search,
     ]
 
@@ -317,9 +327,31 @@ def create_agent(api_key: str, splunk: SplunkClient):
 
     system_msg = SystemMessage(content=SYSTEM_PROMPT)
 
+    def _print_state(label: str, state: AgentState) -> None:
+        msgs = state.get("messages", [])
+        print(
+            f"\n[STATE:{label}]"
+            f"  step={state.get('step_count', 0)}"
+            f"  msgs={len(msgs)}"
+            f"  errors={len(state.get('seen_errors', []))}"
+            f"  empty={len(state.get('seen_empty', []))}"
+            f"  verified={state.get('verification_passed', '?')}"
+        )
+        last = msgs[-1] if msgs else None
+        if last:
+            kind = type(last).__name__
+            tcs  = getattr(last, "tool_calls", None)
+            if tcs:
+                for tc in tcs:
+                    print(f"  last_msg: {kind} -> tool_call: {tc['name']}({json.dumps(tc['args'], separators=(',', ':'))})")
+            else:
+                snippet = (getattr(last, "content", "") or "")[:120].replace("\n", " ")
+                print(f"  last_msg: {kind} -> {snippet!r}")
+
     # ── Node: agent ────────────────────────────────────────────────────────────
     def agent_node(state: AgentState) -> dict:
         step = state.get("step_count", 0) + 1
+        _print_state("agent_in", state)
         msgs = [system_msg] + list(state["messages"])
 
         if step > MAX_ITER:
@@ -333,13 +365,14 @@ def create_agent(api_key: str, splunk: SplunkClient):
             response = model_with_tools.invoke(msgs)
 
         if response.content:
-            label = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
-            print(f"\n{label}\n{response.content}\n")
+            tag = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
+            print(f"\n{tag}\n{response.content}\n")
 
         return {"messages": [response], "step_count": step}
 
     # ── Node: verify ───────────────────────────────────────────────────────────
     def verify_node(state: AgentState) -> dict:
+        _print_state("verify_in", state)
         """Pre-flight check: inspect proposed tool calls before execution.
 
         Approves  → sets verification_passed=True, adds nothing to messages.
@@ -370,6 +403,7 @@ def create_agent(api_key: str, splunk: SplunkClient):
     # ── Node: execute ──────────────────────────────────────────────────────────
     def execute_node(state: AgentState) -> dict:
         """Run verified tool calls; record execution errors and empty results."""
+        _print_state("execute_in", state)
         seen_errors = {(e[0], e[1]) for e in state.get("seen_errors", [])}
         seen_empty  = {(e[0], e[1]) for e in state.get("seen_empty",  [])}
         new_errors  = [list(e) for e in seen_errors]
