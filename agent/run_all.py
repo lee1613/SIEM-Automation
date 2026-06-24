@@ -33,8 +33,9 @@ from scoreboard_client import ScoreboardClient
 import splunk_agent as agent_mod
 
 # extract_clean_answer still uses the raw OpenAI client (lightweight, no tools)
-MODEL        = "meta/llama-3.3-70b-instruct"
-NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODEL         = "mistralai/mistral-large-3-675b-instruct-2512"
+EXTRACT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1"
+NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
 
 
 def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
@@ -54,7 +55,7 @@ def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
         "with no spaces. If a number, give only the number. Output nothing else."
     )
     resp = nim_client.chat.completions.create(
-        model=MODEL,
+        model=EXTRACT_MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=256,
         temperature=0,
@@ -255,16 +256,22 @@ def main():
 
                 # Submit to Splunk CTF scoreboard (official scoring)
                 q_number = q.get("number", int(qid.replace("Q", "")))
-                sb_result = scoreboard.submit(q_number, clean_answer)
-                pts_earned = sb_result.earned
-                earned_pts += pts_earned
+                try:
+                    sb_result = scoreboard.submit(q_number, clean_answer)
+                    pts_earned = sb_result.earned
+                    earned_pts += pts_earned
+                    verdict_label = "[CORRECT]" if sb_result.correct else "[WRONG]"
+                    sb_correct = sb_result.correct
+                    print(f"  Scoreboard: {verdict_label}  |  Earned: {pts_earned}/{points} pts")
+                except Exception as sb_err:
+                    print(f"  Scoreboard: [UNAVAILABLE] — {sb_err}")
+                    pts_earned = 0
+                    sb_correct = False
+                    verdict_label = "[UNAVAILABLE]"
 
                 # Also compute a local verdict for the breakdown table
                 verdict, reason = score_answer(agent_answer, correct)
-                # Override earned with the scoreboard's authoritative answer
-                verdict_label = "[CORRECT]" if sb_result.correct else "[WRONG]"
 
-                print(f"  Scoreboard: {verdict_label}  |  Earned: {pts_earned}/{points} pts")
                 print(f"  (local match: {verdict} — {reason})")
                 print(f"  Running total: {earned_pts} pts earned from scoreboard")
 
@@ -277,7 +284,7 @@ def main():
                     "correct":         correct,
                     "agent_answer":    agent_answer,
                     "clean_answer":    clean_answer,
-                    "sb_correct":      sb_result.correct,
+                    "sb_correct":      sb_correct,
                     "local_verdict":   verdict,
                     "earned":          pts_earned,
                     "notes":           notes,

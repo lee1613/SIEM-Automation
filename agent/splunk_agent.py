@@ -45,7 +45,7 @@ SPLUNK_HOST   = os.getenv("SPLUNK_HOST", "https://localhost:8089")
 SPLUNK_USER   = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS   = os.getenv("SPLUNK_PASS", "")
 NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
-MODEL         = "meta/llama-3.3-70b-instruct"
+MODEL         = "mistralai/mistral-large-3-675b-instruct-2512"
 MAX_ITER      = 15
 MANIFEST_PATH = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
@@ -120,6 +120,7 @@ class AgentState(TypedDict):
     seen_empty:           list   # [[name, args_str], ...] calls that returned 0 results — reset per question
     step_count:           int    # agent-node calls — reset per question
     verification_passed:  bool   # set by verify_node, read by after_verify router
+    intention_retries:    int    # tracks retries for missing Intention — reset per question
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
 
@@ -214,7 +215,11 @@ def make_tools(splunk: SplunkClient) -> list:
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise.
+SYSTEM_PROMPT = """CRITICAL RULE — READ FIRST: You MUST write an "Intention:" line before EVERY tool call. NEVER call a tool without first stating your reasoning. Your tool call WILL BE REJECTED if you do not include "Intention:" in your message. Example:
+  Intention: I need to see all available sourcetypes to find where DNS data lives.
+  → call get_source_types()
+
+You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise.
 
 MANDATORY: Every SPL query MUST begin with `index=botsv3`. All BOTSv3 data lives in this index.
 
@@ -232,6 +237,26 @@ To be certain: call get_source_types first to confirm the sourcetype is present,
 Never run a search without a sourcetype filter.
 
 Use sample_events to inspect the raw structure of events inside a sourcetype before searching. This reveals actual field names, value formats, and keywords that can lead you to the answer. Call this whenever you are unsure what a sourcetype contains or what fields to search on.
+
+ALWAYS state your reasoning before acting. The format is:
+  Intention: <why you are making this call and what you expect to learn or confirm>
+  → tool call
+
+Example investigation flow:
+  Intention: Understand what sourcetypes are available to narrow down where destination IP data might live.
+  → call get_source_types()
+
+  Intention: stream:udp looked relevant; check what fields it exposes to see if destination IP is present.
+  → call get_sourcetype_fields(sourcetype="stream:udp")
+
+  Intention: No useful dest field in stream:udp; search the manifest for any sourcetype containing a 'dest' field.
+  → call search_keyword(keyword="dest")
+
+  Intention: stream:ip has a 'dest' field; sample a raw event to confirm the field format before querying.
+  → call sample_events(sourcetype="stream:ip")
+
+  Intention: Field confirmed. Run aggregation to find the top destination IP in stream:ip traffic.
+  → call run_splunk_search(query="index=botsv3 sourcetype=stream:ip | top limit=20 dest")
 
 """
 # ── Verification helpers ───────────────────────────────────────────────────────
@@ -384,6 +409,24 @@ def create_agent(api_key: str, splunk: SplunkClient):
         last        = state["messages"][-1]
         rejections  = []
 
+        # ── Intention protocol soft check ─────────────────────────────────
+        intention_missing = not last.content or "intention" not in last.content.lower()
+        intention_retries = state.get("intention_retries", 0)
+
+        if intention_missing and intention_retries < 2:
+            for tc in last.tool_calls:
+                rejections.append(ToolMessage(
+                    content=json.dumps({"error":
+                        "Rejected: You must state your reasoning before calling any tool. "
+                        "Write an 'Intention: <why you are making this call>' line, "
+                        "then repeat your tool call."}),
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                ))
+            print(f"[Verify REJECT] No Intention stated (retry {intention_retries + 1}/2)")
+            return {"messages": rejections, "verification_passed": False,
+                    "intention_retries": intention_retries + 1}
+
         for tc in last.tool_calls:
             reason = _verify_call(tc, seen_errors, seen_empty)
             if reason:
@@ -493,6 +536,7 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
             "seen_empty":          [],
             "step_count":          0,
             "verification_passed": False,
+            "intention_retries":   0,
         },
         config=config,
     )
