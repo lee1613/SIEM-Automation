@@ -32,16 +32,17 @@ from splunk_client import SplunkClient
 from scoreboard_client import ScoreboardClient
 import splunk_agent as agent_mod
 
-# extract_clean_answer uses the raw OpenAI client (lightweight, no tools)
+# Main agent model (GPT-5.4 via OpenAI); extractor uses Llama-3.3-70B via NIM
 MODEL         = "gpt-5.4"
-EXTRACT_MODEL = "gpt-5.4"
+EXTRACT_MODEL = "meta/llama-3.3-70b-instruct"
+NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
 
 
-def extract_clean_answer(oai_client: OpenAI, question: str, guidance: str,
+def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
                          verbose_answer: str) -> str:
     """
-    One additional LLM call that strips prose from the agent's answer and
-    returns only the exact value(s) the scoreboard expects.
+    Lightweight prose-stripping pass — delegates to Llama-3.3-70B via NIM.
+    Returns only the exact value(s) the scoreboard expects.
     """
     guidance_line = f"Answer format guidance: {guidance}" if guidance else ""
     prompt = (
@@ -53,10 +54,10 @@ def extract_clean_answer(oai_client: OpenAI, question: str, guidance: str,
         "surrounding text. If the answer is a list, use comma-separated values "
         "with no spaces. If a number, give only the number. Output nothing else."
     )
-    resp = oai_client.chat.completions.create(
+    resp = nim_client.chat.completions.create(
         model=EXTRACT_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        max_completion_tokens=256,
+        max_tokens=256,
         temperature=0,
     )
     return (resp.choices[0].message.content or "").strip()
@@ -65,6 +66,7 @@ load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+NIM_API_KEY    = os.getenv("NIM_API_KEY", "")
 SPLUNK_HOST    = os.getenv("SPLUNK_HOST", "https://localhost:8089")
 SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
@@ -168,6 +170,8 @@ def main():
 
     if not OPENAI_API_KEY:
         sys.exit("OPENAI_API_KEY not set — check .env")
+    if not NIM_API_KEY:
+        sys.exit("NIM_API_KEY not set — check .env")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -183,8 +187,8 @@ def main():
     run_thread_id = f"botsv3_run_{timestamp}"
     print(f"Agent ready  [thread: {run_thread_id}]\n")
 
-    # OpenAI client for extract_clean_answer (prose-stripping pass, no tools)
-    oai_client = OpenAI(api_key=OPENAI_API_KEY)
+    # NIM client for extract_clean_answer (Llama-3.3-70B, lightweight prose-strip)
+    nim_client = OpenAI(base_url=NIM_BASE_URL, api_key=NIM_API_KEY)
 
     results      = []
     total_points = 0
@@ -248,7 +252,7 @@ def main():
                 # Extract a clean bare answer for scoreboard submission
                 guidance = q.get("answer_guidance", "") or ""
                 clean_answer = extract_clean_answer(
-                    oai_client, qtext, guidance, agent_answer
+                    nim_client, qtext, guidance, agent_answer
                 )
                 print(f"\n[EXTRACTED ANSWER FOR SCOREBOARD]\n{clean_answer}")
                 print("-" * 40)
