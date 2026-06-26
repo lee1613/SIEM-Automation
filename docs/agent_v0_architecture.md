@@ -7,7 +7,7 @@
 
 ## Overview
 
-v0 is a stateful, tool-calling LangGraph agent that investigates BOTSv3 Splunk data to answer CTF questions. Every design decision is oriented around one constraint: a moderately capable LLM (70B–550B parameter class) must produce reliable, non-hallucinated SPL queries against a live Splunk instance with no prior knowledge of the dataset's schema.
+v0 is a stateful, tool-calling LangGraph agent that investigates BOTSv3 Splunk data to answer CTF questions. Every design decision is oriented around one constraint: a high-end LLM GPT-5.4 must produce reliable, non-hallucinated SPL queries against a live Splunk instance with no prior knowledge of the dataset's schema.
 
 ---
 
@@ -272,3 +272,5 @@ The guardrail resets per question (both lists are initialized to `[]` in each `r
 | `agent/botsv3_fields_template.json` | Blank template (102 sourcetypes, empty field lists) |
 | `agent/scoreboard_client.py` | CTF scoreboard KV store client + submission logger |
 | `agent/splunk_client.py` | Splunk REST API wrapper (search, fieldsummary, field values, sample) |
+
+
