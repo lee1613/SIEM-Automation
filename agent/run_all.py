@@ -32,13 +32,12 @@ from splunk_client import SplunkClient
 from scoreboard_client import ScoreboardClient
 import splunk_agent as agent_mod
 
-# extract_clean_answer still uses the raw OpenAI client (lightweight, no tools)
-MODEL         = "mistralai/mistral-large-3-675b-instruct-2512"
-EXTRACT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1"
-NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
+# extract_clean_answer uses the raw OpenAI client (lightweight, no tools)
+MODEL         = "gpt-5.4"
+EXTRACT_MODEL = "gpt-5.4"
 
 
-def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
+def extract_clean_answer(oai_client: OpenAI, question: str, guidance: str,
                          verbose_answer: str) -> str:
     """
     One additional LLM call that strips prose from the agent's answer and
@@ -54,10 +53,10 @@ def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
         "surrounding text. If the answer is a list, use comma-separated values "
         "with no spaces. If a number, give only the number. Output nothing else."
     )
-    resp = nim_client.chat.completions.create(
+    resp = oai_client.chat.completions.create(
         model=EXTRACT_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=256,
+        max_completion_tokens=256,
         temperature=0,
     )
     return (resp.choices[0].message.content or "").strip()
@@ -65,10 +64,10 @@ def extract_clean_answer(nim_client: OpenAI, question: str, guidance: str,
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-NIM_API_KEY  = os.getenv("NIM_API_KEY", "")
-SPLUNK_HOST  = os.getenv("SPLUNK_HOST", "https://localhost:8089")
-SPLUNK_USER  = os.getenv("SPLUNK_USER", "admin")
-SPLUNK_PASS  = os.getenv("SPLUNK_PASS", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+SPLUNK_HOST    = os.getenv("SPLUNK_HOST", "https://localhost:8089")
+SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
+SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
 
 QUESTIONS_PATH = os.path.join(PROJECT_ROOT, "datasets", "botsv3_questions.json")
 ANSWERS_PATH   = os.path.join(PROJECT_ROOT, "datasets", "botsv3_answers.json")
@@ -167,8 +166,8 @@ def main():
     questions = json.load(open(QUESTIONS_PATH, "r", encoding="utf-8"))
     answers   = {a["id"]: a for a in json.load(open(ANSWERS_PATH, "r", encoding="utf-8"))}
 
-    if not NIM_API_KEY:
-        sys.exit("NIM_API_KEY not set — check .env")
+    if not OPENAI_API_KEY:
+        sys.exit("OPENAI_API_KEY not set — check .env")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -179,13 +178,13 @@ def main():
 
     # LangGraph agent — single graph + MemorySaver shared across all questions
     print("Building LangGraph agent ...")
-    graph, _   = agent_mod.create_agent(NIM_API_KEY, splunk)
+    graph, _   = agent_mod.create_agent(OPENAI_API_KEY, splunk)
     # Single thread per run: the model accumulates context across all 58 questions
     run_thread_id = f"botsv3_run_{timestamp}"
     print(f"Agent ready  [thread: {run_thread_id}]\n")
 
-    # OpenAI client kept for extract_clean_answer (prose-stripping pass, no tools)
-    nim_client = OpenAI(base_url=NIM_BASE_URL, api_key=NIM_API_KEY)
+    # OpenAI client for extract_clean_answer (prose-stripping pass, no tools)
+    oai_client = OpenAI(api_key=OPENAI_API_KEY)
 
     results      = []
     total_points = 0
@@ -249,7 +248,7 @@ def main():
                 # Extract a clean bare answer for scoreboard submission
                 guidance = q.get("answer_guidance", "") or ""
                 clean_answer = extract_clean_answer(
-                    nim_client, qtext, guidance, agent_answer
+                    oai_client, qtext, guidance, agent_answer
                 )
                 print(f"\n[EXTRACTED ANSWER FOR SCOREBOARD]\n{clean_answer}")
                 print("-" * 40)

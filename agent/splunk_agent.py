@@ -14,7 +14,7 @@ verify_node runs before any tool executes and rejects calls that:
 
 execute_node only runs approved calls and records execution errors in seen_errors.
 
-Model:  meta/llama-3.3-70b-instruct via NVIDIA NIM
+Model:  gpt-5.4 via OpenAI API
 Brain:  LangGraph StateGraph + MemorySaver (cross-question statefulness)
 Data:   Splunk Enterprise REST API (port 8089)
 """
@@ -40,14 +40,13 @@ load_dotenv()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-NIM_API_KEY   = os.getenv("NIM_API_KEY", "")
-SPLUNK_HOST   = os.getenv("SPLUNK_HOST", "https://localhost:8089")
-SPLUNK_USER   = os.getenv("SPLUNK_USER", "admin")
-SPLUNK_PASS   = os.getenv("SPLUNK_PASS", "")
-NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
-MODEL         = "mistralai/mistral-large-3-675b-instruct-2512"
-MAX_ITER      = 15
-MANIFEST_PATH = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+SPLUNK_HOST    = os.getenv("SPLUNK_HOST", "https://localhost:8089")
+SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
+SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
+MODEL          = "gpt-5.4"
+MAX_ITER       = 15
+MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 # ── Field manifest helpers ─────────────────────────────────────────────────────
 
@@ -341,10 +340,9 @@ def create_agent(api_key: str, splunk: SplunkClient):
     tool_map = {t.name: t for t in tools}
 
     llm = ChatOpenAI(
-        base_url=NIM_BASE_URL,
         api_key=api_key,
         model=MODEL,
-        max_tokens=4096,
+        max_completion_tokens=4096,
         temperature=0,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
@@ -556,11 +554,11 @@ def _connect_splunk() -> SplunkClient:
 
 
 def main():
-    if not NIM_API_KEY:
-        raise SystemExit("NIM_API_KEY not set.")
+    if not OPENAI_API_KEY:
+        raise SystemExit("OPENAI_API_KEY not set.")
 
     splunk    = _connect_splunk()
-    graph, _  = create_agent(NIM_API_KEY, splunk)
+    graph, _  = create_agent(OPENAI_API_KEY, splunk)
     thread_id = "interactive"
 
     if len(sys.argv) > 1:
@@ -571,7 +569,7 @@ def main():
         print(answer)
         return
 
-    print(f"SIEM Agent ready  [model: {MODEL}  |  LangGraph + verify gate]")
+    print(f"SIEM Agent ready  [model: {MODEL}  |  LangGraph + verify gate  |  OpenAI]")
     print("Type your question or 'exit' to quit. Context persists across turns.\n")
 
     while True:
