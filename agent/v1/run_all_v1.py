@@ -91,6 +91,8 @@ def main():
                              "Vultr: https://api.vultrinference.com/v1). Omit to use OpenAI.")
     parser.add_argument("--senior-api-key-env", default="OPENAI_API_KEY",
                         help="Name of the env var holding the Senior API key (default: OPENAI_API_KEY).")
+    parser.add_argument("--run-name", default=None,
+                        help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
@@ -130,7 +132,7 @@ def main():
     if args.limit is not None:
         selected = selected[:args.limit]
 
-    logger = RunLogger(full_run=full_run, version_major=1)
+    logger = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
 
     # Point LangSmith at a per-run project so every trace is grouped correctly.
     os.environ["LANGCHAIN_PROJECT"] = f"botsv3-{logger.run_name}"
