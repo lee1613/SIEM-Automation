@@ -329,26 +329,44 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
 
 # ── Graph factory ──────────────────────────────────────────────────────────────
 
-def create_agent(api_key: str, splunk: SplunkClient):
+def create_agent(api_key: str, splunk: SplunkClient, *,
+                 model: str = MODEL, base_url: str | None = None,
+                 extra_instructions: str = ""):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
         agent ──► verify_node ──(approved)──► execute_node ──► agent
                               └─(rejected)──► agent
+
+    Args:
+        model:              chat model id (e.g. "gpt-5.4", "gpt-5.4-mini",
+                            "meta/llama-3.3-70b-instruct").
+        base_url:           OpenAI-compatible endpoint. None → OpenAI; pass the NIM
+                            base URL to run a Llama worker through the same code path.
+        extra_instructions: appended to SYSTEM_PROMPT — used by the v1 worker pool to
+                            inject the ESCALATE protocol without altering v0 behaviour.
     """
     tools    = make_tools(splunk)
     tool_map = {t.name: t for t in tools}
 
+    # OpenAI's newer models require `max_completion_tokens`; NIM / open-source models
+    # (reached via base_url) expect the classic `max_tokens`. Pick the right one.
+    token_kwargs = ({"max_tokens": 4096} if base_url
+                    else {"max_completion_tokens": 4096})
     llm = ChatOpenAI(
         api_key=api_key,
-        model=MODEL,
-        max_completion_tokens=4096,
+        model=model,
+        base_url=base_url,
         temperature=0,
+        **token_kwargs,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
     model_bare       = llm  # no tools — used when iteration cap is hit
 
-    system_msg = SystemMessage(content=SYSTEM_PROMPT)
+    prompt_text = SYSTEM_PROMPT
+    if extra_instructions:
+        prompt_text = SYSTEM_PROMPT + "\n" + extra_instructions
+    system_msg = SystemMessage(content=prompt_text)
 
     def _print_state(label: str, state: AgentState) -> None:
         msgs = state.get("messages", [])
@@ -540,6 +558,41 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
     )
     last = result["messages"][-1]
     return getattr(last, "content", "") or ""
+
+
+def run_agent_traced(graph, question: str, thread_id: str = "default",
+                     *, run_name: str = "", tags: list | None = None,
+                     metadata: dict | None = None) -> tuple[str, dict]:
+    """Like run_agent but also returns the full final AgentState.
+
+    Extra kwargs (run_name, tags, metadata) are forwarded to LangSmith when
+    LANGCHAIN_TRACING_V2 is enabled, making each worker trace identifiable.
+    """
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": MAX_ITER * 4,
+    }
+    if run_name:
+        config["run_name"] = run_name
+    if tags:
+        config["tags"] = tags
+    if metadata:
+        config["metadata"] = metadata
+
+    result = graph.invoke(
+        {
+            "messages":            [HumanMessage(content=question)],
+            "seen_errors":         [],
+            "seen_empty":          [],
+            "step_count":          0,
+            "verification_passed": False,
+            "intention_retries":   0,
+        },
+        config=config,
+    )
+    last   = result["messages"][-1]
+    answer = getattr(last, "content", "") or ""
+    return answer, result
 
 
 # ── CLI entry point ────────────────────────────────────────────────────────────

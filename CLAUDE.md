@@ -60,3 +60,35 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 | `botsv3content/ctf_hints.csv` | Official BOTSv3 hints (loaded into `ctf_hints` KV store) |
 | `datasets/botsv3_questions.json` | Questions in JSON format (used by `run_all.py`) |
 | `datasets/botsv3_answers.json` | Answers in JSON format (reference only — scoring uses KV store) |
+
+## Versioning & Logging (v1+ multi-agent)
+
+When a new version (e.g. `v1.x`, `v2.x`) is run **against the full scoreboard**:
+
+1. **Update `docs/version_architecture/`** — add/maintain the version's architecture doc
+   (`docs/version_architecture/v1/v1.x.md`) and describe **how it compares to the previous
+   version** (what changed and why).
+2. **Update `docs/scoreboard_result/`** — write the version's result doc
+   (`docs/scoreboard_result/v1/v1.x.md`) including **which questions were not answered
+   correctly**.
+3. **Prompt the user for the run's cost in dollars** — do not guess it; the user will
+   provide the figure to record in the result doc.
+
+Logging rules:
+- **Only full runs are logged** under `log/v1/run_1.x/` (auto-incrementing). Run with
+  `python agent/v1/run_all_v1.py` (no `--ids`/`--limit`).
+- **Test/smoke runs** (`--ids` or `--limit`) go to `log/temp/` and are NOT versioned, NOT
+  compared in docs, and NOT cost-tracked.
+- Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
+  v1.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
+  carries `failed_delegations`, `extractor_rejections`, and each worker's full state).
+
+### v1 Key Files
+
+| File | Purpose |
+|------|---------|
+| `agent/v1/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
+| `agent/v1/splunk_subagent.py` | Senior worker pool (reuses v0 graph); structured findings |
+| `agent/v1/extractor.py` | Prose-strip + format validation; single scoreboard submit |
+| `agent/v1/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
+| `agent/v1/run_all_v1.py` | v1 runner (full run → `log/v1/run_1.x/`; test → `log/temp/`) |
