@@ -1,0 +1,28 @@
+SH ORCHESTRATOR LOG — Q304
+Q: What is the name of the user that was created after the endpoint was compromised?
+Guidance:
+
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — this requires endpoint-compromise timeline investigation and likely Windows account-creation event analysis in BOTSv3, which is a multi-step Splunk pivot.
+
+
+[SH -> SENIOR #6]  In the Splunk BOTSv3 dataset (index=botsv3, August 2018 APT attack against Frothly), determine the name of the user account that was created after an endpoint was compromised. Investigate endpoint compromise evidence and then identify any user-account creation events on the compromised endpoint(s), likely in Windows logs (e.g., Security EventCode 4720 or related account-management events, Sysmon, or authentication logs). Return the created username only if you can determine it confidently, and include the SPL and sourcetypes used.
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — I need a narrower hunt for explicit user creation artifacts on the identified compromised endpoint BSTOLL-L, including process execution like `net user` and domain-controller/security logs that may record 4720 for that host/user action.
+
+
+[SH -> SENIOR #7]  In BOTSv3 index=botsv3, focus on the likely compromised endpoint `BSTOLL-L.froth.ly` / host `BSTOLL-L`. Search for evidence of user creation after compromise using these approaches: (1) Windows Security account-management events such as EventCode 4720/4722/4732/4728/4738 on any host if they reference BSTOLL-L or a local account created there; (2) process creation or command execution on BSTOLL-L indicating `net user`, `net localgroup`, PowerShell user-creation commands, or similar. Search sourcetypes including `wineventlog`, Sysmon if present, and any relevant Windows host monitoring logs. Return the created username only if found confidently, plus the supporting SPL and sourcetypes.
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — the prior searches may have focused too narrowly on BSTOLL-L. I need a broader Windows account-creation lookup across the environment for EventCode 4720 and related fields, then identify which created user aligns with post-compromise activity.
+
+
+[SH -> SENIOR #8]  In BOTSv3 index=botsv3, perform a broad search across all Windows logs for user-account creation events after compromise. Search `sourcetype=wineventlog` for EventCode 4720 specifically, plus related account-management events if needed, across all hosts. List any created usernames (fields like TargetUserName, NewAccountName, SamAccountName, MemberName, or parsed from Message), the host where the event was logged, and timestamps. Then determine which created username is most likely the one created after the endpoint compromise. Return the username only if there is a clear match, and include the SPL and sourcetypes used.
+
+[SH FINAL]
+svcvnc
+
+FINAL ANSWER: svcvnc
+

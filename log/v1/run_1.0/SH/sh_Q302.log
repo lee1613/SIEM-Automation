@@ -1,0 +1,34 @@
+SH ORCHESTRATOR LOG — Q302
+Q: According to Symantec's website, what is the discovery date of the malware identified in the macro-enabled file?
+Guidance: Provide the US date format MM/DD/YY. (Example: January 1, 2019 should be provided as 01/01/19)
+
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — this requires identifying the malware detected in the macro-enabled file from SEP data, then pivoting to any dataset evidence of Symantec website lookups or threat metadata to obtain the discovery date.
+
+
+
+
+[SH -> SENIOR #37]  In the BOTSv3 dataset (index=botsv3), identify the malware detected in the macro-enabled file (for example from Symantec Endpoint Protection detections involving a .docm/.xlsm or similar macro-enabled attachment). Then determine, according to Symantec's website, the discovery date of that malware. Use SEP logs and any supporting web/DNS activity to Symantec threat-information pages if present. Return only the discovery date in MM/DD/YY format.
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — I need a narrower path: first identify the macro-enabled file and malware name from email/endpoint logs, then we can ask specifically for the Symantec discovery date.
+
+
+
+
+[SH -> SENIOR #38]  In index=botsv3, identify the specific macro-enabled file involved in the Frothly malware incident and the malware name detected for it. Search email/attachment logs, endpoint process/file telemetry, and SEP logs for files with extensions such as `.docm`, `.xlsm`, `.pptm`, `.dotm`, or `.xltm`. Return the exact filename and the exact malware/threat name associated with that file, if found.
+
+[SH thinking]
+Responsibility: Senior Splunk Agent — the likely intended artifact may be an Office file not explicitly macro-enabled by extension in SEP; I need a focused lookup of Backdoor.PsEmpire-related Symantec threat-page access or metadata to extract the discovery date.
+
+
+
+
+[SH -> SENIOR #39]  In index=botsv3, use the confirmed malware `Backdoor.PsEmpire` (associated with `Bruce Birthday Happy Hour Pics.lnk`) and determine, according to Symantec's website, its discovery date. Search for Symantec website lookups in `stream:http`/`stream:dns` related to `Backdoor.PsEmpire`, threat writeups, or security response pages, and if needed inspect SEP event text for any embedded metadata. Return only the discovery date in MM/DD/YY format.
+
+[SH FINAL]
+08/20/18
+
+FINAL ANSWER: 08/20/18
+
