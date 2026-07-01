@@ -87,8 +87,9 @@ class SplunkWorkerPool:
     """Builds worker graphs once per role and runs fresh-session tasks on demand."""
 
     def __init__(self, splunk, *, senior_api_key: str, senior_model: str = "gpt-5.4",
-                 senior_base_url: str | None = None):
-        self.splunk = splunk
+                 senior_base_url: str | None = None, tracker=None):
+        self.splunk  = splunk
+        self.tracker = tracker
         self.senior_model = senior_model
         self.senior_graph, _ = agent_mod.create_agent(
             senior_api_key, splunk,
@@ -111,6 +112,7 @@ class SplunkWorkerPool:
                 run_name=run_name,
                 tags=[role, parent_qid],
                 metadata={"role": role, "qid": parent_qid, "idx": idx},
+                tracker=self.tracker,
             )
         except Exception as exc:
             answer = f"ESCALATE: worker crashed — {exc}"

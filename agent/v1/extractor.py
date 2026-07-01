@@ -31,9 +31,10 @@ _NON_ANSWER = re.compile(
 
 class Extractor:
     def __init__(self, nim_api_key: str, nim_base_url: str,
-                 model: str = EXTRACT_MODEL):
-        self.client = OpenAI(base_url=nim_base_url, api_key=nim_api_key)
-        self.model  = model
+                 model: str = EXTRACT_MODEL, tracker=None):
+        self.client  = OpenAI(base_url=nim_base_url, api_key=nim_api_key)
+        self.model   = model
+        self.tracker = tracker
 
     def extract(self, question: str, guidance: str, verbose_answer: str) -> str:
         """Prose-strip to the bare answer the scoreboard expects."""
@@ -53,6 +54,15 @@ class Extractor:
             max_tokens=256,
             temperature=0,
         )
+        if self.tracker and resp.usage:
+            u = resp.usage
+            cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+            self.tracker.add_nim_usage(
+                self.model,
+                inp=u.prompt_tokens or 0,
+                cached=cached,
+                out=u.completion_tokens or 0,
+            )
         return (resp.choices[0].message.content or "").strip()
 
     def validate(self, clean_answer: str, guidance: str) -> tuple[bool, str]:

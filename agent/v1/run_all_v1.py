@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-v1 multi-agent runner for BOTSv3.
+v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
-  SH (GPT-5.4, persistent memory)  ->  spawn_senior  ->  Senior Splunk worker (gpt-5.4,
-  fresh session)  ->  Extractor (Llama-3.3-70B via NIM, format-validate)  ->  scoreboard (1x).
+  SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
+    -> parallel Senior Splunk workers (GLM-5.2-fp8 via Vultr)
+    -> Extractor (Llama-3.3-70B via NIM, format-validate)
+    -> scoreboard (1x)
 
-Per-step traces (LLM calls, tool calls, node visits) are sent to LangSmith automatically
-when LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY are set in .env. Each run creates its
-own LangSmith project (botsv3-run_1.x or botsv3-test_<ts>). Each SH question and each
-Senior worker is a named trace filterable in the LangSmith UI.
+The SH plans a DAG of tasks and dispatches independent tasks concurrently via
+ThreadPoolExecutor (up to 6 parallel Senior workers, backed by SplunkConnectionPool).
+Dependent tasks ($N refs) wait for their prerequisites before running. The Joiner
+synthesizes all findings or requests one replan round if a critical datum is missing.
+
+Per-step traces (LLM calls, tool calls, node visits) are sent to LangSmith
+automatically when LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set in .env.
+Each run creates its own LangSmith project (botsv3-run_1.x or botsv3-test_<ts>).
 
 Usage (from project root or agent/v1/):
     python agent/v1/run_all_v1.py                 # FULL run  -> log/v1/run_1.<n>/
@@ -34,16 +40,18 @@ for p in (AGENT_DIR, SCRIPT_DIR):
 
 from dotenv import load_dotenv
 from splunk_client import SplunkClient
+from splunk_pool import SplunkConnectionPool
 from scoreboard_client import ScoreboardClient
 
 from agent_logger import RunLogger
+from usage_tracker import UsageTracker
 from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
-from orchestrator import (DelegationContext, make_sh_tools, build_sh_agent, run_sh)
+from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
-SENIOR_MODEL  = "gpt-5.4"
+SENIOR_MODEL  = "GLM-5.2-fp8"
 NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
 
 EXTRACTOR_MAX_RETRIES = 1
@@ -69,10 +77,9 @@ def build_sh_message(qid, qtext, guidance):
     if guidance:
         lines.append(f"Answer format guidance: {guidance}")
     lines.append(
-        "Before delegating, write your PLAN: scan your memory for relevant prior findings "
-        "(hosts, IPs, usernames, bucket names, time windows, sourcetypes) and state what "
-        "context you will include in the subquestion. Then delegate with that enriched "
-        "context and give your FINAL ANSWER in the exact required format."
+        "Write your PLAN block, then produce your TASKS list. "
+        "Scan your memory for relevant prior findings (hosts, IPs, usernames, bucket names, "
+        "time windows, sourcetypes) and embed that context in every task you write."
     )
     return "\n".join(lines)
 
@@ -89,20 +96,22 @@ def main():
     parser.add_argument("--senior-base-url", default=None,
                         help="Base URL for Senior's API (NIM: https://integrate.api.nvidia.com/v1, "
                              "Vultr: https://api.vultrinference.com/v1). Omit to use OpenAI.")
-    parser.add_argument("--senior-api-key-env", default="OPENAI_API_KEY",
-                        help="Name of the env var holding the Senior API key (default: OPENAI_API_KEY).")
+    parser.add_argument("--senior-api-key-env", default="VULTR_SERVERLESS_INFERENCE_API_KEY",
+                        help="Name of the env var holding the Senior API key "
+                             "(default: VULTR_SERVERLESS_INFERENCE_API_KEY for GLM-5.2-fp8).")
     parser.add_argument("--run-name", default=None,
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
-    senior_base_url = args.senior_base_url or None
+    senior_base_url = args.senior_base_url or VULTR_BASE_URL
     senior_api_key  = os.getenv(args.senior_api_key_env, "")
 
     if not OPENAI_API_KEY:
         sys.exit("OPENAI_API_KEY not set — check .env")
     if not senior_api_key:
-        sys.exit(f"{args.senior_api_key_env} not set — check .env")
+        sys.exit(f"{args.senior_api_key_env} not set — check .env  "
+                 f"(Senior model={senior_model}, base_url={senior_base_url})")
     if not NIM_API_KEY:
         sys.exit("NIM_API_KEY not set — check .env (needed for the extractor)")
     if not SPLUNK_PASS:
@@ -132,28 +141,30 @@ def main():
     if args.limit is not None:
         selected = selected[:args.limit]
 
-    logger = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
+    logger  = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
+    tracker = UsageTracker()
 
-    # Point LangSmith at a per-run project so every trace is grouped correctly.
-    os.environ["LANGCHAIN_PROJECT"] = f"botsv3-{logger.run_name}"
+    # Point LangSmith at a per-run project derived from the run name (e.g. botsv3-run_1.2).
+    # LANGSMITH_PROJECT takes precedence over the legacy LANGCHAIN_PROJECT variable.
+    os.environ["LANGSMITH_PROJECT"] = f"botsv3-{logger.run_name}"
 
     run_label = "FULL RUN" if full_run else "TEST RUN"
 
-    print(f"Connecting to Splunk at {SPLUNK_HOST} ...")
-    splunk     = SplunkClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
+    print(f"Connecting to Splunk at {SPLUNK_HOST} (pool size=6) ...")
+    splunk     = SplunkConnectionPool(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS, size=6)
     scoreboard = ScoreboardClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
-    print("Connected.")
+    print(f"Connected.  {splunk}")
 
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
                                  senior_model=senior_model,
-                                 senior_base_url=senior_base_url)
+                                 senior_base_url=senior_base_url,
+                                 tracker=tracker)
     ctx       = DelegationContext(pool, logger)
-    sh_tools  = make_sh_tools(ctx)
-    sh_graph, _ = build_sh_agent(OPENAI_API_KEY, SH_MODEL, sh_tools)
-    extractor = Extractor(NIM_API_KEY, NIM_BASE_URL)
+    sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx)
+    extractor = Extractor(NIM_API_KEY, NIM_BASE_URL, tracker=tracker)
 
     run_thread = f"sh_{logger.run_name}"
-    ls_project = os.environ["LANGCHAIN_PROJECT"]
+    ls_project = os.environ["LANGSMITH_PROJECT"]
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
     print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor=Llama-3.3-70B(NIM)")
@@ -177,6 +188,7 @@ def main():
         total_points += points
 
         ctx.reset_question(qid)
+        tracker.reset_sh_question()
         logger.timeline_question_header(qid, qtext, points)
         print(f"\n{'-'*80}\n[{qid}]  {points} pts  |  {qtext[:90]}")
 
@@ -187,6 +199,7 @@ def main():
             run_thread,
             qid=qid,
             run_name=f"SH-{qid}",
+            tracker=tracker,
         )
 
         # ── Extractor: strip + validate; let SH retry once if format is rejected ─
@@ -204,6 +217,7 @@ def main():
             sh_answer, _ = run_sh(
                 sh_graph, feedback, run_thread,
                 qid=qid, run_name=f"SH-{qid}-retry{retries}",
+                tracker=tracker,
             )
             ext = extractor.process(qtext, guidance, sh_answer)
         clean = ext["clean_answer"]
@@ -220,10 +234,23 @@ def main():
             verdict = f"[SB UNAVAILABLE: {exc}]"
 
         print(f"  Extracted: {clean!r}  ->  {verdict}  ({pts_earned}/{points})")
+
+        # ── SH token report for this question ────────────────────────────────────
+        sh_q = tracker.sh_question_tokens()
+        sh_tok_line = (
+            f"  SH tokens [{qid}]: "
+            f"input={sh_q['input_tokens']:,}  "
+            f"cached={sh_q['cached_tokens']:,}  "
+            f"output={sh_q['output_tokens']:,}  "
+            f"est=${sh_q['estimated_usd']:.4f}"
+        )
+        print(sh_tok_line)
+
         logger.timeline(
             f"\n**SH FINAL → extractor:** `{clean}`  {verdict}  "
             f"(delegations: {len(ctx.q_delegations)}, "
             f"cumulative failed delegations: {ctx.failed_delegations})\n"
+            f"\n{sh_tok_line}\n"
         )
 
         results.append({
@@ -255,12 +282,15 @@ def main():
                 "attempted":            len(results),
                 "failed_delegations":   ctx.failed_delegations,
                 "extractor_rejections": extractor_rejections,
+                "token_usage":          tracker.totals(),
                 "results":              results,
             }, f, indent=2, ensure_ascii=False)
 
     # ── Final summary ──────────────────────────────────────────────────────────────
-    correct_n = sum(1 for r in results if r["sb_correct"])
-    att       = len(results)
+    correct_n  = sum(1 for r in results if r["sb_correct"])
+    att        = len(results)
+    tok        = tracker.totals()
+    tok_total  = tok.get("__total__", {})
     print(f"\n{'='*80}\nFINAL — {logger.run_name}  ({run_label})")
     print(f"  Correct           : {correct_n}/{att}"
           f"  ({(correct_n/att*100 if att else 0):.1f}%)")
@@ -270,8 +300,19 @@ def main():
     print(f"  Summary JSON      : {summary_path}")
     print(f"  Timeline          : {logger.timeline_path}")
     print(f"  LangSmith project : {ls_project}")
+    print(f"  Total tokens      : {tok_total.get('total_tokens', 0):,}"
+          f"  (in={tok_total.get('input_tokens',0):,}"
+          f"  cached={tok_total.get('cached_tokens',0):,}"
+          f"  out={tok_total.get('output_tokens',0):,})")
+    print(f"  Estimated cost    : ${tok_total.get('estimated_usd', 0):.4f}"
+          f"  ({tok_total.get('note', '')})")
     print("=" * 80)
 
+    tok_lines = "\n".join(
+        f"  - {m}: in={v['input_tokens']:,}  cached={v['cached_tokens']:,}"
+        f"  out={v['output_tokens']:,}  est=${v['estimated_usd']:.4f}"
+        for m, v in tok.items() if not m.startswith("__")
+    )
     logger.timeline(
         f"\n---\n\n## SUMMARY\n\n"
         f"- Correct: {correct_n}/{att}\n"
@@ -279,6 +320,9 @@ def main():
         f"- Failed delegations: {ctx.failed_delegations}\n"
         f"- Extractor rejections: {extractor_rejections}\n"
         f"- LangSmith project: `{ls_project}`\n"
+        f"- Token usage:\n{tok_lines}\n"
+        f"- Total tokens: {tok_total.get('total_tokens',0):,}"
+        f"  estimated ${tok_total.get('estimated_usd',0):.4f}\n"
     )
 
 

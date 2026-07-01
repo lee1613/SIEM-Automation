@@ -1,247 +1,430 @@
 #!/usr/bin/env python3
 """
-SH (orchestrator / mastermind) agent for v1.
+SH (orchestrator / mastermind) agent for v1 — LLMCompiler edition.
 
-A stateful GPT-5.4 planner that NEVER touches Splunk directly. Its only tool is
-`spawn_senior(subquestion)`, which recruits a fresh Senior Splunk worker (the v0 graph).
-The SH plans, delegates atomic sub-questions one at a time, reads each worker's structured
-findings, replans, and finally writes a plain-text answer (no tool call) — at which point
-the graph terminates the standard ReAct way and the answer flows to the Extractor.
+Architecture:
+    Planner → Parallel Executor → Joiner → (Replan once | FINAL ANSWER)
 
-The SH keeps ONE persistent MemorySaver thread for the whole 58-question run, so the
-mastermind accumulates cross-question context (entities, hosts, timeframes) exactly like
-v0 did.
+The SH LLM (gpt-5.4, persistent MemorySaver thread) generates a numbered task
+DAG. Tasks with no $N dependencies run in parallel via ThreadPoolExecutor.
+Tasks with $N references wait for those results, then run. The Joiner assembles
+all findings into a FINAL ANSWER, or requests a single focused replan round if
+a critical datum is missing.
+
+Cross-question memory is preserved: the MemorySaver thread accumulates every
+plan + task-results summary + final answer across all 58 questions.
 """
 
-import json
+import re
+import concurrent.futures
+from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
 
-SH_MAX_ROUNDS = 12   # max agent turns per question (decomposition + replans)
+MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
+MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
 
 
-SH_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 \
+# ── Planner prompt ─────────────────────────────────────────────────────────────
+PLANNER_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 \
 security investigation (August 2018 APT attack against Frothly, all data in Splunk index=botsv3).
 
 YOUR ROLE
-- You PLAN and DELEGATE. You do NOT query Splunk yourself and you have no Splunk tools.
-- For each question you decide what information is needed, break it into sub-questions when
-  necessary, and delegate each to a Splunk worker. You then assemble the final answer.
-
-YOUR TEAM (you must choose who is responsible and say so out loud)
-- Senior Splunk Agent — call via spawn_senior(subquestion). A Splunk EXPERT with multi-step
-  reasoning and 6 Splunk tools (sourcetype discovery, keyword/field search, event sampling,
-  SPL search). Use it for anything requiring investigation or a multi-step pivot.
-- (A Junior Splunk Agent for trivial single-hop lookups will join in a later version. For
-  now, route all data lookups to the Senior.)
-
-PLAN-AND-ACT CYCLE (mandatory before your FIRST delegation on each question)
-Before calling spawn_senior for the first time, write a PLAN block:
-
-  PLAN:
-  - Goal: [what the question is asking for; what type of value is expected]
-  - Prior knowledge: [entities from your memory relevant to THIS question — hosts, IPs,
-    usernames, bucket names, time windows, sourcetypes that proved useful in earlier Qs]
-  - Enrichment: [what known context you will embed directly in the subquestion]
-  - Suggested approach: [which sourcetypes or investigation path to try first]
-
-Only after writing the PLAN call spawn_senior, with the relevant context from "Prior
-knowledge" woven inline into the subquestion text.
-
-DELEGATION RULES
-1. Decomposition is OPTIONAL. If a question is a single atomic lookup, delegate it whole in
-   ONE spawn_senior call. Only decompose genuinely multi-hop questions.
-2. Workers have NO shared memory — each spawn_senior call is a fresh session. Make every
-   subquestion fully self-contained: restate all known entities, hosts, time ranges, and
-   sourcetype hints. Never say "the host from before" — name it explicitly every time.
-3. Delegate ONE sub-question at a time and use its result to shape the next.
-4. Before EVERY delegation, state explicitly who is responsible and why, e.g.:
-   "Responsibility: Senior Splunk Agent — this needs a cloudtrail->s3 pivot (multi-step)."
-5. If a worker returns status 'too_big' or 'failed', that means YOU scoped it poorly. Narrow
-   the sub-question (smaller, more specific, with concrete hints) and delegate again.
-
-HANDLING WORKER RESPONSES
-- status='solved': Worker found a confident answer. Use it directly or as evidence for a
-  follow-up sub-question.
-- status='partial': Worker found useful evidence but is NOT certain. The response includes
-  PARTIAL ANSWER (the best candidate), UNCERTAINTY (why it's unsure), NEXT STEP (what
-  would confirm it). You should: (a) re-delegate with a targeted verification subquestion
-  incorporating the candidate, or (b) accept it if the partial finding is specific and
-  your cross-question memory corroborates it. Do NOT treat 'partial' as a failure.
-- status='too_big' or 'failed': Worker could not proceed. Narrow the sub-question and
-  retry with a more specific scope and explicit hints.
+- You PLAN and DELEGATE. You do NOT query Splunk yourself.
+- Produce a numbered task list for Senior Splunk workers (Splunk experts with multi-step
+  reasoning and 6 Splunk tools). Workers run IN PARALLEL where possible.
 
 CROSS-QUESTION MEMORY
 - You remember everything from earlier questions in this run. Carry forward key entities
-  (hosts, IPs, users, bucket names, time windows) and restate them inside every subquestion.
-- Do NOT assume a worker knows any context from a prior question — always state it explicitly.
+  (hosts, IPs, users, bucket names, time windows, sourcetypes) and restate them explicitly
+  inside every task. Never say "the host from before" — name it explicitly every time.
 
-ANSWERING
-- Anything that depends on the dataset MUST be delegated — never invent dataset facts.
-- Pure general knowledge (e.g. "what company makes Splunk") you may answer directly.
-- When you have enough information, STOP calling tools and write your final answer as plain
-  text. End with a line exactly:  FINAL ANSWER: <the precise value>
-- Keep the final value in the exact format the question asks for (an extractor will read the
-  FINAL ANSWER line)."""
+OUTPUT FORMAT — produce EXACTLY this structure:
+
+PLAN:
+- Goal: [what the question is asking for; what type of value is expected]
+- Prior knowledge: [entities from your memory relevant to THIS question]
+- Approach: [which sourcetypes or investigation path to try first]
+
+TASKS:
+1. <fully self-contained subquestion — no $N references>
+2. <fully self-contained subquestion — no $N references>
+3. Given $1 and $2: <subquestion using results from tasks 1 and 2>
+
+RULES:
+- Use $N (e.g. $1, $2) to reference a previous task's result inline in the subquestion text.
+  Only reference tasks whose results you actually need before this task can proceed.
+- Tasks without any $N references will run IN PARALLEL — maximise parallelism.
+- Each task MUST be fully self-contained: include all known entities, time ranges, sourcetype
+  hints. Workers have NO shared memory across tasks.
+- 1–6 tasks maximum. If the question is a single atomic lookup, write exactly ONE task.
+- If you already know the answer from your cross-question memory (not from the Splunk dataset
+  itself — general knowledge is fine), write instead:
+    DIRECT ANSWER: <the precise value>
+  Do NOT write TASKS in that case."""
+
+
+# ── Joiner prompt ──────────────────────────────────────────────────────────────
+JOINER_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 \
+security investigation (August 2018 APT attack against Frothly, all data in Splunk index=botsv3).
+
+All delegated tasks for the current question are complete. Your job: synthesize the findings
+into a final answer, or request a focused second round if a critical datum is genuinely missing.
+
+CROSS-QUESTION MEMORY — you remember all prior BOTSv3 findings. Use them when interpreting
+ambiguous task results.
+
+RESPONSE FORMAT — choose exactly ONE:
+
+Option A — you have enough to answer:
+FINAL ANSWER: <the precise value the question asks for>
+
+Option B — one specific critical piece is still missing (use at most once per question):
+REPLAN:
+- Missing: <exactly what is still unknown and why>
+- New tasks:
+  1. <targeted self-contained subquestion to fill the gap>
+  2. <another if needed>
+
+RULES:
+- Strongly prefer Option A. Use Option B only when a critical datum is genuinely absent.
+- status='partial': the worker found useful evidence but isn't certain. Accept it if the
+  candidate is specific and your cross-question memory corroborates it, or note it in a
+  targeted replan.
+- status='too_big' or 'failed': that worker couldn't proceed. Consider whether a different
+  sourcetype or narrower query would help.
+- NEVER invent dataset facts. If workers found nothing after thorough investigation, write
+  FINAL ANSWER with your best-effort estimate from memory.
+- The FINAL ANSWER line is read by an extractor — give the exact value in the required
+  format, nothing else on that line."""
+
+
+@dataclass
+class Task:
+    idx: int
+    subquestion: str
+    deps: list = field(default_factory=list)    # list of int task indices
+
+
+def parse_plan(text: str) -> list[Task]:
+    """Extract numbered tasks from planner/replan output."""
+    tasks = []
+    pattern = re.compile(
+        r'^(\d+)\.\s+(.+?)(?=^\d+\.|\Z)',
+        re.MULTILINE | re.DOTALL,
+    )
+    for m in pattern.finditer(text):
+        idx  = int(m.group(1))
+        subq = m.group(2).strip()
+        deps = sorted(set(int(d) for d in re.findall(r'\$(\d+)', subq)))
+        tasks.append(Task(idx=idx, subquestion=subq, deps=deps))
+    return tasks
+
+
+def substitute_deps(subquestion: str, completed: dict) -> str:
+    """Replace $N references with a brief summary of task N's result."""
+    def _replace(m):
+        n      = int(m.group(1))
+        result = completed.get(n, {})
+        answer = (result.get("answer") or "(no result)").strip()[:400]
+        status = result.get("status", "?")
+        return f"[Task-{n} ({status}): {answer}]"
+    return re.sub(r'\$(\d+)', _replace, subquestion)
 
 
 class SHState(TypedDict):
-    messages:   Annotated[list, add_messages]   # persists across the whole run
-    step_count: int                             # reset to 0 per question
+    messages:     Annotated[list, add_messages]  # persistent across all questions
+    plan_text:    str                            # last plan/replan text (debug)
+    tasks:        list                           # [{idx, subquestion, deps}]
+    task_results: dict                           # {task_idx (int): result_dict}
+    plan_round:   int                            # 1-based cycle counter (reset per Q)
+    final_answer: str                            # populated when done
+    done:         bool
 
 
 class DelegationContext:
-    """Mutable per-run context the spawn_senior tool reads at call time.
-
-    Built once and shared with the (persistent) SH graph; `current_qid` is updated before
-    each question so the single graph can serve all 58 while logging to the right place.
-    """
+    """Shared mutable context: pool, logger, and per-question delegation log."""
 
     def __init__(self, pool, logger):
         self.pool   = pool
         self.logger = logger
-        self.current_qid       = None
-        self.failed_delegations = 0     # cumulative (req c): worker couldn't resolve
-        self.q_delegations      = []    # delegations for the current question
-        self.all_delegations    = []    # everything, for the run JSON
+        self.current_qid        = None
+        self.failed_delegations = 0
+        self.q_delegations      = []
+        self.all_delegations    = []
 
     def reset_question(self, qid: str) -> None:
-        self.current_qid = qid
+        self.current_qid   = qid
         self.q_delegations = []
 
 
-def make_sh_tools(ctx: DelegationContext) -> list:
-    @tool
-    def spawn_senior(subquestion: str) -> str:
-        """Delegate ONE atomic, self-contained sub-question to a FRESH Senior Splunk worker.
-        The worker is a Splunk expert (multi-step reasoning + 6 Splunk tools) with NO memory
-        of any other sub-question — so restate all known entities, time ranges, and sourcetype
-        hints inside `subquestion`. Returns the worker's findings: answer, the SPL it ran, the
-        sourcetypes it used, and status (solved | partial | too_big | failed).
-        - solved: confident answer found — use it directly.
-        - partial: useful evidence but uncertain — verify or accept with corroboration.
-        - too_big / failed: re-scope with a narrower, more specific subquestion."""
-        qid = ctx.current_qid
-        idx = ctx.logger.next_worker("senior", qid)
-        print(f"\n[SH -> SENIOR #{idx}]  {subquestion}")
+def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext):
+    """Compile the LLMCompiler SH graph. Returns (graph, checkpointer)."""
 
-        result = ctx.pool.run_senior(subquestion, qid, idx)
+    llm         = ChatOpenAI(api_key=api_key, model=model,
+                             max_completion_tokens=4096, temperature=0)
+    sys_planner = SystemMessage(content=PLANNER_SYSTEM_PROMPT)
+    sys_joiner  = SystemMessage(content=JOINER_SYSTEM_PROMPT)
 
-        if result["status"] in ("too_big", "failed"):
-            ctx.failed_delegations += 1
+    # ── Planner ───────────────────────────────────────────────────────────────
+    def planner_node(state: SHState) -> dict:
+        round_n  = state.get("plan_round", 0) + 1
+        print(f"\n[SH PLANNER — round {round_n}]")
 
-        record = {
-            "worker":      f"senior#{idx}",
-            "qid":         qid,
-            "subquestion": subquestion,
-            "status":      result["status"],
-            "answer":      result["answer"],
-            "spl_used":    result["spl_used"],
-            "sourcetypes": result["sourcetypes"],
-            "full_state":  result["full_state"],
+        msgs      = [sys_planner] + list(state["messages"])
+        response  = llm.invoke(msgs)
+        plan_text = (response.content or "").strip()
+        print(f"\n[SH PLAN]\n{plan_text}\n")
+
+        # DIRECT ANSWER — SH already knows from cross-question memory
+        dm = re.search(r'DIRECT ANSWER:\s*(.+)', plan_text, re.IGNORECASE)
+        if dm:
+            answer = dm.group(1).strip().split('\n')[0].strip()
+            print(f"[SH PLANNER] direct answer from memory: {answer!r}")
+            return {
+                "messages":     [response],
+                "plan_text":    plan_text,
+                "tasks":        [],
+                "task_results": {},
+                "plan_round":   round_n,
+                "final_answer": answer,
+                "done":         True,
+            }
+
+        tasks = parse_plan(plan_text)
+        if not tasks:
+            # Fallback: treat the last human message as a single senior task
+            last_q = next(
+                (m.content for m in reversed(state["messages"])
+                 if isinstance(m, HumanMessage)), ""
+            )
+            tasks = [Task(idx=1, subquestion=last_q, deps=[])]
+            print("[SH PLANNER] no structured tasks parsed — falling back to single task")
+
+        print(f"[SH PLANNER] {len(tasks)} task(s), "
+              f"{sum(1 for t in tasks if not t.deps)} parallel-eligible")
+
+        return {
+            "messages":     [response],
+            "plan_text":    plan_text,
+            "tasks":        [{"idx": t.idx, "subquestion": t.subquestion, "deps": t.deps}
+                             for t in tasks],
+            "task_results": {},
+            "plan_round":   round_n,
+            "final_answer": "",
+            "done":         False,
         }
-        ctx.q_delegations.append(record)
-        ctx.all_delegations.append(record)
 
-        ctx.logger.timeline(
-            f"- **Senior #{idx}**  _[{result['status']}]_  "
-            f"(LangSmith: `Senior-{idx}-{qid}`)\n"
-            f"    - task: {subquestion}\n"
-            f"    - answer: {(result['answer'] or '').strip()[:400]}\n"
-            f"    - SPL: {result['spl_used']}"
+    # ── Executor ──────────────────────────────────────────────────────────────
+    def executor_node(state: SHState) -> dict:
+        if state.get("done"):
+            return {}
+
+        tasks     = [Task(**t) for t in state["tasks"]]
+        completed = dict(state.get("task_results") or {})
+        remaining = [t for t in tasks if t.idx not in completed]
+
+        for _guard in range(len(remaining) + 1):
+            if not remaining:
+                break
+            ready = [t for t in remaining if all(d in completed for d in t.deps)]
+            if not ready:
+                print("[SH EXECUTOR] unresolvable dependency — running first pending task")
+                ready = [remaining[0]]
+
+            n_workers = min(len(ready), MAX_WORKERS)
+            print(f"\n[SH EXECUTOR] dispatching {len(ready)} task(s) "
+                  f"({n_workers} parallel worker slot(s))")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as exe:
+                futures: dict = {}
+                for t in ready:
+                    subq       = substitute_deps(t.subquestion, completed)
+                    worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
+                    print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
+                    futures[exe.submit(_run_senior, ctx, subq, worker_idx)] = (t, worker_idx, subq)
+
+                for fut, (t, worker_idx, subq) in futures.items():
+                    try:
+                        result = fut.result()
+                    except Exception as exc:
+                        result = {
+                            "status": "failed",
+                            "answer": f"worker crashed: {exc}",
+                            "spl_used": [], "sourcetypes": [], "full_state": [],
+                        }
+                    completed[t.idx] = result
+
+                    if result["status"] in ("too_big", "failed"):
+                        ctx.failed_delegations += 1
+
+                    record = {
+                        "worker":      f"senior#{worker_idx}",
+                        "qid":         ctx.current_qid,
+                        "subquestion": subq,
+                        "status":      result["status"],
+                        "answer":      result["answer"],
+                        "spl_used":    result["spl_used"],
+                        "sourcetypes": result["sourcetypes"],
+                        "full_state":  result["full_state"],
+                    }
+                    ctx.q_delegations.append(record)
+                    ctx.all_delegations.append(record)
+
+                    ctx.logger.timeline(
+                        f"- **Senior #{worker_idx}**  _[{result['status']}]_  task={t.idx}\n"
+                        f"    - subquestion: {subq[:200]}\n"
+                        f"    - answer: {(result['answer'] or '').strip()[:400]}\n"
+                        f"    - SPL: {result['spl_used']}"
+                    )
+
+            remaining = [t for t in remaining if t.idx not in completed]
+
+        return {"task_results": completed}
+
+    # ── Joiner ────────────────────────────────────────────────────────────────
+    def joiner_node(state: SHState) -> dict:
+        if state.get("done"):
+            return {}
+
+        tasks        = [Task(**t) for t in state["tasks"]]
+        task_results = state.get("task_results") or {}
+        plan_round   = state.get("plan_round", 1)
+
+        parts = []
+        for t in tasks:
+            r = task_results.get(t.idx, {})
+            parts.append(
+                f"Task {t.idx} [{r.get('status', '?')}]:\n"
+                f"  Question: {t.subquestion[:300]}\n"
+                f"  Result: {(r.get('answer') or '(no result)').strip()[:600]}"
+            )
+        findings = "\n\n".join(parts)
+
+        joiner_msg_text = (
+            f"All delegated tasks are complete (round {plan_round}).\n\n"
+            f"=== Task Results ===\n{findings}\n\n"
+            "Synthesize the above and give your FINAL ANSWER, "
+            "or request a focused REPLAN if a critical datum is missing."
         )
+        joiner_hm = HumanMessage(content=joiner_msg_text)
 
-        return json.dumps({
-            "worker":      f"senior#{idx}",
-            "status":      result["status"],
-            "answer":      result["answer"],
-            "spl_used":    result["spl_used"],
-            "sourcetypes": result["sourcetypes"],
-        }, ensure_ascii=False)
+        print(f"\n[SH JOINER — round {plan_round}]")
+        msgs     = [sys_joiner] + list(state["messages"]) + [joiner_hm]
+        response = llm.invoke(msgs)
+        jtext    = (response.content or "").strip()
+        print(f"\n[SH JOINER OUTPUT]\n{jtext}\n")
 
-    return [spawn_senior]
+        # Option A — FINAL ANSWER
+        fa_m = re.search(r'FINAL ANSWER:\s*(.+)', jtext, re.IGNORECASE | re.DOTALL)
+        if fa_m:
+            answer = fa_m.group(1).strip().split('\n')[0].strip()
+            return {
+                "messages":     [joiner_hm, response],
+                "plan_text":    jtext,
+                "final_answer": answer,
+                "done":         True,
+            }
 
+        # Option B — REPLAN (only if rounds remain)
+        if re.search(r'\bREPLAN\b', jtext, re.IGNORECASE) and plan_round < MAX_PLAN_ROUNDS:
+            replan_tasks = parse_plan(jtext)
+            if replan_tasks:
+                print(f"[SH JOINER] replan — {len(replan_tasks)} new task(s) "
+                      f"(round {plan_round} → {plan_round + 1})")
+                return {
+                    "messages":     [joiner_hm, response],
+                    "plan_text":    jtext,
+                    "tasks":        [{"idx": t.idx, "subquestion": t.subquestion,
+                                      "deps": t.deps} for t in replan_tasks],
+                    "task_results": {},
+                    "plan_round":   plan_round + 1,
+                    "done":         False,
+                }
 
-def build_sh_agent(api_key: str, model: str, tools: list):
-    """Compile the SH graph. Returns (graph, checkpointer)."""
-    llm = ChatOpenAI(api_key=api_key, model=model,
-                     max_completion_tokens=4096, temperature=0)
-    model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-    tool_map = {t.name: t for t in tools}
-    sys_msg  = SystemMessage(content=SH_SYSTEM_PROMPT)
+        # Fallback — extract best-effort answer from the last non-empty line
+        print("[SH JOINER] no FINAL ANSWER / REPLAN tag — extracting from last line")
+        lines  = [l.strip() for l in jtext.splitlines() if l.strip()]
+        answer = lines[-1] if lines else jtext[:200]
+        return {
+            "messages":     [joiner_hm, response],
+            "plan_text":    jtext,
+            "final_answer": answer,
+            "done":         True,
+        }
 
-    def agent_node(state: SHState) -> dict:
-        step = state.get("step_count", 0) + 1
-        msgs = [sys_msg] + list(state["messages"])
-        if step > SH_MAX_ROUNDS:
-            print("[SH max rounds reached — forcing final answer]")
-            msgs = msgs + [HumanMessage(
-                "You have reached the maximum delegation rounds. Using everything gathered "
-                "so far, give your FINAL ANSWER now. Do not delegate again."
-            )]
-            response = llm.invoke(msgs)
-        else:
-            response = model_with_tools.invoke(msgs)
+    # ── Graph wiring ──────────────────────────────────────────────────────────
+    def route_planner(state: SHState) -> str:
+        return END if state.get("done") else "executor"
 
-        if response.content:
-            tag = "[SH thinking]" if getattr(response, "tool_calls", None) else "[SH FINAL]"
-            print(f"\n{tag}\n{response.content}\n")
-        return {"messages": [response], "step_count": step}
-
-    def tools_node(state: SHState) -> dict:
-        last = state["messages"][-1]
-        out  = []
-        for tc in last.tool_calls:
-            try:
-                res = tool_map[tc["name"]].invoke(tc["args"])
-            except Exception as exc:
-                res = json.dumps({"error": str(exc)})
-            out.append(ToolMessage(
-                content=res if isinstance(res, str) else json.dumps(res),
-                tool_call_id=tc["id"], name=tc["name"],
-            ))
-        return {"messages": out}
-
-    def should_continue(state: SHState) -> str:
-        if state.get("step_count", 0) > SH_MAX_ROUNDS:
+    def route_joiner(state: SHState) -> str:
+        if state.get("done") or state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
             return END
-        last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else END
+        if state.get("tasks"):      # replan set new tasks
+            return "executor"
+        return END
 
     g = StateGraph(SHState)
-    g.add_node("agent", agent_node)
-    g.add_node("tools", tools_node)
-    g.set_entry_point("agent")
-    g.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    g.add_edge("tools", "agent")
+    g.add_node("planner",  planner_node)
+    g.add_node("executor", executor_node)
+    g.add_node("joiner",   joiner_node)
+    g.set_entry_point("planner")
+    g.add_conditional_edges("planner",  route_planner,
+                            {"executor": "executor", END: END})
+    g.add_edge("executor", "joiner")
+    g.add_conditional_edges("joiner",   route_joiner,
+                            {"executor": "executor", END: END})
 
     checkpointer = MemorySaver()
     return g.compile(checkpointer=checkpointer), checkpointer
 
 
+def _run_senior(ctx: DelegationContext, subquestion: str, idx: int) -> dict:
+    """Submit one Senior worker task (called from ThreadPoolExecutor thread)."""
+    return ctx.pool.run_senior(subquestion, ctx.current_qid, idx)
+
+
 def run_sh(graph, message: str, thread_id: str,
-           *, qid: str = "", run_name: str = "") -> tuple[str, dict]:
-    """Send one message to the SH on its persistent thread. Returns (answer, state)."""
-    config = {
+           *, qid: str = "", run_name: str = "", tracker=None) -> tuple[str, dict]:
+    """Invoke the SH graph for one question or extractor-retry message.
+
+    Returns (final_answer, full_state). Same interface as the v1.0 version so
+    run_all_v1.py needs no structural changes.
+    """
+    config: dict = {
         "configurable": {"thread_id": thread_id},
-        "recursion_limit": SH_MAX_ROUNDS * 4,
+        "recursion_limit": MAX_PLAN_ROUNDS * 6 + 10,
     }
     if run_name:
         config["run_name"] = run_name
     if qid:
         config["tags"]     = ["SH", qid]
         config["metadata"] = {"role": "SH", "qid": qid}
+    if tracker is not None:
+        config["callbacks"] = [tracker]
 
     result = graph.invoke(
-        {"messages": [HumanMessage(content=message)], "step_count": 0},
+        {
+            "messages":     [HumanMessage(content=message)],
+            "plan_text":    "",
+            "tasks":        [],
+            "task_results": {},
+            "plan_round":   0,
+            "final_answer": "",
+            "done":         False,
+        },
         config=config,
     )
-    last = result["messages"][-1]
-    return getattr(last, "content", "") or "", result
+    answer = result.get("final_answer", "")
+    if not answer:
+        for m in reversed(result.get("messages", [])):
+            if isinstance(m, AIMessage) and m.content:
+                answer = m.content
+                break
+    return answer, result

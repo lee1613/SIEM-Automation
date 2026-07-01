@@ -562,11 +562,12 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
 
 def run_agent_traced(graph, question: str, thread_id: str = "default",
                      *, run_name: str = "", tags: list | None = None,
-                     metadata: dict | None = None) -> tuple[str, dict]:
+                     metadata: dict | None = None, tracker=None) -> tuple[str, dict]:
     """Like run_agent but also returns the full final AgentState.
 
     Extra kwargs (run_name, tags, metadata) are forwarded to LangSmith when
-    LANGCHAIN_TRACING_V2 is enabled, making each worker trace identifiable.
+    LANGSMITH_TRACING is enabled, making each worker trace identifiable.
+    tracker, if provided, receives on_llm_end callbacks for token counting.
     """
     config = {
         "configurable": {"thread_id": thread_id},
@@ -578,6 +579,8 @@ def run_agent_traced(graph, question: str, thread_id: str = "default",
         config["tags"] = tags
     if metadata:
         config["metadata"] = metadata
+    if tracker is not None:
+        config["callbacks"] = [tracker]
 
     result = graph.invoke(
         {
