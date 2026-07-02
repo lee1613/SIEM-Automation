@@ -4,7 +4,7 @@ v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
     -> parallel Senior Splunk workers (GLM-5.2-fp8 via Vultr)
-    -> Extractor (Llama-3.3-70B via NIM, format-validate)
+    -> Extractor (DeepSeek-V4-Flash via Vultr, prose-strip only)
     -> scoreboard (1x)
 
 The SH plans a DAG of tasks and dispatches independent tasks concurrently via
@@ -41,7 +41,7 @@ for p in (AGENT_DIR, SCRIPT_DIR):
 from dotenv import load_dotenv
 from splunk_client import SplunkClient
 from splunk_pool import SplunkConnectionPool
-from scoreboard_client import ScoreboardClient
+from local_scoreboard import LocalScoreboard
 
 from agent_logger import RunLogger
 from usage_tracker import UsageTracker
@@ -52,15 +52,11 @@ from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
 SENIOR_MODEL  = "GLM-5.2-fp8"
-NIM_BASE_URL  = "https://integrate.api.nvidia.com/v1"
-
-EXTRACTOR_MAX_RETRIES = 1
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-NIM_API_KEY    = os.getenv("NIM_API_KEY", "")
 SPLUNK_HOST    = os.getenv("SPLUNK_HOST", "https://localhost:8089")
 SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
@@ -69,7 +65,6 @@ QUESTIONS_PATH = os.path.join(PROJECT_ROOT, "datasets", "botsv3_questions.json")
 ANSWERS_PATH   = os.path.join(PROJECT_ROOT, "datasets", "botsv3_answers.json")
 
 VULTR_BASE_URL = "https://api.vultrinference.com/v1"
-NIM_BASE_URL   = "https://integrate.api.nvidia.com/v1"
 
 
 def build_sh_message(qid, qtext, guidance):
@@ -112,8 +107,6 @@ def main():
     if not senior_api_key:
         sys.exit(f"{args.senior_api_key_env} not set — check .env  "
                  f"(Senior model={senior_model}, base_url={senior_base_url})")
-    if not NIM_API_KEY:
-        sys.exit("NIM_API_KEY not set — check .env (needed for the extractor)")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -144,15 +137,19 @@ def main():
     logger  = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
     tracker = UsageTracker()
 
-    # Point LangSmith at a per-run project derived from the run name (e.g. botsv3-run_1.2).
+    # All runs land in the user's manually-created "V1.1" LangSmith project.
     # LANGSMITH_PROJECT takes precedence over the legacy LANGCHAIN_PROJECT variable.
-    os.environ["LANGSMITH_PROJECT"] = f"botsv3-{logger.run_name}"
+    os.environ["LANGSMITH_PROJECT"] = "V1.1"
 
     run_label = "FULL RUN" if full_run else "TEST RUN"
 
     print(f"Connecting to Splunk at {SPLUNK_HOST} (pool size=6) ...")
     splunk     = SplunkConnectionPool(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS, size=6)
-    scoreboard = ScoreboardClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
+    scoreboard = LocalScoreboard(
+        questions_csv=os.path.join(PROJECT_ROOT, "botsv3content", "ctf_questions.csv"),
+        answers_csv=os.path.join(PROJECT_ROOT, "botsv3content", "ctf_answers.csv"),
+        results_path=os.path.join(logger.run_dir, "scoreboard_submissions.json"),
+    )
     print(f"Connected.  {splunk}")
 
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
@@ -160,14 +157,18 @@ def main():
                                  senior_base_url=senior_base_url,
                                  tracker=tracker)
     ctx       = DelegationContext(pool, logger)
-    sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx)
-    extractor = Extractor(NIM_API_KEY, NIM_BASE_URL, tracker=tracker)
+    # SQLite-backed so cross-question memory survives a killed/resumed process
+    # (same --run-name -> same run_dir -> same checkpoint file picked back up).
+    checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
+    sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx,
+                                          checkpoint_db_path=checkpoint_db_path)
+    extractor = Extractor(senior_api_key, VULTR_BASE_URL, tracker=tracker)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
-    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor=Llama-3.3-70B(NIM)")
+    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor={extractor.model}(Vultr)")
     print(f"  Questions: {len(selected)}   Log dir: {logger.run_dir}")
     print(f"  LangSmith project: {ls_project}")
     print("=" * 80)
@@ -175,8 +176,20 @@ def main():
     results              = []
     total_points         = 0
     earned_pts           = 0
-    extractor_rejections = 0
     summary_path         = os.path.join(logger.run_dir, "run_summary.json")
+
+    # Resume support: pick up where a killed/interrupted process left off
+    # instead of overwriting run_summary.json with just this segment's data.
+    if os.path.exists(summary_path):
+        with open(summary_path, "r", encoding="utf-8") as f:
+            prior = json.load(f)
+        results              = prior.get("results", [])
+        total_points         = prior.get("total", 0)
+        earned_pts           = prior.get("score", 0)
+        ctx.failed_delegations = prior.get("failed_delegations", 0)
+        tracker.seed(prior.get("token_usage"))
+        print(f"Resuming {logger.run_name}: {len(results)} question(s) already "
+              f"recorded, {earned_pts}/{total_points} pts so far.")
 
     for q in selected:
         qid      = q["id"]
@@ -202,25 +215,9 @@ def main():
             tracker=tracker,
         )
 
-        # ── Extractor: strip + validate; let SH retry once if format is rejected ─
-        ext = extractor.process(qtext, guidance, sh_answer)
-        retries = 0
-        while not ext["valid"] and retries < EXTRACTOR_MAX_RETRIES:
-            retries += 1
-            extractor_rejections += 1
-            print(f"[EXTRACTOR] rejected -> asking SH to correct (retry {retries})")
-            feedback = (
-                f"The extractor could not validate your FINAL ANSWER: {ext['reason']}. "
-                f"Expected format: {guidance or 'exact value only'}. Re-examine your "
-                "findings (delegate again if needed) and give a corrected FINAL ANSWER."
-            )
-            sh_answer, _ = run_sh(
-                sh_graph, feedback, run_thread,
-                qid=qid, run_name=f"SH-{qid}-retry{retries}",
-                tracker=tracker,
-            )
-            ext = extractor.process(qtext, guidance, sh_answer)
-        clean = ext["clean_answer"]
+        # ── Extractor: strip prose down to the bare answer ────────────────────────
+        clean = extractor.extract(qtext, guidance, sh_answer)
+        print(f"[EXTRACTOR] clean={clean!r}")
 
         # ── Single scoreboard submission ──────────────────────────────────────────
         try:
@@ -275,13 +272,12 @@ def main():
                 "langsmith_project":    ls_project,
                 "models":               {"sh": SH_MODEL, "senior": senior_model,
                                           "senior_base_url": senior_base_url or "openai",
-                                          "extractor": "meta/llama-3.3-70b-instruct"},
+                                          "extractor": extractor.model},
                 "score":                earned_pts,
                 "total":                total_points,
                 "correct":              sum(1 for r in results if r["sb_correct"]),
                 "attempted":            len(results),
                 "failed_delegations":   ctx.failed_delegations,
-                "extractor_rejections": extractor_rejections,
                 "token_usage":          tracker.totals(),
                 "results":              results,
             }, f, indent=2, ensure_ascii=False)
@@ -296,7 +292,6 @@ def main():
           f"  ({(correct_n/att*100 if att else 0):.1f}%)")
     print(f"  Points (this run) : {earned_pts}/{total_points}")
     print(f"  Failed delegations: {ctx.failed_delegations}")
-    print(f"  Extractor rejects : {extractor_rejections}")
     print(f"  Summary JSON      : {summary_path}")
     print(f"  Timeline          : {logger.timeline_path}")
     print(f"  LangSmith project : {ls_project}")
@@ -318,7 +313,6 @@ def main():
         f"- Correct: {correct_n}/{att}\n"
         f"- Points: {earned_pts}/{total_points}\n"
         f"- Failed delegations: {ctx.failed_delegations}\n"
-        f"- Extractor rejections: {extractor_rejections}\n"
         f"- LangSmith project: `{ls_project}`\n"
         f"- Token usage:\n{tok_lines}\n"
         f"- Total tokens: {tok_total.get('total_tokens',0):,}"

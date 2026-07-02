@@ -63,11 +63,31 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 
 ## Versioning & Logging (v1+ multi-agent)
 
+### Every change must be recorded in the current in-progress version's doc
+
+A version `v1.x` is considered **in progress** from the moment any code change is made after
+its predecessor's full run, until `v1.x`'s own first full `run_all_v1.py` run completes. While
+`v1.x` is in progress:
+
+- **Every code change**, no matter how small, must be accompanied by a one-line (or short
+  paragraph, if significant) entry in `docs/version_architecture/v1/v1.x.md`'s changelog —
+  written **in the same turn as the change**, not deferred. A simple sentence is enough for
+  small/mechanical changes (e.g. "Remove extractor validation node"). Give a fuller description
+  — what changed, why, and how it was verified — for anything that affects correctness,
+  architecture, or the scoring pipeline (e.g. swapping the planning pattern, fixing a
+  persistence bug).
+- If `docs/version_architecture/v1/v1.x.md` doesn't exist yet, create it with a `## Changelog`
+  section (see `v1.2.md` for the template) rather than waiting for the version to be "finished."
+- Once `v1.x`'s first full run completes, fold the changelog into a proper "What changed vs
+  v1.(x-1)" comparison section (see `v1.1.md` for the target shape) and start a fresh `v1.(x+1)`
+  changelog for whatever comes next.
+
 When a new version (e.g. `v1.x`, `v2.x`) is run **against the full scoreboard**:
 
-1. **Update `docs/version_architecture/`** — add/maintain the version's architecture doc
+1. **Update `docs/version_architecture/`** — finalize the version's architecture doc
    (`docs/version_architecture/v1/v1.x.md`) and describe **how it compares to the previous
-   version** (what changed and why).
+   version** (what changed and why) — this supersedes the running changelog kept during
+   development.
 2. **Update `docs/scoreboard_result/`** — write the version's result doc
    (`docs/scoreboard_result/v1/v1.x.md`) including **which questions were not answered
    correctly**.
@@ -81,7 +101,7 @@ Logging rules:
   compared in docs, and NOT cost-tracked.
 - Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
   v1.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
-  carries `failed_delegations`, `extractor_rejections`, and each worker's full state).
+  carries `failed_delegations` and each worker's full state).
 
 ### v1 Key Files
 
@@ -89,6 +109,6 @@ Logging rules:
 |------|---------|
 | `agent/v1/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
 | `agent/v1/splunk_subagent.py` | Senior worker pool (reuses v0 graph); structured findings |
-| `agent/v1/extractor.py` | Prose-strip + format validation; single scoreboard submit |
+| `agent/v1/extractor.py` | Prose-strip to bare answer; single scoreboard submit |
 | `agent/v1/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
 | `agent/v1/run_all_v1.py` | v1 runner (full run → `log/v1/run_1.x/`; test → `log/temp/`) |

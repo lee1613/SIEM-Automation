@@ -16,6 +16,7 @@ plan + task-results summary + final answer across all 58 questions.
 """
 
 import re
+import sqlite3
 import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
@@ -25,6 +26,8 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langsmith.run_helpers import get_current_run_tree, tracing_context
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
@@ -164,8 +167,16 @@ class DelegationContext:
         self.q_delegations = []
 
 
-def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext):
-    """Compile the LLMCompiler SH graph. Returns (graph, checkpointer)."""
+def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
+                             checkpoint_db_path: str | None = None):
+    """Compile the LLMCompiler SH graph. Returns (graph, checkpointer).
+
+    checkpoint_db_path, if given, backs the checkpointer with a SQLite file
+    instead of MemorySaver's in-process RAM. This is what makes cross-question
+    memory survive a process restart when resuming a killed run with the same
+    --run-name: MemorySaver starts empty on every new process regardless of
+    thread_id, silently dropping all prior findings.
+    """
 
     llm         = ChatOpenAI(api_key=api_key, model=model,
                              max_completion_tokens=4096, temperature=0)
@@ -242,13 +253,14 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext):
             print(f"\n[SH EXECUTOR] dispatching {len(ready)} task(s) "
                   f"({n_workers} parallel worker slot(s))")
 
+            parent_run_tree = get_current_run_tree()
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as exe:
                 futures: dict = {}
                 for t in ready:
                     subq       = substitute_deps(t.subquestion, completed)
                     worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
                     print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
-                    futures[exe.submit(_run_senior, ctx, subq, worker_idx)] = (t, worker_idx, subq)
+                    futures[exe.submit(_run_senior, ctx, subq, worker_idx, parent_run_tree)] = (t, worker_idx, subq)
 
                 for fut, (t, worker_idx, subq) in futures.items():
                     try:
@@ -381,13 +393,25 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext):
     g.add_conditional_edges("joiner",   route_joiner,
                             {"executor": "executor", END: END})
 
-    checkpointer = MemorySaver()
+    if checkpoint_db_path:
+        conn = sqlite3.connect(checkpoint_db_path, check_same_thread=False)
+        checkpointer = SqliteSaver(conn)
+    else:
+        checkpointer = MemorySaver()
     return g.compile(checkpointer=checkpointer), checkpointer
 
 
-def _run_senior(ctx: DelegationContext, subquestion: str, idx: int) -> dict:
-    """Submit one Senior worker task (called from ThreadPoolExecutor thread)."""
-    return ctx.pool.run_senior(subquestion, ctx.current_qid, idx)
+def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree) -> dict:
+    """Submit one Senior worker task (called from ThreadPoolExecutor thread).
+
+    contextvars (which LangSmith's tracing relies on) don't propagate into a
+    fresh ThreadPoolExecutor thread, so without this the worker's whole trace
+    would show up as a disconnected root trace instead of nesting under the
+    SH's trace. `parent_run_tree` is captured in the main thread (where the
+    contextvar is still populated) and re-applied here.
+    """
+    with tracing_context(parent=parent_run_tree):
+        return ctx.pool.run_senior(subquestion, ctx.current_qid, idx)
 
 
 def run_sh(graph, message: str, thread_id: str,

@@ -24,6 +24,7 @@ NIM dashboard — those are the authoritative billing sources.
 
 from __future__ import annotations
 
+import re
 import threading
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -52,12 +53,30 @@ PRICES_PER_1M: dict[str, dict] = {
     "meta/llama-3.3-70b-instruct": {
         "short": {"input": 0.23,  "cached_input": None,   "output": 0.40},
     },
+    "Nemotron-Cascade-2-30B-A3B": {
+        "short": {"input": 0.15,  "cached_input": None,   "output": 0.60},
+    },
+    "deepseek-ai/DeepSeek-V4-Flash": {
+        "short": {"input": 0.30,  "cached_input": None,   "output": 1.00},
+    },
 }
+
+
+def _normalize_model_name(name: str) -> str:
+    """Strip provider prefixes and dated snapshot suffixes so lookups survive
+    e.g. OpenAI returning "gpt-5.4-2026-03-05" for alias "gpt-5.4", or Vultr
+    returning "zai-org/GLM-5.2-FP8" for catalog id "GLM-5.2-fp8"."""
+    name = name.rsplit("/", 1)[-1]
+    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", name)
+    return name.lower()
+
+
+_NORMALIZED_PRICES = {_normalize_model_name(k): v for k, v in PRICES_PER_1M.items()}
 
 
 def _call_cost(model: str, inp: int, cached: int, out: int) -> float:
     """Cost in USD for a single LLM call, accounting for context tier + cache."""
-    spec = PRICES_PER_1M.get(model)
+    spec = PRICES_PER_1M.get(model) or _NORMALIZED_PRICES.get(_normalize_model_name(model))
     if not spec:
         return 0.0
     threshold = spec.get("long_ctx_threshold", 272_000)
@@ -150,6 +169,34 @@ class UsageTracker(BaseCallbackHandler):
             b["output_tokens"] += out
             b["estimated_usd"] += usd
 
+    # ── Resume support ────────────────────────────────────────────────────────
+    def seed(self, prior_token_usage: dict | None) -> None:
+        """Pre-load counters from a previous process's saved run_summary.json
+        so a resumed process's totals keep accumulating instead of restarting
+        at zero. Costs are recomputed from the raw token counts rather than
+        trusted from the old JSON, so a stale/buggy price table at the time
+        doesn't propagate forward."""
+        if not prior_token_usage:
+            return
+        with self._lock:
+            for model, b in prior_token_usage.items():
+                if model.startswith("__"):
+                    continue
+                inp    = b.get("input_tokens", 0)
+                cached = b.get("cached_tokens", 0)
+                out    = b.get("output_tokens", 0)
+                bucket = self._models.setdefault(model, _empty_bucket())
+                bucket["input_tokens"]  += inp
+                bucket["cached_tokens"] += cached
+                bucket["output_tokens"] += out
+                bucket["estimated_usd"] += _call_cost(model, inp, cached, out)
+
+            sh = prior_token_usage.get("__sh_cumulative__")
+            if sh:
+                for k in ("input_tokens", "cached_tokens", "output_tokens", "estimated_usd"):
+                    self._sh_cum[k] += sh.get(k, 0)
+                self._sh_snap = dict(self._sh_cum)
+
     # ── Per-question SH tracking ──────────────────────────────────────────────
     def reset_sh_question(self) -> None:
         """Save a snapshot of current SH cumulative counts. Call before each question."""
@@ -174,7 +221,14 @@ class UsageTracker(BaseCallbackHandler):
         grand_usd = 0.0
         missing: list[str] = []
 
-        combined = {**self._models, **self._nim}
+        combined: dict[str, dict] = {}
+        for src in (self._models, self._nim):
+            for model, b in src.items():
+                c = combined.setdefault(model, _empty_bucket())
+                c["input_tokens"]  += b["input_tokens"]
+                c["cached_tokens"] += b["cached_tokens"]
+                c["output_tokens"] += b["output_tokens"]
+                c["estimated_usd"] += b["estimated_usd"]
         for model, b in combined.items():
             inp    = b["input_tokens"]
             cached = b["cached_tokens"]
@@ -185,7 +239,7 @@ class UsageTracker(BaseCallbackHandler):
             grand_out    += out
             grand_usd    += usd
 
-            if model not in PRICES_PER_1M:
+            if model not in PRICES_PER_1M and _normalize_model_name(model) not in _NORMALIZED_PRICES:
                 missing.append(model)
 
             rows[model] = {

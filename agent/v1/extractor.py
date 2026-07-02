@@ -2,31 +2,23 @@
 """
 Extractor agent for v1.
 
-Strictly two jobs, kept deliberately simple (per the brief):
-  1. Strip the orchestrator's prose down to the bare scoreboard answer
-     (Llama-3.3-70B via NIM — reuses the v0 extract_clean_answer approach).
-  2. Validate that bare answer against the question's `answer_guidance` format.
-     It has NO ground truth, so "validate" = format / plausibility only:
-       - non-empty
-       - not an ESCALATE / "couldn't find" style non-answer
-       - matches simple guidance hints (e.g. an IP, a number, an N-letter word)
+Strips the orchestrator's prose down to the bare scoreboard answer
+(DeepSeek-V4-Flash via Vultr — a plain non-reasoning model, chosen so hidden
+chain-of-thought can't eat the completion-token budget on this fixed-format task;
+reuses the v0 extract_clean_answer approach).
 
-Valid   -> caller submits ONCE to the scoreboard.
-Invalid -> caller reports back to the SH (no submission), and the SH may retry (capped).
+Caller submits the extracted answer directly to the scoreboard.
 """
 
-import re
+import time
 
+import openai
 from openai import OpenAI
 
 
-EXTRACT_MODEL = "meta/llama-3.3-70b-instruct"
-
-_NON_ANSWER = re.compile(
-    r"\b(escalate|i (?:could not|cannot|couldn't|don't|do not)\s|"
-    r"unable to|not found|no (?:answer|data|result)|insufficient|unknown)\b",
-    re.IGNORECASE,
-)
+EXTRACT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+EXTRACT_MAX_RETRIES = 3
+EXTRACT_RETRY_BACKOFF = 2.0  # seconds; doubles each retry
 
 
 class Extractor:
@@ -48,12 +40,22 @@ class Extractor:
             "surrounding text. If the answer is a list, use comma-separated values "
             "with no spaces. If a number, give only the number. Output nothing else."
         )
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=256,
-            temperature=0,
-        )
+        delay = EXTRACT_RETRY_BACKOFF
+        for attempt in range(1, EXTRACT_MAX_RETRIES + 1):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,  # reasoning models spend budget on hidden chain-of-thought before the answer
+                    temperature=0,
+                )
+                break
+            except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as exc:
+                if attempt == EXTRACT_MAX_RETRIES:
+                    raise
+                print(f"[EXTRACTOR] API call failed (attempt {attempt}/{EXTRACT_MAX_RETRIES}): {exc}. Retrying in {delay:.0f}s...")
+                time.sleep(delay)
+                delay *= 2
         if self.tracker and resp.usage:
             u = resp.usage
             cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
@@ -64,40 +66,3 @@ class Extractor:
                 out=u.completion_tokens or 0,
             )
         return (resp.choices[0].message.content or "").strip()
-
-    def validate(self, clean_answer: str, guidance: str) -> tuple[bool, str]:
-        """Format/plausibility check. Returns (is_valid, reason)."""
-        a = (clean_answer or "").strip()
-        if not a:
-            return False, "empty answer"
-        if _NON_ANSWER.search(a):
-            return False, f"looks like a non-answer / escalation: {a!r}"
-
-        g = (guidance or "").lower()
-
-        # Length hint: "a six-letter word", "8 characters"
-        m = re.search(r'\b(\d+)[- ]?(?:letter|character|char|digit)', g)
-        if m:
-            want = int(m.group(1))
-            token = a.split()[0]
-            if len(token) != want and len(a) != want:
-                return False, f"expected {want} characters, got {len(a)} ({a!r})"
-
-        # IP hint
-        if "ip" in g and re.search(r'\baddress\b', g):
-            if not re.search(r'\d{1,3}(?:\.\d{1,3}){3}', a):
-                return False, f"guidance expects an IP address, got {a!r}"
-
-        # Numeric hint
-        if re.search(r'\b(?:a number|numeric|count|how many|integer)\b', g):
-            if not re.search(r'\d', a):
-                return False, f"guidance expects a number, got {a!r}"
-
-        return True, "format ok"
-
-    def process(self, question: str, guidance: str, verbose_answer: str) -> dict:
-        """Convenience: extract + validate in one call."""
-        clean = self.extract(question, guidance, verbose_answer)
-        valid, reason = self.validate(clean, guidance)
-        print(f"[EXTRACTOR] clean={clean!r}  valid={valid}  reason={reason}")
-        return {"clean_answer": clean, "valid": valid, "reason": reason}
