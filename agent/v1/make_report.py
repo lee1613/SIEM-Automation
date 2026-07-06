@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""
+Render human-readable views from a run's canonical event stream + metrics.json.
+
+    python agent/v1/make_report.py <run_dir>
+
+Writes <run_dir>/report.md. Pure rendering — reads events.jsonl and metrics.json,
+computes score/cost/latency rollups, ranks slowest & most expensive questions,
+and surfaces the ungrounded-answer list (the fabrication signal) and cap-hit list.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+
+def load_events(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def load_metrics(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _pct(values: list[float], p: float) -> float:
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = max(0, min(len(s) - 1, int(round((p / 100) * (len(s) - 1)))))
+    return s[k]
+
+
+def render_report(events: list[dict], metrics: list[dict]) -> str:
+    run_end = next((e for e in events if e.get("event") == "run_end"), {})
+    run_start = next((e for e in events if e.get("event") == "run_start"), {})
+    correct = run_end.get("correct", sum(1 for m in metrics if m.get("verdict") == "correct"))
+    attempted = run_end.get("attempted", len(metrics))
+    score = run_end.get("score", sum(m.get("earned", 0) for m in metrics))
+    total = run_end.get("total", sum(m.get("points", 0) for m in metrics))
+
+    lats = [m["latency_s"]["total"] for m in metrics if m.get("latency_s")]
+    lines = []
+    lines.append(f"# Run report — {run_start.get('run', '?')}")
+    if run_start.get("git_sha"):
+        lines.append(f"\n_git {run_start['git_sha']}, "
+                     f"models {run_start.get('models', {})}_")
+    lines.append(f"\n## Score\n\n**{correct}/{attempted}** correct — "
+                 f"{score}/{total} pts\n")
+
+    lines.append("## Latency (per question, s)\n")
+    lines.append(f"- p50 {_pct(lats,50):.0f} · p95 {_pct(lats,95):.0f} · "
+                 f"max {max(lats) if lats else 0:.0f}\n")
+
+    slow = sorted(metrics, key=lambda m: m.get("latency_s", {}).get("total", 0), reverse=True)[:5]
+    lines.append("### Slowest questions\n")
+    lines.append("| qid | s | verdict |\n|---|---|---|")
+    for m in slow:
+        lines.append(f"| {m['qid']} | {m['latency_s']['total']:.0f} | {m['verdict']} |")
+    lines.append("")
+
+    exp = sorted(metrics, key=lambda m: sum(m.get("cost_by_role", {}).values()), reverse=True)[:5]
+    lines.append("### Most expensive questions\n")
+    lines.append("| qid | $ | verdict |\n|---|---|---|")
+    for m in exp:
+        lines.append(f"| {m['qid']} | {sum(m.get('cost_by_role', {}).values()):.4f} | {m['verdict']} |")
+    lines.append("")
+
+    ungrounded = [m for m in metrics if m.get("verdict") == "wrong" and not m.get("grounded")]
+    lines.append(f"## Ungrounded wrong answers ({len(ungrounded)})\n")
+    lines.append("_Submitted a value no worker produced — fabrication signal._\n")
+    lines.append("| qid | pts | submitted |\n|---|---|---|")
+    for m in ungrounded:
+        lines.append(f"| {m['qid']} | {m['points']} | `{m.get('clean_answer','')}` |")
+    lines.append("")
+
+    caps = [m for m in metrics if m.get("cap_hits")]
+    lines.append(f"## Questions that hit the iteration cap ({len(caps)})\n")
+    lines.append("| qid | cap_hits | verdict |\n|---|---|---|")
+    for m in caps:
+        lines.append(f"| {m['qid']} | {m['cap_hits']} | {m['verdict']} |")
+    lines.append("")
+
+    lines.append("## Wrong / Not Answered\n")
+    lines.append("| qid | pts | submitted | grounded |\n|---|---|---|---|")
+    for m in metrics:
+        if m.get("verdict") == "wrong":
+            lines.append(f"| {m['qid']} | {m['points']} | `{m.get('clean_answer','')}` "
+                         f"| {m.get('grounded')} |")
+    return "\n".join(lines) + "\n"
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        sys.exit("usage: python make_report.py <run_dir>")
+    run_dir = sys.argv[1]
+    events = load_events(os.path.join(run_dir, "events.jsonl"))
+    metrics = load_metrics(os.path.join(run_dir, "metrics.json"))
+    md = render_report(events, metrics)
+    out = os.path.join(run_dir, "report.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(md)
+    print(f"wrote {out}")
+
+
+if __name__ == "__main__":
+    main()
