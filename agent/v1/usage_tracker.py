@@ -104,6 +104,17 @@ class UsageTracker(BaseCallbackHandler):
         self._nim:    dict[str, dict] = {}      # NIM raw-SDK totals (Extractor)
         self._sh_cum  = _empty_bucket()         # cumulative SH totals for the whole run
         self._sh_snap = _empty_bucket()         # snapshot at start of current question
+        self._by_q: dict[tuple[str, str], dict] = {}   # (qid, role) -> bucket
+
+    # ── Per-(qid, role) attribution ───────────────────────────────────────────
+    def _add_by_q(self, qid: str, role: str, inp: int, cached: int, out: int, usd: float) -> None:
+        if not qid:
+            return
+        b = self._by_q.setdefault((qid, role), _empty_bucket())
+        b["input_tokens"]  += inp
+        b["cached_tokens"] += cached
+        b["output_tokens"] += out
+        b["estimated_usd"] += usd
 
     # ── LangChain callback ────────────────────────────────────────────────────
     def on_llm_end(self, response: LLMResult, **kwargs) -> None:
@@ -156,8 +167,13 @@ class UsageTracker(BaseCallbackHandler):
                 self._sh_cum["output_tokens"] += out
                 self._sh_cum["estimated_usd"] += usd
 
+            role = "sh" if "SH" in tags else ("senior" if "senior" in tags else "other")
+            qid  = next((tg for tg in tags if isinstance(tg, str) and tg.startswith("Q")), "")
+            self._add_by_q(qid, role, inp, cached, out, usd)
+
     # ── NIM / raw-SDK helper ──────────────────────────────────────────────────
-    def add_nim_usage(self, model: str, inp: int, cached: int, out: int) -> None:
+    def add_nim_usage(self, model: str, inp: int, cached: int, out: int,
+                      qid: str = "", role: str = "extractor") -> None:
         """Called by Extractor after each NIM completion."""
         if not (inp or out):
             return
@@ -168,6 +184,7 @@ class UsageTracker(BaseCallbackHandler):
             b["cached_tokens"] += cached
             b["output_tokens"] += out
             b["estimated_usd"] += usd
+            self._add_by_q(qid, role, inp, cached, out, usd)
 
     # ── Resume support ────────────────────────────────────────────────────────
     def seed(self, prior_token_usage: dict | None) -> None:
@@ -208,6 +225,19 @@ class UsageTracker(BaseCallbackHandler):
         for k in ("input_tokens", "cached_tokens", "output_tokens", "estimated_usd"):
             delta[k] = round(self._sh_cum[k] - self._sh_snap[k], 6)
         return delta
+
+    def by_question(self) -> dict:
+        """Return {qid: {role: bucket}} with per-question, per-role usage."""
+        out: dict[str, dict] = {}
+        with self._lock:
+            for (qid, role), b in self._by_q.items():
+                out.setdefault(qid, {})[role] = {
+                    "input_tokens":  b["input_tokens"],
+                    "cached_tokens": b["cached_tokens"],
+                    "output_tokens": b["output_tokens"],
+                    "estimated_usd": round(b["estimated_usd"], 6),
+                }
+        return out
 
     # ── Final summary ─────────────────────────────────────────────────────────
     def totals(self) -> dict:

@@ -216,7 +216,7 @@ def main():
         )
 
         # ── Extractor: strip prose down to the bare answer ────────────────────────
-        clean = extractor.extract(qtext, guidance, sh_answer)
+        clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)
         print(f"[EXTRACTOR] clean={clean!r}")
 
         # ── Single scoreboard submission ──────────────────────────────────────────

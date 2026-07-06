@@ -28,7 +28,7 @@ class Extractor:
         self.model   = model
         self.tracker = tracker
 
-    def extract(self, question: str, guidance: str, verbose_answer: str) -> str:
+    def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "") -> str:
         """Prose-strip to the bare answer the scoreboard expects."""
         guidance_line = f"Answer format guidance: {guidance}" if guidance else ""
         prompt = (
@@ -64,5 +64,7 @@ class Extractor:
                 inp=u.prompt_tokens or 0,
                 cached=cached,
                 out=u.completion_tokens or 0,
+                qid=qid,
+                role="extractor",
             )
         return (resp.choices[0].message.content or "").strip()
