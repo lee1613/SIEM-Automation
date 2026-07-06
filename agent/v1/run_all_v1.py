@@ -204,9 +204,11 @@ def main():
     logger  = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
     tracker = UsageTracker()
 
-    # All runs land in the user's manually-created "V1.1" LangSmith project.
-    # LANGSMITH_PROJECT takes precedence over the legacy LANGCHAIN_PROJECT variable.
-    os.environ["LANGSMITH_PROJECT"] = "V1.1"
+    # Each run gets its own LangSmith project, named after the run so traces
+    # don't pile into one shared project (full runs: botsv3-run_1.x; test
+    # runs: botsv3-test_<ts>). LANGSMITH_PROJECT takes precedence over the
+    # legacy LANGCHAIN_PROJECT variable.
+    os.environ["LANGSMITH_PROJECT"] = f"botsv3-{logger.run_name}"
 
     run_label = "FULL RUN" if full_run else "TEST RUN"
 

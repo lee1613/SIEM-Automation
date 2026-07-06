@@ -15,6 +15,13 @@ import time
 import openai
 from openai import OpenAI
 
+try:
+    from langsmith import traceable
+except Exception:
+    def traceable(*a, **k):
+        def _wrap(fn): return fn
+        return _wrap if not (len(a) == 1 and callable(a[0])) else a[0]
+
 
 EXTRACT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 EXTRACT_MAX_RETRIES = 3
@@ -27,6 +34,16 @@ class Extractor:
         self.client  = OpenAI(base_url=nim_base_url, api_key=nim_api_key)
         self.model   = model
         self.tracker = tracker
+
+    @traceable(run_type="llm", name="Extractor")
+    def _complete(self, prompt: str):
+        """The raw network call, wrapped so it shows as a span in LangSmith."""
+        return self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,  # reasoning models spend budget on hidden chain-of-thought before the answer
+            temperature=0,
+        )
 
     def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "") -> str:
         """Prose-strip to the bare answer the scoreboard expects."""
@@ -43,12 +60,7 @@ class Extractor:
         delay = EXTRACT_RETRY_BACKOFF
         for attempt in range(1, EXTRACT_MAX_RETRIES + 1):
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1024,  # reasoning models spend budget on hidden chain-of-thought before the answer
-                    temperature=0,
-                )
+                resp = self._complete(prompt)
                 break
             except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as exc:
                 if attempt == EXTRACT_MAX_RETRIES:
