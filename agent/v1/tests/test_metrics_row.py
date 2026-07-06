@@ -1,4 +1,4 @@
-from run_all_v1 import build_metrics_row
+from run_all_v1 import build_metrics_row, seed_resume_results, upsert_metrics_row
 
 
 def test_metrics_row_flags_ungrounded_and_verdict():
@@ -33,3 +33,50 @@ def test_metrics_row_grounded_true_when_answer_in_worker_text():
         usage_by_role={},
     )
     assert row["grounded"] is True
+
+
+# ── upsert_metrics_row: crash-then-resume dedupe (Issue 1) ────────────────────
+
+def test_upsert_replaces_stale_row_for_same_qid():
+    rows = [
+        {"qid": "Q200", "verdict": "wrong", "grounded": False},
+        {"qid": "Q301", "verdict": "correct", "grounded": True},
+    ]
+    upsert_metrics_row(rows, {"qid": "Q200", "verdict": "correct", "grounded": True})
+    q200 = [m for m in rows if m["qid"] == "Q200"]
+    assert len(q200) == 1                      # exactly one row — no duplicate
+    assert q200[0]["verdict"] == "correct"     # and it is the NEW row
+    assert len(rows) == 2                      # unrelated row untouched
+
+
+def test_upsert_appends_new_qid():
+    rows = [{"qid": "Q200", "verdict": "correct"}]
+    upsert_metrics_row(rows, {"qid": "Q301", "verdict": "wrong"})
+    assert [m["qid"] for m in rows] == ["Q200", "Q301"]
+
+
+# ── seed_resume_results: old vs new summary schema (Issue 2) ──────────────────
+
+def test_seed_resume_new_schema_reloads_from_questions_dir(tmp_path):
+    import json
+    qdir = tmp_path / "questions"
+    qdir.mkdir()
+    rec = {"id": "Q200", "sb_correct": True, "earned": 100}
+    (qdir / "Q200.json").write_text(json.dumps(rec), encoding="utf-8")
+    prior = {"index": [{"id": "Q200", "verdict": "correct", "earned": 100}]}
+    results = seed_resume_results(prior, str(qdir))
+    assert results == [rec]
+
+
+def test_seed_resume_old_schema_falls_back_to_embedded_results(tmp_path):
+    # run_1.0 / run_1.1 summaries: inline "results" array, no "index" key.
+    prior = {"results": [{"id": "Q1", "sb_correct": False, "earned": 0}]}
+    results = seed_resume_results(prior, str(tmp_path / "questions"))
+    assert results == [{"id": "Q1", "sb_correct": False, "earned": 0}]
+
+
+def test_seed_resume_new_schema_skips_missing_question_files(tmp_path):
+    qdir = tmp_path / "questions"
+    qdir.mkdir()
+    prior = {"index": [{"id": "Q999", "verdict": "wrong", "earned": 0}]}
+    assert seed_resume_results(prior, str(qdir)) == []

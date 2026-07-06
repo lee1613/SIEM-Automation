@@ -114,6 +114,38 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
     }
 
 
+def upsert_metrics_row(rows: list, row: dict) -> None:
+    """Replace-or-append `row` in `rows` keyed by qid (in place).
+
+    Idempotent per question: if a crash left a stale row in metrics.json and
+    the question is reprocessed after resume, the stale row is replaced instead
+    of duplicated (a duplicate would also poison the summary's index lookup,
+    which takes the first match by qid).
+    """
+    qid = row.get("qid")
+    rows[:] = [m for m in rows if m.get("qid") != qid]
+    rows.append(row)
+
+
+def seed_resume_results(prior: dict, questions_dir: str) -> list:
+    """Rebuild the `results` list from a prior run_summary.json on resume.
+
+    New schema (v1.2+): summary carries an `index` list and the heavy records
+    live in questions/<qid>.json — reload each one (skipping any file a crash
+    prevented from being written). Old schema (run_1.0/run_1.1): no `index`
+    key, the full `results` array is embedded in the summary — use it directly.
+    """
+    if prior.get("index") is not None:
+        results = []
+        for entry in prior["index"]:
+            qpath = os.path.join(questions_dir, f"{entry['id']}.json")
+            if os.path.exists(qpath):
+                with open(qpath, "r", encoding="utf-8") as qf:
+                    results.append(json.load(qf))
+        return results
+    return prior.get("results", [])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ids", default=None,
@@ -228,14 +260,10 @@ def main():
         ctx.failed_delegations = prior.get("failed_delegations", 0)
         tracker.seed(prior.get("token_usage"))
         resumed = True
-        prior_index = prior.get("index", [])
-        # Heavy per-question records now live under questions/<qid>.json; reload
-        # them so `results` keeps its prior full content across a resume.
-        for entry in prior_index:
-            qpath = os.path.join(questions_dir, f"{entry['id']}.json")
-            if os.path.exists(qpath):
-                with open(qpath, "r", encoding="utf-8") as qf:
-                    results.append(json.load(qf))
+        # Heavy per-question records live under questions/<qid>.json (new
+        # schema, via the summary's index); old-schema summaries (run_1.0/1.1)
+        # embed the full results array directly — handle both.
+        results = seed_resume_results(prior, questions_dir)
         print(f"Resuming {logger.run_name}: {len(results)} question(s) already "
               f"recorded, {earned_pts}/{total_points} pts so far.")
 
@@ -347,7 +375,7 @@ def main():
                            grounded=row["grounded"], clean=clean)
         logger.events.emit("question_end", qid=qid, **{k: row[k] for k in
                            ("latency_s", "delegations", "statuses", "cap_hits", "cost_by_role")})
-        metrics_rows.append(row)
+        upsert_metrics_row(metrics_rows, row)   # idempotent by qid across resumes
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics_rows, f, indent=2, ensure_ascii=False)
 
