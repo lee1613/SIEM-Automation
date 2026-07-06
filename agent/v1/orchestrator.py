@@ -270,6 +270,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                             "status": "failed",
                             "answer": f"worker crashed: {exc}",
                             "spl_used": [], "sourcetypes": [], "full_state": [],
+                            "iterations": 0, "cap_hit": False,
                         }
                     completed[t.idx] = result
 
@@ -285,6 +286,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                         "spl_used":    result["spl_used"],
                         "sourcetypes": result["sourcetypes"],
                         "full_state":  result["full_state"],
+                        "iterations":  result.get("iterations", 0),
+                        "cap_hit":     result.get("cap_hit", False),
                     }
                     ctx.q_delegations.append(record)
                     ctx.all_delegations.append(record)
