@@ -25,7 +25,7 @@ class RunLogger:
 
     def __init__(self, *, full_run: bool, version_major: int = 1, run_name: str | None = None):
         self.full_run = full_run
-        log_root = os.path.join(PROJECT_ROOT, "log")
+        log_root = os.environ.get("SIEM_LOG_ROOT") or os.path.join(PROJECT_ROOT, "log")
 
         if run_name:
             # Reuse an existing run dir (append mode).
@@ -51,6 +51,10 @@ class RunLogger:
 
         self.timeline_path = os.path.join(self.run_dir, "timeline.md")
         self._counters     = {"senior": 0, "junior": 0}
+
+        from event_log import EventLog
+        self.events = EventLog(os.path.join(self.run_dir, "events.jsonl"),
+                               run=self.run_name)
 
         if not append:
             with open(self.timeline_path, "w", encoding="utf-8") as f:
