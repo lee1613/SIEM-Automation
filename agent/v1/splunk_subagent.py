@@ -20,6 +20,7 @@ import re
 import uuid
 
 import splunk_agent as agent_mod
+from splunk_agent import MAX_ITER
 
 
 ESCALATE_INSTRUCTIONS = (
@@ -72,15 +73,23 @@ def extract_spl_and_sourcetypes(state: dict) -> tuple[list, list]:
 
 
 def _classify(answer: str) -> str:
+    """Status from the worker's terminal message.
+
+    'solved' requires an explicit FINAL ANSWER commitment — a non-empty tail
+    with no tag means the worker never actually answered (e.g. ran out of
+    iterations mid-tool-call), which must read as 'failed', not 'solved'.
+    """
     a = (answer or "").strip()
     if not a:
         return "failed"
     upper = a.upper()
-    if upper.startswith("ESCALATE") or "ESCALATE:" in upper:
+    if "ESCALATE:" in upper or upper.startswith("ESCALATE"):
         return "too_big"
-    if upper.startswith("PARTIAL ANSWER") or "PARTIAL ANSWER:" in upper:
+    if "PARTIAL ANSWER" in upper:
         return "partial"
-    return "solved"
+    if "FINAL ANSWER" in upper:
+        return "solved"
+    return "failed"
 
 
 class SplunkWorkerPool:
@@ -116,12 +125,15 @@ class SplunkWorkerPool:
             )
         except Exception as exc:
             answer = f"ESCALATE: worker crashed — {exc}"
-            state  = {"messages": []}
+            state  = {"messages": [], "step_count": 0}
 
         print(f"\n[WORKER RESULT] {run_name}: {answer[:200]}")
 
         spl_used, sourcetypes = extract_spl_and_sourcetypes(state)
         status = _classify(answer)
+
+        steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
+        cap_hit = steps > MAX_ITER
 
         return {
             "role":        role,
@@ -134,4 +146,6 @@ class SplunkWorkerPool:
             "spl_used":    spl_used,
             "sourcetypes": sourcetypes,
             "full_state":  serialize_messages(state),
+            "iterations":  steps,
+            "cap_hit":     cap_hit,
         }

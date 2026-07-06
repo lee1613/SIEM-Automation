@@ -259,8 +259,6 @@ def main():
             "clean_answer":     clean,
             "sb_correct":       sb_correct,
             "earned":           pts_earned,
-            "extractor_valid":  ext["valid"],
-            "extractor_reason": ext["reason"],
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
         })
