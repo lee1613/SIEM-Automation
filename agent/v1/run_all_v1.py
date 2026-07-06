@@ -30,6 +30,7 @@ import os
 import sys
 import json
 import argparse
+import subprocess
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))     # agent/v1
 AGENT_DIR    = os.path.dirname(SCRIPT_DIR)                    # agent
@@ -77,6 +78,40 @@ def build_sh_message(qid, qtext, guidance):
         "time windows, sourcetypes) and embed that context in every task you write."
     )
     return "\n".join(lines)
+
+
+def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations,
+                      stage_ms, usage_by_role):
+    """Assemble one per-question metrics row (pure data — unit-testable).
+
+    `grounded` = the submitted answer appears verbatim (case-insensitive) in at
+    least one worker's answer text. False here is the fabrication signal: the
+    SH invented a value no delegate ever produced (Q221/Q303/Q330/Q333 class).
+    """
+    ca = (clean_answer or "").strip().lower()
+    grounded = bool(ca) and any(
+        ca in (d.get("answer") or "").lower() for d in delegations
+    )
+    statuses = [d.get("status", "?") for d in delegations]
+    cap_hits = sum(1 for d in delegations if d.get("cap_hit"))
+    total_ms = sum(stage_ms.values())
+    return {
+        "qid": qid,
+        "points": points,
+        "verdict": verdict,
+        "earned": earned,
+        "clean_answer": clean_answer,
+        "grounded": grounded,
+        "delegations": len(delegations),
+        "statuses": statuses,
+        "cap_hits": cap_hits,
+        "latency_s": {
+            "total": round(total_ms / 1000, 1),
+            **{k: round(v / 1000, 1) for k, v in stage_ms.items()},
+        },
+        "cost_by_role": {r: round(v.get("estimated_usd", 0.0), 6)
+                         for r, v in usage_by_role.items()},
+    }
 
 
 def main():
@@ -174,22 +209,51 @@ def main():
     print("=" * 80)
 
     results              = []
+    metrics_rows         = []
     total_points         = 0
     earned_pts           = 0
     summary_path         = os.path.join(logger.run_dir, "run_summary.json")
+    metrics_path         = os.path.join(logger.run_dir, "metrics.json")
+    questions_dir        = os.path.join(logger.run_dir, "questions")
+    os.makedirs(questions_dir, exist_ok=True)
 
     # Resume support: pick up where a killed/interrupted process left off
     # instead of overwriting run_summary.json with just this segment's data.
+    resumed = False
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8") as f:
             prior = json.load(f)
-        results              = prior.get("results", [])
         total_points         = prior.get("total", 0)
         earned_pts           = prior.get("score", 0)
         ctx.failed_delegations = prior.get("failed_delegations", 0)
         tracker.seed(prior.get("token_usage"))
+        resumed = True
+        prior_index = prior.get("index", [])
+        # Heavy per-question records now live under questions/<qid>.json; reload
+        # them so `results` keeps its prior full content across a resume.
+        for entry in prior_index:
+            qpath = os.path.join(questions_dir, f"{entry['id']}.json")
+            if os.path.exists(qpath):
+                with open(qpath, "r", encoding="utf-8") as qf:
+                    results.append(json.load(qf))
         print(f"Resuming {logger.run_name}: {len(results)} question(s) already "
               f"recorded, {earned_pts}/{total_points} pts so far.")
+
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            metrics_rows = json.load(f)
+
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=PROJECT_ROOT, text=True
+        ).strip()
+    except Exception:
+        git_sha = "unknown"
+    logger.events.emit(
+        "run_start", git_sha=git_sha, full_run=full_run,
+        models={"sh": SH_MODEL, "senior": senior_model, "extractor": extractor.model},
+        langsmith_project=ls_project, questions=len(selected), resumed=resumed,
+    )
 
     for q in selected:
         qid      = q["id"]
@@ -204,19 +268,25 @@ def main():
         tracker.reset_sh_question()
         logger.timeline_question_header(qid, qtext, points)
         print(f"\n{'-'*80}\n[{qid}]  {points} pts  |  {qtext[:90]}")
+        logger.events.emit("question_start", qid=qid, points=points)
+        stage_ms = {}
 
         # ── SH solves the question ────────────────────────────────────────────────
-        sh_answer, _ = run_sh(
-            sh_graph,
-            build_sh_message(qid, qtext, guidance),
-            run_thread,
-            qid=qid,
-            run_name=f"SH-{qid}",
-            tracker=tracker,
-        )
+        with logger.events.timer() as t_sh:
+            sh_answer, _ = run_sh(
+                sh_graph,
+                build_sh_message(qid, qtext, guidance),
+                run_thread,
+                qid=qid,
+                run_name=f"SH-{qid}",
+                tracker=tracker,
+            )
+        stage_ms["sh"] = t_sh.ms
 
         # ── Extractor: strip prose down to the bare answer ────────────────────────
-        clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)
+        with logger.events.timer() as t_ext:
+            clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)
+        stage_ms["extract"] = t_ext.ms
         print(f"[EXTRACTOR] clean={clean!r}")
 
         # ── Single scoreboard submission ──────────────────────────────────────────
@@ -262,9 +332,28 @@ def main():
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
         })
+        with open(os.path.join(questions_dir, f"{qid}.json"), "w", encoding="utf-8") as f:
+            json.dump(results[-1], f, indent=2, ensure_ascii=False)
+
+        # ── Events + per-question metrics row ─────────────────────────────────────
+        verdict_str = "correct" if sb_correct else "wrong"
+        ubr = tracker.by_question().get(qid, {})
+        row = build_metrics_row(
+            qid=qid, points=points, verdict=verdict_str, earned=pts_earned,
+            clean_answer=clean, delegations=ctx.q_delegations,
+            stage_ms=stage_ms, usage_by_role=ubr,
+        )
+        logger.events.emit("submit", qid=qid, verdict=verdict_str, earned=pts_earned,
+                           grounded=row["grounded"], clean=clean)
+        logger.events.emit("question_end", qid=qid, **{k: row[k] for k in
+                           ("latency_s", "delegations", "statuses", "cap_hits", "cost_by_role")})
+        metrics_rows.append(row)
+        with open(metrics_path, "w", encoding="utf-8") as f:
+            json.dump(metrics_rows, f, indent=2, ensure_ascii=False)
 
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump({
+                "schema_version":       1,
                 "run":                  logger.run_name,
                 "full_run":             full_run,
                 "langsmith_project":    ls_project,
@@ -277,7 +366,13 @@ def main():
                 "attempted":            len(results),
                 "failed_delegations":   ctx.failed_delegations,
                 "token_usage":          tracker.totals(),
-                "results":              results,
+                "questions_dir":        "questions",
+                "index":                [
+                    {"id": r["id"], "verdict": "correct" if r["sb_correct"] else "wrong",
+                     "earned": r["earned"],
+                     "grounded": next((m["grounded"] for m in metrics_rows if m["qid"] == r["id"]), None)}
+                    for r in results
+                ],
             }, f, indent=2, ensure_ascii=False)
 
     # ── Final summary ──────────────────────────────────────────────────────────────
@@ -285,6 +380,9 @@ def main():
     att        = len(results)
     tok        = tracker.totals()
     tok_total  = tok.get("__total__", {})
+    logger.events.emit("run_end", correct=correct_n, attempted=att,
+                       score=earned_pts, total=total_points,
+                       estimated_usd=tok_total.get("estimated_usd", 0))
     print(f"\n{'='*80}\nFINAL — {logger.run_name}  ({run_label})")
     print(f"  Correct           : {correct_n}/{att}"
           f"  ({(correct_n/att*100 if att else 0):.1f}%)")
