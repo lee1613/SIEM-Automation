@@ -28,6 +28,28 @@ EXTRACT_MAX_RETRIES = 3
 EXTRACT_RETRY_BACKOFF = 2.0  # seconds; doubles each retry
 
 
+def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
+                         expected_shape: str = "") -> str:
+    """Pure prompt builder for the extractor's prose-strip call.
+
+    `expected_shape` is an optional hint (e.g. from planner/runner guidance) telling
+    the extractor to strip vendor/version suffixes and normalize list formatting
+    (fixes cases like submitting 'E5-2676 v3' when the scoreboard wants 'E5-2676').
+    """
+    guidance_line = f"Answer format guidance: {guidance}" if guidance else ""
+    shape_line = f"Required answer shape: {expected_shape}" if expected_shape else ""
+    return (
+        f"Question: {question}\n\n"
+        f"{guidance_line}\n{shape_line}\n\n"
+        f"Agent's analysis: {verbose_answer}\n\n"
+        "Based on the analysis above, state ONLY the exact answer with no "
+        "explanation, no punctuation beyond what the format requires, and no "
+        "surrounding text. Strip any vendor/version suffix not asked for. "
+        "If the answer is a list, use comma-separated values with no spaces. "
+        "If a number, give only the number. Output nothing else."
+    )
+
+
 class Extractor:
     def __init__(self, nim_api_key: str, nim_base_url: str,
                  model: str = EXTRACT_MODEL, tracker=None):
@@ -45,18 +67,10 @@ class Extractor:
             temperature=0,
         )
 
-    def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "") -> str:
+    def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "",
+                expected_shape: str = "") -> str:
         """Prose-strip to the bare answer the scoreboard expects."""
-        guidance_line = f"Answer format guidance: {guidance}" if guidance else ""
-        prompt = (
-            f"Question: {question}\n\n"
-            f"{guidance_line}\n\n"
-            f"Agent's analysis: {verbose_answer}\n\n"
-            "Based on the analysis above, state ONLY the exact answer with no "
-            "explanation, no punctuation beyond what the format requires, and no "
-            "surrounding text. If the answer is a list, use comma-separated values "
-            "with no spaces. If a number, give only the number. Output nothing else."
-        )
+        prompt = build_extract_prompt(question, guidance, verbose_answer, expected_shape)
         delay = EXTRACT_RETRY_BACKOFF
         for attempt in range(1, EXTRACT_MAX_RETRIES + 1):
             try:

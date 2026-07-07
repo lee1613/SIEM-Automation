@@ -333,7 +333,7 @@ def main():
 
         # ── Extractor: strip prose down to the bare answer ────────────────────────
         with logger.events.timer() as t_ext:
-            clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)
+            clean = extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)
         stage_ms["extract"] = t_ext.ms
         print(f"[EXTRACTOR] clean={clean!r}")
 

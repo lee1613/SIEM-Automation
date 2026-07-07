@@ -72,7 +72,10 @@ RULES:
 - If you already know the answer from your cross-question memory (not from the Splunk dataset
   itself — general knowledge is fine), write instead:
     DIRECT ANSWER: <the precise value>
-  Do NOT write TASKS in that case."""
+  Do NOT write TASKS in that case.
+- Also output one line:  EXPECTED SHAPE: <the exact form the scoreboard wants —
+  e.g. "bare MAC address lowercase", "integer only", "comma-separated lowercase
+  list no spaces", "filename with extension". Derive it from the answer guidance.>"""
 
 
 # ── Joiner prompt ──────────────────────────────────────────────────────────────
