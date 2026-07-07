@@ -68,6 +68,22 @@ ANSWERS_PATH   = os.path.join(PROJECT_ROOT, "datasets", "botsv3_answers.json")
 VULTR_BASE_URL = "https://api.vultrinference.com/v1"
 
 
+def force_utf8_stdio() -> None:
+    """Reconfigure stdout/stderr to UTF-8 with error replacement.
+
+    On Windows, the console is often cp1252 ('charmap'). Any print() of a
+    Unicode character outside that codec (e.g. the arrow U+2192, em-dashes)
+    raises UnicodeEncodeError and kills the process mid-run. Reconfiguring
+    the streams here fixes every print() call at once instead of hunting
+    down each non-ASCII character across the codebase.
+    """
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def build_sh_message(qid, qtext, guidance):
     lines = [f"New question — {qid}.", f"Question: {qtext}"]
     if guidance:
@@ -147,6 +163,8 @@ def seed_resume_results(prior: dict, questions_dir: str) -> list:
 
 
 def main():
+    force_utf8_stdio()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--ids", default=None,
                         help="Comma-separated question ids to run (e.g. Q1,Q205). Marks a TEST run.")

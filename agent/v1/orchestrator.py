@@ -128,7 +128,7 @@ def parse_plan(text: str) -> list[Task]:
     """Extract numbered tasks from planner/replan output."""
     tasks = []
     pattern = re.compile(
-        r'^(\d+)\.\s+(.+?)(?=^\d+\.|\Z)',
+        r'^\s*(\d+)\.\s+(.+?)(?=^\s*\d+\.|\Z)',
         re.MULTILINE | re.DOTALL,
     )
     for m in pattern.finditer(text):
