@@ -203,6 +203,18 @@ def make_tools(splunk: SplunkClient) -> list:
         )
         return _format_result(result)
 
+    @tool
+    def get_raw_events(sourcetype: str, keyword: str = "", index: str = "botsv3",
+                       limit: int = 10) -> str:
+        """Return RAW event content (not aggregated) from a sourcetype, to read
+        the actual text of emails, scripts, bash history, HTTP payloads, etc.
+        Use when the answer is INSIDE the event content rather than a field value.
+        `limit` is capped at 20 to protect context. Prefer a specific `keyword`."""
+        n = max(1, min(int(limit), 20))
+        result = splunk.sample_events(sourcetype=sourcetype, index=index,
+                                      keyword=keyword, count=n)
+        return _format_result(result, keep_raw=True)
+
     return [
         get_source_types,
         search_keyword,
@@ -210,6 +222,7 @@ def make_tools(splunk: SplunkClient) -> list:
         get_field_values,
         sample_events,
         run_splunk_search,
+        get_raw_events,
     ]
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -256,6 +269,15 @@ Example investigation flow:
 
   Intention: Field confirmed. Run aggregation to find the top destination IP in stream:ip traffic.
   → call run_splunk_search(query="index=botsv3 sourcetype=stream:ip | top limit=20 dest")
+
+Reading content: when the answer is text inside an event (an email body, a
+command line, a script, an uploaded file's content), use get_raw_events to read
+the raw events rather than forcing an aggregation.
+
+Never exclude a process, file, or host from suspicion just because its name looks
+benign or "known-good". Suspicion comes from behavior (unusual parent, network,
+timing), not from a name blocklist. Do not add NOT match(...) filters that drop
+candidate answers by name.
 
 """
 # ── Verification helpers ───────────────────────────────────────────────────────
