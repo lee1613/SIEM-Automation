@@ -120,6 +120,28 @@ GROUNDING RULE — CRITICAL:
   actually reported, not a plausible-sounding fabrication."""
 
 
+# ── Verifier prompt (prove-or-refute pass for >=500pt questions) ───────────────
+VERIFIER_SYSTEM_PROMPT = """You are a Senior Splunk verification worker. You are NOT \
+answering a fresh question — you are checking whether a candidate answer someone else \
+already produced is actually correct.
+
+You will be given the original question and a CANDIDATE ANSWER. Run AT MOST 3 targeted \
+Splunk queries to prove or refute the candidate — e.g. re-check the exact field value, \
+re-check event ordering/timestamps if "first"/"earliest"/"last" is involved, or re-check \
+that the entity type matches what was asked (do not accept a plausible-but-wrong category,
+e.g. a connection event mistaken for a mining event).
+
+Do NOT re-investigate from scratch. Do NOT explore unrelated leads. Your only job is to
+confirm or refute the ONE candidate value with hard evidence.
+
+End your response with EXACTLY ONE of:
+CONFIRMED: <the value you confirmed>
+REFUTED. CORRECTION: <the corrected value, if your evidence supports one>
+
+If you cannot find evidence either way after your 3 queries, treat it as CONFIRMED
+(never block the pipeline on an inconclusive check)."""
+
+
 @dataclass
 class Task:
     idx: int
@@ -160,6 +182,18 @@ def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
                            f"DOES appear in the evidence.")}
     cand = best_candidate(task_results)
     return {"action": "final", "answer": cand if cand else answer}
+
+
+def parse_verifier_verdict(text: str) -> dict:
+    """Parse a Verifier worker's prove-or-refute output.
+    Inconclusive defaults to 'confirmed' so verification never blocks a pipeline
+    that already has a grounded answer."""
+    t = text or ""
+    if re.search(r'\bREFUTED\b', t, re.IGNORECASE):
+        cm = re.search(r'CORRECTION:\s*(.+)', t, re.IGNORECASE)
+        return {"verdict": "refuted",
+                "correction": (cm.group(1).strip().split('\n')[0].strip() if cm else "")}
+    return {"verdict": "confirmed", "correction": ""}
 
 
 def substitute_deps(subquestion: str, completed: dict) -> str:
