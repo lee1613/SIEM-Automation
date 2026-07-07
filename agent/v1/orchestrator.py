@@ -184,6 +184,11 @@ def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
     return {"action": "final", "answer": cand if cand else answer}
 
 
+def _should_verify(ctx: "DelegationContext") -> bool:
+    """Points-gated: only >=500pt questions get a Verifier pass."""
+    return ctx.current_points >= 500
+
+
 def parse_verifier_verdict(text: str) -> dict:
     """Parse a Verifier worker's prove-or-refute output.
     Inconclusive defaults to 'confirmed' so verification never blocks a pipeline
@@ -216,6 +221,7 @@ class SHState(TypedDict):
     final_answer: str                            # populated when done
     done:         bool
     needs_replan: bool                           # True -> route joiner back to planner
+    verified:     bool                           # True once the verifier pass has run
 
 
 class DelegationContext:
@@ -276,6 +282,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 "final_answer": answer,
                 "done":         True,
                 "needs_replan": False,
+                "verified":     False,
             }
 
         tasks = parse_plan(plan_text)
@@ -301,6 +308,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             "final_answer": "",
             "done":         False,
             "needs_replan": False,
+            "verified":     False,
         }
 
     # ── Executor ──────────────────────────────────────────────────────────────
@@ -468,6 +476,69 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             "done":         True,
         }
 
+    # ── Verifier (>=500pt prove-or-refute pass, runs at most once per question) ─
+    def verifier_node(state: SHState) -> dict:
+        answer = state.get("final_answer", "")
+        qtext  = next((m.content for m in state["messages"]
+                       if isinstance(m, HumanMessage)), "")
+
+        verify_subq = (
+            f"{VERIFIER_SYSTEM_PROMPT}\n\n"
+            f"Original question: {qtext}\n"
+            f"Candidate answer to verify: {answer}"
+        )
+
+        worker_idx      = ctx.logger.next_worker("senior", ctx.current_qid)
+        parent_run_tree = get_current_run_tree()
+        print(f"\n[SH -> VERIFIER #{worker_idx}]  candidate={answer!r}")
+        try:
+            result = _run_senior(ctx, verify_subq, worker_idx, parent_run_tree)
+        except Exception as exc:
+            print(f"[SH VERIFIER] worker crashed: {exc} — keeping original answer")
+            return {"verified": True, "done": True}
+
+        verdict = parse_verifier_verdict(result.get("answer", ""))
+        print(f"[SH VERIFIER OUTPUT] verdict={verdict['verdict']} "
+              f"correction={verdict.get('correction')!r}")
+
+        record = {
+            "worker":      f"senior#{worker_idx}",
+            "qid":         ctx.current_qid,
+            "subquestion": verify_subq,
+            "status":      result.get("status", "?"),
+            "answer":      result.get("answer", ""),
+            "spl_used":    result.get("spl_used", []),
+            "sourcetypes": result.get("sourcetypes", []),
+            "full_state":  result.get("full_state", []),
+            "iterations":  result.get("iterations", 0),
+            "cap_hit":     result.get("cap_hit", False),
+        }
+        ctx.q_delegations.append(record)
+        ctx.all_delegations.append(record)
+        ctx.logger.timeline(
+            f"- **Verifier #{worker_idx}**  _[{verdict['verdict']}]_\n"
+            f"    - candidate: {answer}\n"
+            f"    - result: {(result.get('answer') or '').strip()[:400]}"
+        )
+
+        if verdict["verdict"] == "refuted" and verdict.get("correction"):
+            task_results = dict(state.get("task_results") or {})
+            combined = dict(task_results)
+            combined["verifier"] = result
+            if is_grounded(verdict["correction"], combined, qtext):
+                print(f"[SH VERIFIER] REFUTED — replacing answer "
+                      f"{answer!r} -> {verdict['correction']!r}")
+                return {"final_answer": verdict["correction"], "verified": True,
+                        "done": True}
+            print("[SH VERIFIER] REFUTED but correction not grounded — "
+                  "keeping original answer")
+            return {"verified": True, "done": True}
+
+        # confirmed, or refuted with no usable correction — keep original answer.
+        # No replan branch here: verification runs at most once per question so
+        # the joiner<->verifier loop always terminates.
+        return {"verified": True, "done": True}
+
     # ── Graph wiring ──────────────────────────────────────────────────────────
     def route_planner(state: SHState) -> str:
         return END if state.get("done") else "executor"
@@ -475,7 +546,11 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     def route_joiner(state: SHState) -> str:
         if state.get("needs_replan"):
             return "planner"
-        if state.get("done") or state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
+        if state.get("done"):
+            if _should_verify(ctx) and not state.get("verified"):
+                return "verifier"
+            return END
+        if state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
             return END
         if state.get("tasks"):      # replan set new tasks
             return "executor"
@@ -485,12 +560,15 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     g.add_node("planner",  planner_node)
     g.add_node("executor", executor_node)
     g.add_node("joiner",   joiner_node)
+    g.add_node("verifier", verifier_node)
     g.set_entry_point("planner")
     g.add_conditional_edges("planner",  route_planner,
                             {"executor": "executor", END: END})
     g.add_edge("executor", "joiner")
     g.add_conditional_edges("joiner",   route_joiner,
-                            {"executor": "executor", "planner": "planner", END: END})
+                            {"executor": "executor", "planner": "planner",
+                             "verifier": "verifier", END: END})
+    g.add_edge("verifier", END)
 
     if checkpoint_db_path:
         conn = sqlite3.connect(checkpoint_db_path, check_same_thread=False)
@@ -542,6 +620,8 @@ def run_sh(graph, message: str, thread_id: str,
             "plan_round":   0,
             "final_answer": "",
             "done":         False,
+            "needs_replan": False,
+            "verified":     False,
         },
         config=config,
     )
