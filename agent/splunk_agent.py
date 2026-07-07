@@ -353,7 +353,7 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
 
 def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
-                 extra_instructions: str = ""):
+                 extra_instructions: str = "", extra_tools: list | None = None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -367,8 +367,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                             base URL to run a Llama worker through the same code path.
         extra_instructions: appended to SYSTEM_PROMPT — used by the v1 worker pool to
                             inject the ESCALATE protocol without altering v0 behaviour.
+        extra_tools:        additional LangChain tools appended after the Splunk tool
+                            set — used by the v1 worker pool to give workers the
+                            keyless `web_lookup` tool without changing v0's tool list.
     """
     tools    = make_tools(splunk)
+    if extra_tools:
+        tools = tools + list(extra_tools)
     tool_map = {t.name: t for t in tools}
 
     # OpenAI's newer models require `max_completion_tokens`; NIM / open-source models

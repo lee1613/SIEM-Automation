@@ -21,6 +21,7 @@ import uuid
 
 import splunk_agent as agent_mod
 from splunk_agent import MAX_ITER
+from web_tool import web_lookup
 
 
 ESCALATE_INSTRUCTIONS = (
@@ -38,7 +39,10 @@ ESCALATE_INSTRUCTIONS = (
     "3. ESCALATE — you found nothing useful after thorough investigation:\n"
     "   ESCALATE: <exactly what you searched, what was missing, how to narrow the task>\n"
     "   Only use this as a last resort — first try alternative sourcetypes and keywords.\n\n"
-    "NEVER guess a FINAL ANSWER you are not confident in. If in doubt, use PARTIAL ANSWER."
+    "NEVER guess a FINAL ANSWER you are not confident in. If in doubt, use PARTIAL ANSWER.\n\n"
+    "A `web_lookup` tool is available for facts NOT in the Splunk dataset (e.g. a "
+    "vendor's published threat severity/date, or which CVE matches a technique) — "
+    "use it only for external knowledge, not for anything answerable from BOTSv3 data."
 )
 
 
@@ -104,6 +108,7 @@ class SplunkWorkerPool:
             senior_api_key, splunk,
             model=senior_model, base_url=senior_base_url,
             extra_instructions=ESCALATE_INSTRUCTIONS,
+            extra_tools=[web_lookup],
         )
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int) -> dict:
