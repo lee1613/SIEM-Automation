@@ -29,6 +29,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 
+from grounding import is_grounded, best_candidate
+
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
@@ -105,7 +107,14 @@ RULES:
 - NEVER invent dataset facts. If workers found nothing after thorough investigation, write
   FINAL ANSWER with your best-effort estimate from memory.
 - The FINAL ANSWER line is read by an extractor — give the exact value in the required
-  format, nothing else on that line."""
+  format, nothing else on that line.
+
+GROUNDING RULE — CRITICAL:
+- Your FINAL ANSWER must be a value that literally appears in one of the task
+  results above (or the question). Never invent, guess, or synthesize a value
+  no worker reported. If the tasks did not produce the needed value, prefer a
+  focused REPLAN. If you must answer without it, use the closest value a worker
+  actually reported, not a plausible-sounding fabrication."""
 
 
 @dataclass
@@ -130,6 +139,26 @@ def parse_plan(text: str) -> list[Task]:
     return tasks
 
 
+def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
+                         *, plan_round: int, max_rounds: int) -> dict:
+    """Grounding gate for the joiner's FINAL ANSWER.
+
+    - grounded            -> keep it ('final')
+    - ungrounded, rounds  -> 'replan' with a pointed reason
+    - ungrounded, no rnds -> fall back to best worker candidate, else keep
+    """
+    if is_grounded(answer, task_results, question_text):
+        return {"action": "final", "answer": answer}
+    if plan_round < max_rounds:
+        return {"action": "replan",
+                "reason": (f"Your proposed answer {answer!r} was NOT found in any "
+                           f"task result or the question. Either run a task that "
+                           f"produces it as an exact value, or choose a value that "
+                           f"DOES appear in the evidence.")}
+    cand = best_candidate(task_results)
+    return {"action": "final", "answer": cand if cand else answer}
+
+
 def substitute_deps(subquestion: str, completed: dict) -> str:
     """Replace $N references with a brief summary of task N's result."""
     def _replace(m):
@@ -149,6 +178,7 @@ class SHState(TypedDict):
     plan_round:   int                            # 1-based cycle counter (reset per Q)
     final_answer: str                            # populated when done
     done:         bool
+    needs_replan: bool                           # True -> route joiner back to planner
 
 
 class DelegationContext:
@@ -206,6 +236,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 "plan_round":   round_n,
                 "final_answer": answer,
                 "done":         True,
+                "needs_replan": False,
             }
 
         tasks = parse_plan(plan_text)
@@ -230,6 +261,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             "plan_round":   round_n,
             "final_answer": "",
             "done":         False,
+            "needs_replan": False,
         }
 
     # ── Executor ──────────────────────────────────────────────────────────────
@@ -340,11 +372,34 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         fa_m = re.search(r'FINAL ANSWER:\s*(.+)', jtext, re.IGNORECASE | re.DOTALL)
         if fa_m:
             answer = fa_m.group(1).strip().split('\n')[0].strip()
+            qtext = next((m.content for m in state["messages"]
+                          if isinstance(m, HumanMessage)), "")
+            decision = decide_joiner_answer(
+                answer, task_results, qtext,
+                plan_round=plan_round, max_rounds=MAX_PLAN_ROUNDS)
+            if decision["action"] == "replan":
+                print(f"[SH JOINER] grounding check FAILED for {answer!r} — "
+                      f"forcing replan (round {plan_round} → {plan_round + 1})")
+                replan_hm = HumanMessage(content=(
+                    "GROUNDING CHECK FAILED. " + decision["reason"] +
+                    "\nProduce a REPLAN with 1-2 targeted tasks, or a corrected "
+                    "FINAL ANSWER that is present in the evidence."))
+                return {
+                    "messages":     [joiner_hm, response, replan_hm],
+                    "plan_text":    jtext,
+                    "tasks":        [],
+                    "task_results": task_results,
+                    "plan_round":   plan_round + 1,
+                    "done":         False,
+                    "needs_replan": True,
+                }
+            answer = decision["answer"]
             return {
                 "messages":     [joiner_hm, response],
                 "plan_text":    jtext,
                 "final_answer": answer,
                 "done":         True,
+                "needs_replan": False,
             }
 
         # Option B — REPLAN (only if rounds remain)
@@ -379,6 +434,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         return END if state.get("done") else "executor"
 
     def route_joiner(state: SHState) -> str:
+        if state.get("needs_replan"):
+            return "planner"
         if state.get("done") or state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
             return END
         if state.get("tasks"):      # replan set new tasks
@@ -394,7 +451,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                             {"executor": "executor", END: END})
     g.add_edge("executor", "joiner")
     g.add_conditional_edges("joiner",   route_joiner,
-                            {"executor": "executor", END: END})
+                            {"executor": "executor", "planner": "planner", END: END})
 
     if checkpoint_db_path:
         conn = sqlite3.connect(checkpoint_db_path, check_same_thread=False)
