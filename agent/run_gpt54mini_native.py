@@ -391,11 +391,21 @@ def main():
         else:
             print(f"Warning: --start={args.start!r} not found; starting from beginning.")
 
+    # Fixed filenames: preload any existing results so a resume appends instead
+    # of clobbering Q1..Qn, and append to the log instead of truncating it.
     results      = []
     total_points = 0
     earned_pts   = 0
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as jf:
+            results = json.load(jf).get("results", [])
+        total_points = sum(r.get("base_points", 0) for r in results)
+        earned_pts   = sum(r.get("earned", 0) for r in results)
+        print(f"Resuming: {len(results)} prior result(s) loaded from {json_path}")
+    done_ids = {r["id"] for r in results}
+    log_mode = "a" if results else "w"
 
-    with open(log_path, "w", encoding="utf-8", errors="replace") as log_file:
+    with open(log_path, log_mode, encoding="utf-8", errors="replace") as log_file:
         with Tee(sys.__stdout__, log_file):
             limit_label = str(args.limit) if args.limit else "all"
             print(f"GPT-4.5-mini Native (No LangGraph) — {timestamp}")
@@ -411,7 +421,7 @@ def main():
                 level  = q.get("level", "?")
                 cat    = q.get("category", "")
 
-                if idx < start_idx:
+                if idx < start_idx or qid in done_ids:
                     continue
                 if args.limit is not None and (idx - start_idx) >= args.limit:
                     break

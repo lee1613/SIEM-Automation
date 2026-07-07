@@ -118,8 +118,9 @@ class Task:
 def parse_plan(text: str) -> list[Task]:
     """Extract numbered tasks from planner/replan output."""
     tasks = []
+    # \s* prefix: the joiner's REPLAN template indents tasks by two spaces
     pattern = re.compile(
-        r'^(\d+)\.\s+(.+?)(?=^\d+\.|\Z)',
+        r'^\s*(\d+)\.\s+(.+?)(?=^\s*\d+\.|\Z)',
         re.MULTILINE | re.DOTALL,
     )
     for m in pattern.finditer(text):
@@ -127,14 +128,21 @@ def parse_plan(text: str) -> list[Task]:
         subq = m.group(2).strip()
         deps = sorted(set(int(d) for d in re.findall(r'\$(\d+)', subq)))
         tasks.append(Task(idx=idx, subquestion=subq, deps=deps))
+    # Drop $N refs that don't correspond to a real task (e.g. literal dollar
+    # amounts like "$40" in the subquestion text).
+    valid_idx = {t.idx for t in tasks}
+    for t in tasks:
+        t.deps = [d for d in t.deps if d in valid_idx and d != t.idx]
     return tasks
 
 
 def substitute_deps(subquestion: str, completed: dict) -> str:
     """Replace $N references with a brief summary of task N's result."""
     def _replace(m):
-        n      = int(m.group(1))
-        result = completed.get(n, {})
+        n = int(m.group(1))
+        if n not in completed:
+            return m.group(0)   # not a task ref (e.g. a dollar amount) — leave as-is
+        result = completed[n]
         answer = (result.get("answer") or "(no result)").strip()[:400]
         status = result.get("status", "?")
         return f"[Task-{n} ({status}): {answer}]"

@@ -13,6 +13,7 @@ Test runs  go to  log/temp/<timestamp>/  and are never versioned.
 """
 
 import os
+import re
 import datetime
 
 
@@ -51,6 +52,18 @@ class RunLogger:
 
         self.timeline_path = os.path.join(self.run_dir, "timeline.md")
         self._counters     = {"senior": 0, "junior": 0}
+        if append and os.path.exists(self.timeline_path):
+            # Resume worker numbering where the prior segment left off so
+            # timeline/LangSmith labels stay unique within the run.
+            try:
+                with open(self.timeline_path, "r", encoding="utf-8") as f:
+                    prior = f.read()
+                for role, pat in (("senior", r"Senior #(\d+)"), ("junior", r"Junior #(\d+)")):
+                    hits = [int(n) for n in re.findall(pat, prior)]
+                    if hits:
+                        self._counters[role] = max(hits)
+            except Exception:
+                pass
 
         if not append:
             with open(self.timeline_path, "w", encoding="utf-8") as f:

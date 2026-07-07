@@ -28,8 +28,12 @@ def load_manifest() -> dict:
 
 
 def save_manifest(manifest: dict) -> None:
-    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+    # tmp + rename: a mid-write kill must not leave a truncated manifest
+    # (every agent run depends on this file parsing).
+    tmp = MANIFEST_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
+    os.replace(tmp, MANIFEST_PATH)
 
 
 def main():

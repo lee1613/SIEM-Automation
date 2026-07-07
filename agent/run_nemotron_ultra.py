@@ -21,10 +21,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 MODEL = "moonshotai/kimi-k2.6"
 
 import splunk_agent as agent_mod
-agent_mod.MODEL = MODEL
-
 import run_all
-run_all.MODEL = MODEL
 
 # Override result filenames to nemotron_ultra_v0.*
 import datetime
@@ -65,7 +62,11 @@ def _patched_main():
     print("Connected.\n")
 
     print("Building LangGraph agent ...")
-    graph, _ = agent_mod.create_agent(NIM_API_KEY, splunk)
+    # model/base_url must be passed explicitly — create_agent's defaults are
+    # bound at import time, so patching agent_mod.MODEL was a silent no-op
+    # (the run would have hit api.openai.com with gpt-5.4 and a NIM key).
+    graph, _ = agent_mod.create_agent(NIM_API_KEY, splunk,
+                                      model=MODEL, base_url=run_all.NIM_BASE_URL)
     run_thread_id = f"nemotron_ultra_v0_{timestamp}"
     print(f"Agent ready  [thread: {run_thread_id}]\n")
 
@@ -79,11 +80,21 @@ def _patched_main():
         else:
             print(f"Warning: --start={args.start!r} not found.")
 
+    # Fixed filenames: preload any existing results so a resume appends instead
+    # of clobbering Q1..Qn, and append to the log instead of truncating it.
     results      = []
     total_points = 0
     earned_pts   = 0
+    if _os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as jf:
+            results = json.load(jf).get("results", [])
+        total_points = sum(r.get("base_points", 0) for r in results)
+        earned_pts   = sum(r.get("earned", 0) for r in results)
+        print(f"Resuming: {len(results)} prior result(s) loaded from {json_path}")
+    done_ids = {r["id"] for r in results}
+    log_mode = "a" if results else "w"
 
-    with open(log_path, "w", encoding="utf-8", errors="replace") as log_file:
+    with open(log_path, log_mode, encoding="utf-8", errors="replace") as log_file:
         tee = run_all.Tee(sys.__stdout__, log_file)
         with tee:
             limit_label = str(args.limit) if args.limit else "all"
@@ -100,7 +111,7 @@ def _patched_main():
                 level  = q.get("level", "?")
                 cat    = q.get("category", "")
 
-                if idx < start_idx:
+                if idx < start_idx or qid in done_ids:
                     continue
                 if args.limit is not None and (idx - start_idx) >= args.limit:
                     break
@@ -126,8 +137,12 @@ def _patched_main():
                 print(f"\n{'-'*40}")
                 print(f"[AGENT VERBOSE ANSWER]\n{agent_answer}")
 
-                guidance     = q.get("answer_guidance", "") or ""
-                clean_answer = run_all.extract_clean_answer(nim_client, qtext, guidance, agent_answer)
+                guidance = q.get("answer_guidance", "") or ""
+                try:
+                    clean_answer = run_all.extract_clean_answer(nim_client, qtext, guidance, agent_answer)
+                except Exception as ex_err:
+                    print(f"  [extractor error: {ex_err}] — submitting raw agent answer")
+                    clean_answer = agent_answer.strip()
                 print(f"\n[EXTRACTED ANSWER FOR SCOREBOARD]\n{clean_answer}")
                 print("-" * 40)
 

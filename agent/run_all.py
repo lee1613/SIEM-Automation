@@ -86,11 +86,16 @@ class Tee:
         self.file    = file_stream
 
     def write(self, data):
-        # Write to file (UTF-8, never fails)
+        # Write to file; warn once on failure so a dead log file isn't silent
         try:
             self.file.write(data)
         except Exception:
-            pass
+            if not getattr(self, "_file_warned", False):
+                self._file_warned = True
+                try:
+                    self.console.write("\n[Tee] log-file write failed — transcript no longer being saved\n")
+                except Exception:
+                    pass
         # Write to console: replace characters unsupported by the terminal encoding
         try:
             enc = getattr(self.console, "encoding", "utf-8") or "utf-8"
@@ -182,7 +187,9 @@ def main():
 
     # LangGraph agent — single graph + MemorySaver shared across all questions
     print("Building LangGraph agent ...")
-    graph, _   = agent_mod.create_agent(OPENAI_API_KEY, splunk)
+    # Pass model explicitly: create_agent's default is bound at import time, so
+    # runner-level MODEL overrides (run_gpt5*_temp.py) only work via this kwarg.
+    graph, _   = agent_mod.create_agent(OPENAI_API_KEY, splunk, model=MODEL)
     # Single thread per run: the model accumulates context across all 58 questions
     run_thread_id = f"botsv3_run_{timestamp}"
     print(f"Agent ready  [thread: {run_thread_id}]\n")
@@ -249,11 +256,17 @@ def main():
                 print(f"\n{'-'*40}")
                 print(f"[AGENT VERBOSE ANSWER]\n{agent_answer}")
 
-                # Extract a clean bare answer for scoreboard submission
+                # Extract a clean bare answer for scoreboard submission.
+                # Wrapped: a single NIM 504 must not kill the run after the
+                # (expensive) agent answer has already been computed.
                 guidance = q.get("answer_guidance", "") or ""
-                clean_answer = extract_clean_answer(
-                    nim_client, qtext, guidance, agent_answer
-                )
+                try:
+                    clean_answer = extract_clean_answer(
+                        nim_client, qtext, guidance, agent_answer
+                    )
+                except Exception as ex_err:
+                    print(f"  [extractor error: {ex_err}] — submitting raw agent answer")
+                    clean_answer = agent_answer.strip()
                 print(f"\n[EXTRACTED ANSWER FOR SCOREBOARD]\n{clean_answer}")
                 print("-" * 40)
 
@@ -312,16 +325,21 @@ def main():
             attempted  = len(results)
 
             # Read authoritative total from the Splunk scoreboard index
-            live_score = scoreboard.get_score()
-            live_pts   = live_score.get("total_points", earned_pts)
+            try:
+                live_score = scoreboard.get_score()
+                live_pts   = live_score.get("total_points", earned_pts)
+            except Exception as sc_err:
+                print(f"  [scoreboard get_score failed: {sc_err}]")
+                live_pts = earned_pts
 
             print(f"\n{'='*80}")
             print(f"FINAL SCOREBOARD -- {timestamp}")
             print(f"{'='*80}")
             print(f"  Questions attempted  : {attempted}")
-            print(f"  Correct (scoreboard) : {correct_n}  ({correct_n/attempted*100:.1f}%)")
-            print(f"  Wrong               : {wrong_n}  ({wrong_n/attempted*100:.1f}%)")
-            print(f"  Points (this run)   : {earned_pts} / {total_points}  ({earned_pts/max(total_points,1)*100:.1f}%)")
+            if attempted:
+                print(f"  Correct (scoreboard) : {correct_n}  ({correct_n/attempted*100:.1f}%)")
+                print(f"  Wrong               : {wrong_n}  ({wrong_n/attempted*100:.1f}%)")
+                print(f"  Points (this run)   : {earned_pts} / {total_points}  ({earned_pts/max(total_points,1)*100:.1f}%)")
             print(f"  Points (scoreboard) : {live_pts}  (cumulative, all runs)")
             print(f"\n  Scoreboard UI : http://localhost:8000/en-US/app/SA-ctf_scoreboard/")
             print(f"  Results JSON  : {json_path}")

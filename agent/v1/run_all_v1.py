@@ -118,6 +118,12 @@ def main():
         id_filter = {s.strip() for s in args.ids.split(",") if s.strip()}
     full_run = (id_filter is None) and (args.limit is None)
 
+    # --start on a full run without --run-name would allocate a NEW run_1.x dir,
+    # stranding the prior segment's results, checkpoints, and SH memory.
+    if full_run and args.start and not args.run_name:
+        sys.exit("--start on a full run requires --run-name <existing run dir> "
+                 "so the resumed segment lands in the same run (e.g. --run-name run_1.2).")
+
     selected = []
     started  = args.start is None
     for q in questions:
@@ -191,8 +197,14 @@ def main():
         print(f"Resuming {logger.run_name}: {len(results)} question(s) already "
               f"recorded, {earned_pts}/{total_points} pts so far.")
 
+    # Never re-run (and double-count) a question already recorded in this run dir.
+    done_ids = {r["id"] for r in results}
+
     for q in selected:
         qid      = q["id"]
+        if qid in done_ids:
+            print(f"[{qid}] already recorded in {logger.run_name} — skipping.")
+            continue
         qtext    = q["question"]
         points   = q.get("base_points", 0)
         guidance = q.get("answer_guidance", "") or ""
@@ -259,8 +271,6 @@ def main():
             "clean_answer":     clean,
             "sb_correct":       sb_correct,
             "earned":           pts_earned,
-            "extractor_valid":  ext["valid"],
-            "extractor_reason": ext["reason"],
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
         })

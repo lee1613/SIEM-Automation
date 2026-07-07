@@ -24,6 +24,7 @@ import re
 import sys
 import json
 import textwrap
+import threading
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
@@ -50,13 +51,20 @@ MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 # ── Field manifest helpers ─────────────────────────────────────────────────────
 
+# Parallel Senior workers share this manifest file; the lock serialises
+# read-modify-write cycles and the tmp+rename keeps readers from ever seeing
+# a half-written file.
+_MANIFEST_LOCK = threading.Lock()
+
 def _load_manifest() -> dict:
     with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def _save_manifest(manifest: dict) -> None:
-    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+    tmp = MANIFEST_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
+    os.replace(tmp, MANIFEST_PATH)
 
 def _manifest_get_source_types() -> str:
     manifest = _load_manifest()
@@ -64,14 +72,15 @@ def _manifest_get_source_types() -> str:
     return json.dumps({"source_types": source_types, "count": len(source_types)})
 
 def _manifest_expand(sourcetype: str, fields: list) -> None:
-    manifest = _load_manifest()
-    source_types = manifest.setdefault("source_types", {})
-    entry = source_types.setdefault(sourcetype, {"fields": []})
-    existing = set(entry.get("fields", []))
-    new_fields = [f for f in fields if f not in existing]
-    if new_fields:
-        entry["fields"].extend(new_fields)
-        _save_manifest(manifest)
+    with _MANIFEST_LOCK:
+        manifest = _load_manifest()
+        source_types = manifest.setdefault("source_types", {})
+        entry = source_types.setdefault(sourcetype, {"fields": []})
+        existing = set(entry.get("fields", []))
+        new_fields = [f for f in fields if f not in existing]
+        if new_fields:
+            entry["fields"].extend(new_fields)
+            _save_manifest(manifest)
 
 def _search_keyword_in_manifest(keyword: str) -> list:
     """Return [{sourcetype, field}] for every field containing keyword.
@@ -107,7 +116,15 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
         ]
         payload = json.dumps({"results": cleaned, "meta": result.get("_meta", {})})
         if len(payload) > 12_000:
-            payload = payload[:12_000] + '... [truncated — use a more specific query]"}'
+            # Drop whole rows so the payload stays valid JSON (a raw byte slice
+            # breaks both the model's evidence and the error/empty dedup guard).
+            meta = dict(result.get("_meta", {}))
+            kept = list(cleaned)
+            while kept and len(payload) > 12_000:
+                kept = kept[:max(len(kept) // 2, 0)] if len(kept) > 1 else []
+                meta["truncated"] = (f"showing {len(kept)} of {len(cleaned)} rows — "
+                                     "use a more specific query")
+                payload = json.dumps({"results": kept, "meta": meta})
         return payload
     return json.dumps(result)
 
@@ -143,6 +160,9 @@ def make_tools(splunk: SplunkClient) -> list:
         matches = _search_keyword_in_manifest(keyword)
         if matches:
             return json.dumps({"matches": matches, "count": len(matches), "source": "manifest"})
+        # Strip quotes/pipes so a model-supplied keyword can't break out of the
+        # SPL term and inject pipeline stages.
+        keyword = re.sub(r'["|]', " ", keyword).strip()
         query = (
             f"index=botsv3 *{keyword}* | fields sourcetype *{keyword}*"
             f" | untable sourcetype field_name field_value"
@@ -302,19 +322,31 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
             "Add an aggregation command before submitting."
         )
 
-    # 5. Sourcetype must be present and in the manifest
+    # 5. Sourcetype must be present and in the manifest.
+    #    Accept both sourcetype=<value> and sourcetype IN (v1, v2, ...) — the
+    #    system prompt itself recommends IN for multiple literal values.
+    known = _known_sourcetypes()
+    in_match = re.search(r'sourcetype\s+IN\s*\(([^)]*)\)', query, re.IGNORECASE)
     st_match = re.search(r'sourcetype\s*=\s*"?([^\s",|)]+)', query, re.IGNORECASE)
-    if not st_match:
+    if in_match:
+        sts = [v.strip().strip('"\'') for v in in_match.group(1).split(",") if v.strip()]
+        unknown = [s for s in sts if s not in known]
+        if not sts or unknown:
+            return (
+                f"Rejected: sourcetype(s) {unknown or ['<empty>']} not in the field manifest. "
+                f"Call get_source_types to see valid sourcetypes, then adjust the query."
+            )
+    elif st_match:
+        st = st_match.group(1).strip('"\'')
+        if st not in known:
+            return (
+                f"Rejected: sourcetype '{st}' is not in the field manifest. "
+                f"Call get_source_types to see valid sourcetypes, then adjust the query."
+            )
+    else:
         return (
             "Rejected: every run_splunk_search query must include a sourcetype filter. "
             "Call get_source_types to find the right sourcetype, then add sourcetype=<value> to the query."
-        )
-    st = st_match.group(1).strip('"\'')
-    known = _known_sourcetypes()
-    if st not in known:
-        return (
-            f"Rejected: sourcetype '{st}' is not in the field manifest. "
-            f"Call get_source_types to see valid sourcetypes, then adjust the query."
         )
 
     # 6. No leading wildcards (=*word forces sequential scan)

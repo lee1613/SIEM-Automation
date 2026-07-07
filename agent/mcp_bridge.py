@@ -22,12 +22,14 @@ def main():
     session.verify = False 
     
     # Standard MCP stdio loop
+    request = None
     while True:
         try:
             line = sys.stdin.readline()
             if not line:
                 break
-            
+
+            request = None
             try:
                 request = json.loads(line)
             except json.JSONDecodeError:
@@ -45,8 +47,10 @@ def main():
                 )
                 
                 if resp.status_code == 200:
-                    # The Splunk persistent handler returns the JSON-RPC response directly
-                    print(json.dumps(resp.json()), flush=True)
+                    # The Splunk persistent handler returns the JSON-RPC response directly.
+                    # Notifications (no id) must not receive a reply per JSON-RPC.
+                    if "id" in request:
+                        print(json.dumps(resp.json()), flush=True)
                 else:
                     error_msg = f"Splunk error {resp.status_code}"
                     try:
@@ -79,9 +83,12 @@ def main():
         except EOFError:
             break
         except Exception as e:
+            # Keep the request id so the client can correlate the error
+            # instead of hanging its pending request until timeout.
+            rid = request.get("id") if isinstance(request, dict) else None
             error_resp = {
                 "jsonrpc": "2.0",
-                "id": None,
+                "id": rid,
                 "error": {
                     "code": -32603,
                     "message": f"Unexpected bridge error: {str(e)}"

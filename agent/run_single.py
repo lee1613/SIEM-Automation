@@ -45,7 +45,12 @@ class Tee:
         try:
             self.file.write(data)
         except Exception:
-            pass
+            if not getattr(self, "_file_warned", False):
+                self._file_warned = True
+                try:
+                    self.console.write("\n[Tee] log-file write failed — transcript no longer being saved\n")
+                except Exception:
+                    pass
         try:
             enc  = getattr(self.console, "encoding", "utf-8") or "utf-8"
             safe = data.encode(enc, errors="replace").decode(enc)
@@ -109,7 +114,13 @@ def main():
     log_path = os.path.join(RESULTS_DIR, log_name)
 
     splunk = SplunkClient(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS)
-    graph, checkpointer = agent_mod.create_agent(NIM_API_KEY, splunk)
+    # NIM key requires the NIM endpoint + a NIM-served model; without these
+    # kwargs create_agent defaults to gpt-5.4 on api.openai.com -> 401.
+    graph, checkpointer = agent_mod.create_agent(
+        NIM_API_KEY, splunk,
+        model="meta/llama-3.3-70b-instruct",
+        base_url="https://integrate.api.nvidia.com/v1",
+    )
     thread_id = f"q{q_num}_v{version}"
 
     config = {

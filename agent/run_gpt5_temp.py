@@ -17,13 +17,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 if not OPENAI_API_KEY:
     sys.exit("OPENAI_API_KEY not set in .env")
 
-# Patch splunk_agent to use GPT-5.4 via OpenAI before anything imports it
-import splunk_agent as agent_mod
-agent_mod.NIM_BASE_URL = "https://api.openai.com/v1"
-agent_mod.NIM_API_KEY  = OPENAI_API_KEY
-agent_mod.MODEL        = "gpt-5.4"
-
-# Now import run_all and patch its constants too
+# Patch run_all's constants (read at main() runtime). Patching splunk_agent
+# globals was a no-op — create_agent's defaults bind at import time, so the
+# model must flow through run_all.MODEL -> create_agent(model=...).
 import run_all
 run_all.NIM_BASE_URL = "https://api.openai.com/v1"
 run_all.NIM_API_KEY  = OPENAI_API_KEY
