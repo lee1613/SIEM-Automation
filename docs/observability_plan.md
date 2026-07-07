@@ -40,9 +40,14 @@
 2. Status mislabeling — delegations marked `solved` with transcripts ending mid-tool-call and no
    answer (confirmed Q330). Aggregate "70% solved" is not trustworthy.
 3. ~30-min periodic process kills during run_1.1 (7 resumes at near-exact half-hour marks).
-   Likely environmental (OneDrive sync locking `sh_checkpoints.sqlite`/log files, or power
-   policy). Runs live inside a OneDrive-synced tree — move `log/` + checkpoint DB to a local
-   non-synced path (e.g. `%LOCALAPPDATA%\siem-runs\`, symlink or config) or exclude from sync.
+   **ROOT CAUSE FOUND (2026-07-07): Windows console `charmap`/cp1252 `UnicodeEncodeError`.**
+   The runner prints Unicode (`→`, em-dashes) via `print()`; on this host's cp1252 console
+   those prints raise `UnicodeEncodeError` and kill the process mid-run. Confirmed by test:
+   `"SH FINAL → extractor".encode("cp1252")` raises. **Fixed** (commit `c64cfaf`) by
+   `force_utf8_stdio()` reconfiguring stdout/stderr to UTF-8 at `main()` startup. The earlier
+   "OneDrive sync locking" hypothesis was wrong. `SIEM_LOG_ROOT` (Task 3 of the observability
+   foundation) is still worth keeping to move the checkpoint DB off the synced tree, but it was
+   not the crash cause.
 
 ## 2. Design principles
 
