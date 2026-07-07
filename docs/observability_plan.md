@@ -132,10 +132,12 @@ lose them.
 - Optional `report.html` single-file dashboard later (P2).
 
 ### P2 — nice to have
-- Live tail: `python make_report.py --watch` printing question verdict/cost/latency as the run
-  progresses.
-- Cross-run comparison view (`compare.py run_1.1 run_1.2`): per-question verdict flips
-  (fixes/regressions), cost & latency deltas — exactly the table the version docs require.
+- [x] ~~Live tail: `python make_report.py --watch` printing question verdict/cost/latency as the run
+  progresses.~~ Done — `agent/v1/make_report.py --watch [interval_s]`, see
+  `docs/version_architecture/v1/v1.2.md` changelog.
+- [x] ~~Cross-run comparison view (`compare.py run_1.1 run_1.2`): per-question verdict flips
+  (fixes/regressions), cost & latency deltas — exactly the table the version docs require.~~
+  Done — `agent/v1/compare.py`, see `docs/version_architecture/v1/v1.2.md` changelog.
 
 ## 4. Effort estimate
 

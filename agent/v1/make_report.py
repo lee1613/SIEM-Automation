@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 
 def load_events(path: str) -> list[dict]:
@@ -97,16 +98,53 @@ def render_report(events: list[dict], metrics: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        sys.exit("usage: python make_report.py <run_dir>")
-    run_dir = sys.argv[1]
+def progress_line(metrics: list[dict]) -> str:
+    """One-line pure summary of current progress, for --watch ticks."""
+    attempted = len(metrics)
+    correct = sum(1 for m in metrics if m.get("verdict") == "correct")
+    earned = sum(m.get("earned", 0) for m in metrics)
+    cost = sum(sum(m.get("cost_by_role", {}).values()) for m in metrics)
+    lats = [m["latency_s"]["total"] for m in metrics if m.get("latency_s")]
+    p50 = _pct(lats, 50)
+    return (f"{correct}/{attempted} correct | {earned} pts | "
+            f"${cost:.4f} | p50 {p50:.0f}s")
+
+
+def _render_once(run_dir: str) -> str:
     events = load_events(os.path.join(run_dir, "events.jsonl"))
     metrics = load_metrics(os.path.join(run_dir, "metrics.json"))
     md = render_report(events, metrics)
     out = os.path.join(run_dir, "report.md")
     with open(out, "w", encoding="utf-8") as f:
         f.write(md)
+    return out
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        sys.exit("usage: python make_report.py <run_dir> [--watch [interval_s]]")
+    run_dir = sys.argv[1]
+
+    if "--watch" in sys.argv:
+        watch_idx = sys.argv.index("--watch")
+        interval = 20
+        if len(sys.argv) > watch_idx + 1:
+            try:
+                interval = int(sys.argv[watch_idx + 1])
+            except ValueError:
+                pass
+        print(f"watching {run_dir} every {interval}s (Ctrl-C to stop)")
+        try:
+            while True:
+                out = _render_once(run_dir)
+                metrics = load_metrics(os.path.join(run_dir, "metrics.json"))
+                print(f"wrote {out} - {progress_line(metrics)}")
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\nstopped watching")
+        return
+
+    out = _render_once(run_dir)
     print(f"wrote {out}")
 
 
