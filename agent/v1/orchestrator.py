@@ -191,13 +191,15 @@ class DelegationContext:
         self.pool   = pool
         self.logger = logger
         self.current_qid        = None
+        self.current_points     = 0
         self.failed_delegations = 0
         self.q_delegations      = []
         self.all_delegations    = []
 
-    def reset_question(self, qid: str) -> None:
-        self.current_qid   = qid
-        self.q_delegations = []
+    def reset_question(self, qid: str, points: int = 0) -> None:
+        self.current_qid    = qid
+        self.current_points = points
+        self.q_delegations  = []
 
 
 def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
@@ -474,7 +476,8 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
     contextvar is still populated) and re-applied here.
     """
     with tracing_context(parent=parent_run_tree):
-        return ctx.pool.run_senior(subquestion, ctx.current_qid, idx)
+        return ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
+                                   points=ctx.current_points)
 
 
 def run_sh(graph, message: str, thread_id: str,

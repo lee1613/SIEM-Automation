@@ -20,8 +20,14 @@ import re
 import uuid
 
 import splunk_agent as agent_mod
-from splunk_agent import MAX_ITER
+from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
+
+# Points at/above this threshold get the higher-budget worker graph (see
+# splunk_agent.iter_budget). Kept as a local constant so the pool's graph
+# selection reads standalone; iter_budget is the single source of truth for
+# the actual iteration count.
+HIGH_VALUE_THRESHOLD = 500
 
 
 ESCALATE_INSTRUCTIONS = (
@@ -104,19 +110,36 @@ class SplunkWorkerPool:
         self.splunk  = splunk
         self.tracker = tracker
         self.senior_model = senior_model
+
+        # Two worker graphs built once at init: the base budget (MAX_ITER) for
+        # ordinary questions, and a higher budget (iter_budget(>=500)) for
+        # high-value questions. Both share the same tools/prompt (ESCALATE
+        # protocol + web_lookup) — only max_iter differs.
         self.senior_graph, _ = agent_mod.create_agent(
             senior_api_key, splunk,
             model=senior_model, base_url=senior_base_url,
             extra_instructions=ESCALATE_INSTRUCTIONS,
             extra_tools=[web_lookup],
+            max_iter=MAX_ITER,
+        )
+        self.senior_graph_hi, _ = agent_mod.create_agent(
+            senior_api_key, splunk,
+            model=senior_model, base_url=senior_base_url,
+            extra_instructions=ESCALATE_INSTRUCTIONS,
+            extra_tools=[web_lookup],
+            max_iter=iter_budget(HIGH_VALUE_THRESHOLD),
         )
 
-    def run_senior(self, subquestion: str, parent_qid: str, idx: int) -> dict:
-        return self._run("senior", self.senior_graph, self.senior_model,
-                         subquestion, parent_qid, idx)
+    def run_senior(self, subquestion: str, parent_qid: str, idx: int,
+                   points: int = 0) -> dict:
+        budget = iter_budget(points)
+        graph  = self.senior_graph_hi if points >= HIGH_VALUE_THRESHOLD else self.senior_graph
+        return self._run("senior", graph, self.senior_model,
+                         subquestion, parent_qid, idx, max_iter=budget)
 
     def _run(self, role: str, graph, model: str,
-             subquestion: str, parent_qid: str, idx: int) -> dict:
+             subquestion: str, parent_qid: str, idx: int,
+             max_iter: int = MAX_ITER) -> dict:
         thread_id = f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
         run_name  = f"{role.capitalize()}-{idx}-{parent_qid}"
 
@@ -127,6 +150,7 @@ class SplunkWorkerPool:
                 tags=[role, parent_qid],
                 metadata={"role": role, "qid": parent_qid, "idx": idx},
                 tracker=self.tracker,
+                max_iter=max_iter,
             )
         except Exception as exc:
             answer = f"ESCALATE: worker crashed — {exc}"
@@ -138,7 +162,7 @@ class SplunkWorkerPool:
         status = _classify(answer)
 
         steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
-        cap_hit = steps > MAX_ITER
+        cap_hit = steps > max_iter
 
         return {
             "role":        role,

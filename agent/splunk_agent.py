@@ -48,6 +48,12 @@ MODEL          = "gpt-5.4"
 MAX_ITER       = 15
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
+
+def iter_budget(points: int) -> int:
+    """Iteration cap scaled by question value. High-value (>=500pt) questions
+    get a larger tool-call budget; everything else gets the base MAX_ITER."""
+    return 25 if (points or 0) >= 500 else MAX_ITER
+
 # ── Field manifest helpers ─────────────────────────────────────────────────────
 
 def _load_manifest() -> dict:
@@ -353,7 +359,8 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
 
 def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
-                 extra_instructions: str = "", extra_tools: list | None = None):
+                 extra_instructions: str = "", extra_tools: list | None = None,
+                 max_iter: int = MAX_ITER):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -370,6 +377,11 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         extra_tools:        additional LangChain tools appended after the Splunk tool
                             set — used by the v1 worker pool to give workers the
                             keyless `web_lookup` tool without changing v0's tool list.
+        max_iter:           iteration cap for this graph instance. Defaults to the
+                            module MAX_ITER; the v1 worker pool builds a second,
+                            higher-budget graph (see `iter_budget`) for >=500pt
+                            questions. All in-closure iteration-cap checks use this
+                            local value, not the module constant.
     """
     tools    = make_tools(splunk)
     if extra_tools:
@@ -422,11 +434,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         _print_state("agent_in", state)
         msgs = [system_msg] + list(state["messages"])
 
-        if step > MAX_ITER:
+        if step > max_iter:
             print("[Max iterations reached — forcing final answer]")
             msgs = msgs + [HumanMessage(
-                "You have used the maximum number of tool calls. "
-                "Give your best final answer now based on everything found so far."
+                "You have reached the maximum number of tool calls. Do NOT invent a "
+                "value. Reply with PARTIAL ANSWER: <your best evidence-backed "
+                "candidate>, UNCERTAINTY: <what is unconfirmed>, and the SPL you ran. "
+                "If you have nothing concrete, reply ESCALATE with what you searched."
             )]
             response = model_bare.invoke(msgs)
         else:
@@ -531,7 +545,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
     # ── Routers ────────────────────────────────────────────────────────────────
     def should_continue(state: AgentState) -> str:
         """Route agent output: to verify if tool calls present, else END."""
-        if state.get("step_count", 0) > MAX_ITER:
+        if state.get("step_count", 0) > max_iter:
             return END
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
@@ -589,16 +603,21 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
 
 def run_agent_traced(graph, question: str, thread_id: str = "default",
                      *, run_name: str = "", tags: list | None = None,
-                     metadata: dict | None = None, tracker=None) -> tuple[str, dict]:
+                     metadata: dict | None = None, tracker=None,
+                     max_iter: int = MAX_ITER) -> tuple[str, dict]:
     """Like run_agent but also returns the full final AgentState.
 
     Extra kwargs (run_name, tags, metadata) are forwarded to LangSmith when
     LANGSMITH_TRACING is enabled, making each worker trace identifiable.
     tracker, if provided, receives on_llm_end callbacks for token counting.
+    max_iter must match the iteration cap the graph was built with (see
+    `create_agent(max_iter=...)`/`iter_budget`) so recursion_limit scales too —
+    otherwise a >=500pt worker graph (max_iter=25) would hit LangGraph's
+    recursion ceiling before its own iteration cap fires.
     """
     config = {
         "configurable": {"thread_id": thread_id},
-        "recursion_limit": MAX_ITER * 4,
+        "recursion_limit": max_iter * 4,
     }
     if run_name:
         config["run_name"] = run_name

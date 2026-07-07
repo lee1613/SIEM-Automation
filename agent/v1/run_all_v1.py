@@ -312,7 +312,7 @@ def main():
         correct  = (answers.get(qid, {}) or {}).get("answer", "") or ""
         total_points += points
 
-        ctx.reset_question(qid)
+        ctx.reset_question(qid, points=points)
         tracker.reset_sh_question()
         logger.timeline_question_header(qid, qtext, points)
         print(f"\n{'-'*80}\n[{qid}]  {points} pts  |  {qtext[:90]}")
