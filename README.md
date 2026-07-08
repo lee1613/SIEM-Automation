@@ -20,8 +20,8 @@ This project is designed to build and test a SIEM (Security Information and Even
 
 | File | Purpose |
 |------|---------|
-| `BOTS_V3_SETUP.md` | Complete installation guide for Splunk Enterprise |
-| `DATASET_EXPLORATION_GUIDE.md` | 50+ example queries to understand the dataset |
+| `docs/BOTS_V3_SETUP.md` | Complete installation guide for Splunk Enterprise |
+| `docs/DATASET_EXPLORATION_GUIDE.md` | 50+ example queries to understand the dataset |
 | `botsv3/` | Cloned repository + extracted dataset |
 
 ---
@@ -29,14 +29,14 @@ This project is designed to build and test a SIEM (Security Information and Even
 ## Quick Start
 
 ### 1. Install Splunk Enterprise
-Follow the steps in `BOTS_V3_SETUP.md`:
+Follow the steps in `docs/BOTS_V3_SETUP.md`:
 - Download Splunk Enterprise 7.1.7 (free trial)
 - Install required add-ons
 - Copy the dataset app to `$SPLUNK_HOME/etc/apps/botsv3`
 - Restart Splunk
 
 ### 2. Explore the Data
-Once Splunk is running, open `DATASET_EXPLORATION_GUIDE.md` and run the queries to understand:
+Once Splunk is running, open `docs/DATASET_EXPLORATION_GUIDE.md` and run the queries to understand:
 - Log sources and data types
 - Attack patterns and anomalies
 - Field structures and relationships
@@ -76,8 +76,8 @@ With data understanding, plan your SIEM agent:
 ```
 Project Root
 ├── README.md (this file)
-├── BOTS_V3_SETUP.md (installation guide)
-├── DATASET_EXPLORATION_GUIDE.md (query examples)
+├── docs/BOTS_V3_SETUP.md (installation guide)
+├── docs/DATASET_EXPLORATION_GUIDE.md (query examples)
 └── botsv3/
     ├── README.md (original BOTS V3 docs)
     ├── botsv3_data_set/ (extracted dataset)
@@ -187,8 +187,8 @@ Project Documentation: Open Source
 
 ```bash
 # View setup guides
-cat BOTS_V3_SETUP.md
-cat DATASET_EXPLORATION_GUIDE.md
+cat docs/BOTS_V3_SETUP.md
+cat docs/DATASET_EXPLORATION_GUIDE.md
 
 # Check dataset status
 ls -lh botsv3/botsv3_data_set/
@@ -212,4 +212,4 @@ git commit -m "Add SIEM agent implementation"
 **Dataset Version:** BOTS V3  
 **Status:** Ready for Splunk installation and exploration  
 
-Next: Follow `BOTS_V3_SETUP.md` to install Splunk Enterprise.
+Next: Follow `docs/BOTS_V3_SETUP.md` to install Splunk Enterprise.

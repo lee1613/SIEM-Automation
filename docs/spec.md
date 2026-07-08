@@ -56,6 +56,8 @@ python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
 ├── docs/
 │   ├── spec.md                # this file
 │   ├── observability_plan.md  # instrumentation design (P0-P2 done)
+│   ├── BOTS_V3_SETUP.md       # Splunk install guide
+│   ├── DATASET_EXPLORATION_GUIDE.md / FIELD_AWARENESS_PLAN.md / BOTSV3_QUESTIONS_AND_ANSWERS.md
 │   ├── version_architecture/  # v0/, v1/ — per-version design docs + in-progress changelog
 │   ├── scoreboard_result/     # v0/, v1/ — per-version full-run results
 │   └── superpowers/plans/     # TDD implementation plans
@@ -81,6 +83,7 @@ python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
 │       ├── compare.py         # cross-run fixes/regressions diff
 │       └── tests/             # pytest suite (all green required)
 ├── datasets/                  # botsv3_questions.json / answers.json (answers = reference only)
+├── botsv3/                    # raw BOTSv3 dataset (922M; tgz + extracted app) — data plane source
 ├── botsv3content/             # official CTF CSVs (loaded into KV stores)
 ├── log/                       # v1/run_1.x/ versioned; temp/ unversioned
 └── results/                   # legacy v0 outputs (frozen, archive)
