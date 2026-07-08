@@ -21,7 +21,7 @@ entry toward automated SIEM investigation.
 | Orchestration | LangGraph StateGraph (LLMCompiler pattern: plan → parallel execute → join → replan) |
 | SH (mastermind) | gpt-5.4 (OpenAI) |
 | Senior workers | GLM-5.2-fp8 (Vultr inference) |
-| Extractor | DeepSeek-V4-Flash (Vultr) |
+| Extractor | Qwen3.6-27B, thinking disabled (Vultr; was DeepSeek-V4-Flash — cluster outage 2026-07-08) |
 | Data plane | Splunk Enterprise (localhost:8089), `index=botsv3`, SplunkConnectionPool (6 slots) |
 | Scoring | SA-ctf_scoreboard KV store via `agent/scoreboard_client.py` — exact match, lowercase/strip |
 | Observability | `events.jsonl` + `metrics.json` per run; LangSmith project `botsv3-<run>` |

@@ -23,7 +23,10 @@ except Exception:
         return _wrap if not (len(a) == 1 and callable(a[0])) else a[0]
 
 
-EXTRACT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+EXTRACT_MODEL = "Qwen/Qwen3.6-27B"  # was DeepSeek-V4-Flash; its Vultr cluster went down mid-run_1.2
+# Qwen3.6 is a hybrid-reasoning model: thinking must be disabled or hidden CoT
+# eats the completion budget and content comes back null.
+EXTRACT_EXTRA_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
 EXTRACT_MAX_RETRIES = 5
 EXTRACT_RETRY_BACKOFF = 10.0  # seconds; doubles each retry (10+20+40+80 — rides out ~2.5 min gateway outage)
 
@@ -65,6 +68,7 @@ class Extractor:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1024,  # reasoning models spend budget on hidden chain-of-thought before the answer
             temperature=0,
+            extra_body=EXTRACT_EXTRA_BODY if self.model == EXTRACT_MODEL else None,
         )
 
     def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "",
