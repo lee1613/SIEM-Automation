@@ -34,6 +34,16 @@ from grounding import is_grounded, best_candidate
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
+MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
+                       # (~4-8 msgs/question => ~3-5 prior questions visible).
+                       # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
+
+
+def _window(messages):
+    """Bounded history for SH LLM calls. The persistent thread accumulates every
+    prior question's planner/joiner transcript; replaying all of it into every
+    call scales cost quadratically over the run."""
+    return list(messages)[-MAX_HISTORY_MSGS:]
 
 
 # ── Planner prompt ─────────────────────────────────────────────────────────────
@@ -232,14 +242,16 @@ class DelegationContext:
         self.logger = logger
         self.current_qid        = None
         self.current_points     = 0
+        self.current_question   = ""
         self.failed_delegations = 0
         self.q_delegations      = []
         self.all_delegations    = []
 
-    def reset_question(self, qid: str, points: int = 0) -> None:
-        self.current_qid    = qid
-        self.current_points = points
-        self.q_delegations  = []
+    def reset_question(self, qid: str, points: int = 0, question: str = "") -> None:
+        self.current_qid      = qid
+        self.current_points   = points
+        self.current_question = question
+        self.q_delegations    = []
 
 
 def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
@@ -263,7 +275,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         round_n  = state.get("plan_round", 0) + 1
         print(f"\n[SH PLANNER — round {round_n}]")
 
-        msgs      = [sys_planner] + list(state["messages"])
+        msgs      = [sys_planner] + _window(state["messages"])
         response  = llm.invoke(msgs)
         plan_text = (response.content or "").strip()
         print(f"\n[SH PLAN]\n{plan_text}\n")
@@ -410,7 +422,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         joiner_hm = HumanMessage(content=joiner_msg_text)
 
         print(f"\n[SH JOINER — round {plan_round}]")
-        msgs     = [sys_joiner] + list(state["messages"]) + [joiner_hm]
+        msgs     = [sys_joiner] + _window(state["messages"]) + [joiner_hm]
         response = llm.invoke(msgs)
         jtext    = (response.content or "").strip()
         print(f"\n[SH JOINER OUTPUT]\n{jtext}\n")
@@ -419,8 +431,12 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         fa_m = re.search(r'FINAL ANSWER:\s*(.+)', jtext, re.IGNORECASE | re.DOTALL)
         if fa_m:
             answer = fa_m.group(1).strip().split('\n')[0].strip()
-            qtext = next((m.content for m in state["messages"]
-                          if isinstance(m, HumanMessage)), "")
+            # ctx.current_question, NOT a scan of state["messages"]: the persistent
+            # cross-question thread's first HumanMessage is always the run's first
+            # question, and later HumanMessages are joiner/replan scaffolding.
+            # run_1.2 ground-checked (and verifier-refuted) answers against Q200's
+            # question text because of this.
+            qtext = ctx.current_question
             decision = decide_joiner_answer(
                 answer, task_results, qtext,
                 plan_round=plan_round, max_rounds=MAX_PLAN_ROUNDS)
@@ -479,8 +495,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     # ── Verifier (>=500pt prove-or-refute pass, runs at most once per question) ─
     def verifier_node(state: SHState) -> dict:
         answer = state.get("final_answer", "")
-        qtext  = next((m.content for m in state["messages"]
-                       if isinstance(m, HumanMessage)), "")
+        # ctx.current_question, NOT state["messages"] (see joiner grounding note).
+        qtext  = ctx.current_question
 
         verify_subq = (
             f"{VERIFIER_SYSTEM_PROMPT}\n\n"
