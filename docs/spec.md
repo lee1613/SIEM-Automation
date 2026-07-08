@@ -153,6 +153,16 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 
 ## Open Questions
 
+- **Extractor over-trims answer components (deferred, run_1.2 Q209)**. `FYODOR-L` extracted
+  to `fyodor` — dropped the `-L` suffix the SH's evidence actually contained. User directive:
+  do NOT patch this by adding more special-case suffix-stripping instructions to the
+  extractor prompt (that's how Q202's `v3`-vs-`E5-2676` ambiguity happened — competing
+  "strip vendor/version suffix" guidance with no way to know which suffixes are real vs
+  decoration). Keep the extractor prompt generic; it should follow the question's own
+  `answer_guidance`/`expected_shape` field, not a growing list of trim heuristics. Root cause
+  is likely prompt-following fidelity on the extractor model (Qwen3.6-27B, thinking
+  disabled), not the prompt wording — investigate that angle first. Q202's `v3` truncation is
+  explicitly accepted as-is, not worth fixing.
 - **"Intention:" preamble before tool calls (Senior worker prompt) — helps or just burns
   tokens?** Every Senior tool call currently prefaces with a spoken-out `Intention: ...` line
   before the call. Unverified whether this improves tool-call accuracy/reasoning (a
