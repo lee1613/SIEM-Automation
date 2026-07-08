@@ -333,7 +333,14 @@ def main():
 
         # ── Extractor: strip prose down to the bare answer ────────────────────────
         with logger.events.timer() as t_ext:
-            clean = extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)
+            try:
+                clean = extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)
+            except Exception as exc:
+                # Extractor outage must not kill the run: fall back to the SH
+                # answer's last non-empty line (grounded finals are often bare).
+                clean = (sh_answer or "").strip().splitlines()[-1].strip() if (sh_answer or "").strip() else ""
+                print(f"[EXTRACTOR] FAILED after retries ({exc}); falling back to raw SH line")
+                logger.events.emit("extract_failed", qid=qid, error=str(exc)[:200])
         stage_ms["extract"] = t_ext.ms
         print(f"[EXTRACTOR] clean={clean!r}")
 

@@ -24,8 +24,8 @@ except Exception:
 
 
 EXTRACT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
-EXTRACT_MAX_RETRIES = 3
-EXTRACT_RETRY_BACKOFF = 2.0  # seconds; doubles each retry
+EXTRACT_MAX_RETRIES = 5
+EXTRACT_RETRY_BACKOFF = 10.0  # seconds; doubles each retry (10+20+40+80 — rides out ~2.5 min gateway outage)
 
 
 def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
