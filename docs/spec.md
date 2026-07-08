@@ -153,6 +153,14 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 
 ## Open Questions
 
+- **"Intention:" preamble before tool calls (Senior worker prompt) — helps or just burns
+  tokens?** Every Senior tool call currently prefaces with a spoken-out `Intention: ...` line
+  before the call. Unverified whether this improves tool-call accuracy/reasoning (a
+  lightweight chain-of-thought anchor) or is pure token overhead with no behavior change.
+  **Verify after run_1.2 finishes**: A/B a handful of questions with the preamble stripped
+  from `splunk_agent.py`'s system prompt vs kept — same questions, compare tool-call
+  correctness (right SPL/right sourcetype first try) and token count. Small sample (3-5
+  questions), not a full run. Decide keep/cut based on result.
 - Plan B (case-file blackboard, hints economy, specialists, recon) — implement
   before or after Plan A's full-run verdict?
 - `agent/core/` migration for shared clients — worth the import churn now?
