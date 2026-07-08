@@ -34,6 +34,7 @@ from grounding import is_grounded, best_candidate
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
+VERIFIER_MAX_ITER = 8  # verifier runs <=3 targeted queries; no 25-iter wandering
 MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
@@ -518,9 +519,24 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         parent_run_tree = get_current_run_tree()
         print(f"\n[SH -> VERIFIER #{worker_idx}]  candidate={answer!r}")
         try:
-            result = _run_senior(ctx, verify_subq, worker_idx, parent_run_tree)
+            result = _run_senior(ctx, verify_subq, worker_idx, parent_run_tree,
+                                 max_iter=VERIFIER_MAX_ITER)
         except Exception as exc:
-            print(f"[SH VERIFIER] worker crashed: {exc} — keeping original answer")
+            print(f"[SH VERIFIER] VERIFIER FAILED (crashed: {exc}) — keeping original answer")
+            _emit = getattr(ctx.logger, "events", None)
+            if _emit:
+                _emit.emit("verifier_failed", qid=ctx.current_qid, error=str(exc)[:200])
+            return {"verified": True, "done": True}
+
+        if result.get("status") in ("failed", "too_big") or result.get("cap_hit"):
+            # Verifier couldn't do its <=3-query job — do NOT let it override
+            # anything; keep the answer, flag loudly for post-run review.
+            print(f"[SH VERIFIER] VERIFIER FAILED (status={result.get('status')}, "
+                  f"cap_hit={result.get('cap_hit')}) — keeping original answer")
+            _emit = getattr(ctx.logger, "events", None)
+            if _emit:
+                _emit.emit("verifier_failed", qid=ctx.current_qid,
+                           status=result.get("status"), cap_hit=result.get("cap_hit"))
             return {"verified": True, "done": True}
 
         verdict = parse_verifier_verdict(result.get("answer", ""))
@@ -604,7 +620,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     return g.compile(checkpointer=checkpointer), checkpointer
 
 
-def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree) -> dict:
+def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree,
+                max_iter: int | None = None) -> dict:
     """Submit one Senior worker task (called from ThreadPoolExecutor thread).
 
     contextvars (which LangSmith's tracing relies on) don't propagate into a
@@ -615,7 +632,7 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
     """
     with tracing_context(parent=parent_run_tree):
         return ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
-                                   points=ctx.current_points)
+                                   points=ctx.current_points, max_iter=max_iter)
 
 
 def run_sh(graph, message: str, thread_id: str,

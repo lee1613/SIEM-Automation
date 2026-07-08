@@ -131,9 +131,12 @@ class SplunkWorkerPool:
         )
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int,
-                   points: int = 0) -> dict:
-        budget = iter_budget(points)
-        graph  = self.senior_graph_hi if points >= HIGH_VALUE_THRESHOLD else self.senior_graph
+                   points: int = 0, max_iter: int | None = None) -> dict:
+        """`max_iter` overrides the points-based budget (e.g. the Verifier's
+        targeted <=3-query pass gets a tight cap instead of the 25-iter
+        high-value budget)."""
+        budget = max_iter if max_iter is not None else iter_budget(points)
+        graph  = self.senior_graph_hi if budget > MAX_ITER else self.senior_graph
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)
 
