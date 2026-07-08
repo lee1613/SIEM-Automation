@@ -481,10 +481,20 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                     "done":         False,
                 }
 
-        # Fallback — extract best-effort answer from the last non-empty line
-        print("[SH JOINER] no FINAL ANSWER / REPLAN tag — extracting from last line")
-        lines  = [l.strip() for l in jtext.splitlines() if l.strip()]
-        answer = lines[-1] if lines else jtext[:200]
+        # Fallback — joiner produced neither a usable FINAL ANSWER nor a runnable
+        # replan (typically: REPLAN requested with rounds exhausted). Prefer the
+        # best real worker answer from ANY round of this question over joiner
+        # prose — run_1.2's Q200 submitted the last line of a replan plan (a task
+        # description) because this branch grabbed jtext's last line.
+        cand = best_candidate({i: {"answer": d.get("answer"), "status": d.get("status")}
+                               for i, d in enumerate(ctx.q_delegations)})
+        if cand:
+            print("[SH JOINER] no FINAL/REPLAN available — falling back to best worker answer")
+            answer = cand
+        else:
+            print("[SH JOINER] no FINAL ANSWER / REPLAN tag — extracting from last line")
+            lines  = [l.strip() for l in jtext.splitlines() if l.strip()]
+            answer = lines[-1] if lines else jtext[:200]
         return {
             "messages":     [joiner_hm, response],
             "plan_text":    jtext,

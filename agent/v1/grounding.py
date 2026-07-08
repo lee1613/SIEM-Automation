@@ -15,15 +15,22 @@ _STATUS_RANK = {"solved": 3, "partial": 2, "too_big": 1, "failed": 0}
 
 
 def is_grounded(answer: str, task_results: dict, question_text: str = "") -> bool:
+    """Whole answer — or, for comma-joined lists, EVERY component — must appear
+    in some worker's answer text or the question itself.
+
+    Component-wise matters: scoreboard list answers are comma-joined
+    ('bstoll,btun,splunk_access,web_admin') while worker evidence lists the same
+    values as prose/bullets, so the joined string never appears verbatim.
+    run_1.2's Q200 lost 100 pts to replan churn because of this. A fabricated
+    component still fails (it appears in no evidence), so the anti-fabrication
+    guarantee is unchanged."""
     a = (answer or "").strip().lower()
     if not a:
         return False
-    if a in (question_text or "").lower():
-        return True
-    for r in task_results.values():
-        if a in (r.get("answer") or "").lower():
-            return True
-    return False
+    haystacks = [(question_text or "").lower()]
+    haystacks += [(r.get("answer") or "").lower() for r in task_results.values()]
+    parts = [p.strip() for p in a.split(",") if p.strip()] or [a]
+    return all(any(p in h for h in haystacks) for p in parts)
 
 
 def best_candidate(task_results: dict) -> str | None:

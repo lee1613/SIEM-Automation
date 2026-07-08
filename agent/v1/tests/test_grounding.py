@@ -36,3 +36,23 @@ def test_best_candidate_prefers_solved_over_partial():
 
 def test_best_candidate_none_when_all_empty():
     assert best_candidate({1: {"status": "failed", "answer": ""}}) is None
+
+
+# ── run_1.2 Q200 regression: comma-joined list answers ────────────────────────
+
+def test_comma_list_grounded_when_every_part_in_evidence():
+    tr = {1: {"answer": "Users seen: **bstoll** (615 events), **btun** (73), "
+                        "also splunk_access and web_admin appear.",
+              "status": "solved"}}
+    assert is_grounded("bstoll,btun,splunk_access,web_admin", tr)
+
+
+def test_comma_list_ungrounded_when_any_part_fabricated():
+    tr = {1: {"answer": "Users seen: bstoll, btun.", "status": "solved"}}
+    assert not is_grounded("bstoll,btun,ghost_user", tr)
+
+
+def test_comma_list_parts_may_span_multiple_workers():
+    tr = {1: {"answer": "found bstoll", "status": "partial"},
+          2: {"answer": "found btun", "status": "partial"}}
+    assert is_grounded("bstoll,btun", tr)
