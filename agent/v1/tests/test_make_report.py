@@ -34,6 +34,20 @@ def test_render_report_has_score_and_ungrounded_section(tmp_path):
     assert "Q301" not in md.split("Ungrounded")[-1] if "Ungrounded" in md else True
 
 
+def test_load_metrics_survives_truncated_json(tmp_path):
+    p = tmp_path / "metrics.json"
+    p.write_text('[{"qid": "Q1", "verdict": "correct"', encoding="utf-8")  # truncated
+    assert load_metrics(str(p)) == []
+
+
+def test_load_events_survives_truncated_line(tmp_path):
+    p = tmp_path / "events.jsonl"
+    p.write_text('{"event": "question_start", "qid": "Q1"}\n{"event": "sub', encoding="utf-8")  # 2nd line truncated
+    events = load_events(str(p))
+    assert len(events) == 1
+    assert events[0]["qid"] == "Q1"
+
+
 def test_slowest_questions_ranked(tmp_path):
     metrics = tmp_path / "metrics.json"
     metrics.write_text(json.dumps([

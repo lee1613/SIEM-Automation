@@ -20,15 +20,26 @@ import time
 def load_events(path: str) -> list[dict]:
     if not os.path.exists(path):
         return []
+    out = []
     with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                break  # last line is mid-write; stop here, keep what parsed
+    return out
 
 
 def load_metrics(path: str) -> list[dict]:
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return []  # mid-write full-file rewrite; --watch will pick it up next poll
 
 
 def _pct(values: list[float], p: float) -> float:
