@@ -438,8 +438,17 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             # run_1.2 ground-checked (and verifier-refuted) answers against Q200's
             # question text because of this.
             qtext = ctx.current_question
+            # task_results resets to {} on every REPLAN, but a value proven in
+            # an earlier round can still be the correct restated FINAL ANSWER —
+            # ground against every delegation this question has produced so far
+            # (ctx.q_delegations), not just this round's.
+            grounding_evidence = dict(task_results)
+            grounding_evidence.update({
+                f"prior_{i}": {"answer": d.get("answer")}
+                for i, d in enumerate(ctx.q_delegations)
+            })
             decision = decide_joiner_answer(
-                answer, task_results, qtext,
+                answer, grounding_evidence, qtext,
                 plan_round=plan_round, max_rounds=MAX_PLAN_ROUNDS)
             if decision["action"] == "replan":
                 print(f"[SH JOINER] grounding check FAILED for {answer!r} — "

@@ -44,3 +44,21 @@ def test_grounding_replan_increments_plan_round_only_once():
     # decision["action"] == "replan", the returned state dict's "plan_round"
     # must equal the CURRENT plan_round (unchanged), not plan_round + 1 —
     # planner_node is the sole incrementer for this path.
+
+
+def test_decide_joiner_answer_grounds_against_prior_round_evidence():
+    """A value proven in an earlier round and restated in a later round's
+    FINAL ANSWER must still ground, using accumulated (not just current-round)
+    evidence — this is what orchestrator.py's joiner_node must pass in."""
+    # Simulates joiner_node merging ctx.q_delegations (prior rounds) into the
+    # task_results dict passed to decide_joiner_answer.
+    current_round_results = {1: {"answer": "checked an unrelated field", "status": "solved"}}
+    prior_round_delegation = {"answer": "the MD5 is d41d8cd98f00b204e9800998ecf8427e"}
+    combined = dict(current_round_results)
+    combined["prior_0"] = prior_round_delegation
+
+    decision = decide_joiner_answer(
+        "d41d8cd98f00b204e9800998ecf8427e", combined, "question text",
+        plan_round=2, max_rounds=3,
+    )
+    assert decision["action"] == "final"
