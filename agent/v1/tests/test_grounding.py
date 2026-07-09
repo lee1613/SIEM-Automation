@@ -56,3 +56,18 @@ def test_comma_list_parts_may_span_multiple_workers():
     tr = {1: {"answer": "found bstoll", "status": "partial"},
           2: {"answer": "found btun", "status": "partial"}}
     assert is_grounded("bstoll,btun", tr)
+
+
+def test_short_numeric_value_not_vacuously_grounded_by_stray_digit():
+    """'1,234' must not ground just because a bare '1' and a bare '234'
+    each appear somewhere unrelated — the literal value must be traceable."""
+    tr = {1: {"answer": "host count is 1 across all regions", "status": "solved"},
+          2: {"answer": "port 234 was scanned", "status": "solved"}}
+    assert not is_grounded("1,234", tr)
+
+
+def test_whole_string_match_checked_before_split():
+    """A value containing a comma that DOES appear verbatim should still
+    ground via the whole-string path, even with only one worker mentioning it."""
+    tr = {1: {"answer": "the total is 1,234 units", "status": "solved"}}
+    assert is_grounded("1,234", tr)

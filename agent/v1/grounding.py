@@ -15,21 +15,32 @@ _STATUS_RANK = {"solved": 3, "partial": 2, "too_big": 1, "failed": 0}
 
 
 def is_grounded(answer: str, task_results: dict, question_text: str = "") -> bool:
-    """Whole answer — or, for comma-joined lists, EVERY component — must appear
-    in some worker's answer text or the question itself.
+    """Whole answer must appear in some worker's answer text or the question.
 
-    Component-wise matters: scoreboard list answers are comma-joined
-    ('bstoll,btun,splunk_access,web_admin') while worker evidence lists the same
-    values as prose/bullets, so the joined string never appears verbatim.
-    run_1.2's Q200 lost 100 pts to replan churn because of this. A fabricated
-    component still fails (it appears in no evidence), so the anti-fabrication
-    guarantee is unchanged."""
+    For comma-joined lists whose full joined string doesn't appear verbatim
+    (scoreboard list answers are comma-joined while worker evidence lists the
+    same values as prose/bullets — 'bstoll,btun,...' never appears joined),
+    fall back to requiring EVERY component present instead. The whole-string
+    check runs first so a single value that happens to contain a comma (e.g.
+    '1,234') isn't vacuously grounded by unrelated short fragments matching
+    elsewhere — it only degrades to per-component matching when it looks like
+    a genuine multi-value list (2+ non-empty comma-separated parts) AND the
+    joined form itself isn't directly traceable."""
     a = (answer or "").strip().lower()
     if not a:
         return False
     haystacks = [(question_text or "").lower()]
     haystacks += [(r.get("answer") or "").lower() for r in task_results.values()]
-    parts = [p.strip() for p in a.split(",") if p.strip()] or [a]
+    if any(a in h for h in haystacks):
+        return True
+    parts = [p.strip() for p in a.split(",") if p.strip()]
+    if len(parts) <= 1:
+        return False
+    if all(p.isdigit() for p in parts):
+        # All-digit parts (e.g. "1,234") are a thousands-separated number, not
+        # a real list — component-wise matching would vacuously ground it on
+        # unrelated short digit substrings appearing elsewhere in evidence.
+        return False
     return all(any(p in h for h in haystacks) for p in parts)
 
 
