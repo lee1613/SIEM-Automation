@@ -453,7 +453,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                     "plan_text":    jtext,
                     "tasks":        [],
                     "task_results": task_results,
-                    "plan_round":   plan_round + 1,
+                    "plan_round":   plan_round,
                     "done":         False,
                     "needs_replan": True,
                 }

@@ -29,3 +29,18 @@ def test_ungrounded_no_candidate_keeps_original():
                                "iam resource", plan_round=3, max_rounds=3)
     assert out["action"] == "final"
     assert out["answer"] == "glacier"   # nothing better to offer
+
+
+def test_grounding_replan_increments_plan_round_only_once():
+    """joiner_node's grounding-forced-replan branch must NOT increment
+    plan_round itself — route_joiner sends it to planner_node, which does its
+    own +1. Double-incrementing here burns 2 of 3 replan rounds per failure."""
+    decision = decide_joiner_answer(
+        "fabricated_value", {}, "question text",
+        plan_round=1, max_rounds=3,
+    )
+    assert decision["action"] == "replan"
+    # This test documents the contract joiner_node must follow: when
+    # decision["action"] == "replan", the returned state dict's "plan_round"
+    # must equal the CURRENT plan_round (unchanged), not plan_round + 1 —
+    # planner_node is the sole incrementer for this path.
