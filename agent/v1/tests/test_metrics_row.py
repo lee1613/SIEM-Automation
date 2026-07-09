@@ -23,6 +23,20 @@ def test_metrics_row_flags_ungrounded_and_verdict():
     assert row["latency_s"]["total"] == round((12000+900000+30000+2000)/1000, 1)
 
 
+def test_grounded_uses_component_wise_check_for_list_answers():
+    delegations = [
+        {"answer": "Users seen: bstoll, btun, also splunk_access and web_admin.",
+         "status": "solved", "cap_hit": False},
+    ]
+    row = build_metrics_row(
+        qid="Q200", points=100, verdict="correct", earned=100,
+        clean_answer="bstoll,btun,splunk_access,web_admin",
+        delegations=delegations, stage_ms={}, usage_by_role={},
+        question_text="",
+    )
+    assert row["grounded"] is True
+
+
 def test_metrics_row_grounded_true_when_answer_in_worker_text():
     row = build_metrics_row(
         qid="Q301", points=100, verdict="correct", earned=100,

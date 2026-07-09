@@ -49,6 +49,7 @@ from usage_tracker import UsageTracker
 from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
+from grounding import is_grounded
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
@@ -97,17 +98,16 @@ def build_sh_message(qid, qtext, guidance):
 
 
 def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations,
-                      stage_ms, usage_by_role):
+                      stage_ms, usage_by_role, question_text=""):
     """Assemble one per-question metrics row (pure data — unit-testable).
 
-    `grounded` = the submitted answer appears verbatim (case-insensitive) in at
-    least one worker's answer text. False here is the fabrication signal: the
-    SH invented a value no delegate ever produced (Q221/Q303/Q330/Q333 class).
+    `grounded` reuses grounding.is_grounded (component-wise for comma-joined
+    list answers) so this diagnostic agrees with the actual gate the joiner
+    used to accept the answer — a second, naive whole-string copy of this
+    check previously reported every correct list answer as "ungrounded".
     """
-    ca = (clean_answer or "").strip().lower()
-    grounded = bool(ca) and any(
-        ca in (d.get("answer") or "").lower() for d in delegations
-    )
+    task_results = {i: {"answer": d.get("answer")} for i, d in enumerate(delegations)}
+    grounded = is_grounded(clean_answer, task_results, question_text)
     statuses = [d.get("status", "?") for d in delegations]
     cap_hits = sum(1 for d in delegations if d.get("cap_hit"))
     total_ms = sum(stage_ms.values())
@@ -396,7 +396,7 @@ def main():
         row = build_metrics_row(
             qid=qid, points=points, verdict=verdict_str, earned=pts_earned,
             clean_answer=clean, delegations=ctx.q_delegations,
-            stage_ms=stage_ms, usage_by_role=ubr,
+            stage_ms=stage_ms, usage_by_role=ubr, question_text=qtext,
         )
         logger.events.emit("submit", qid=qid, verdict=verdict_str, earned=pts_earned,
                            grounded=row["grounded"], clean=clean)
