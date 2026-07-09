@@ -59,6 +59,10 @@ class LocalScoreboard:
         correct = agent_answer.lower().strip() == correct_answer.lower().strip()
         earned  = base_points if correct else 0
 
+        # One record per question: a resubmission (e.g. after a resume) replaces
+        # the prior record instead of double-counting in get_score().
+        self._submissions = [s for s in self._submissions
+                             if s.get("number") != question_number]
         self._submissions.append({
             "time":            time.time(),
             "number":          question_number,

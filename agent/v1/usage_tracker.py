@@ -190,9 +190,10 @@ class UsageTracker(BaseCallbackHandler):
     def seed(self, prior_token_usage: dict | None) -> None:
         """Pre-load counters from a previous process's saved run_summary.json
         so a resumed process's totals keep accumulating instead of restarting
-        at zero. Costs are recomputed from the raw token counts rather than
-        trusted from the old JSON, so a stale/buggy price table at the time
-        doesn't propagate forward."""
+        at zero. The stored dollar figure is trusted as-is: recomputing from
+        aggregate token counts would apply per-call long-context tiering to
+        the whole segment's input at once (gpt-5.4 trips the >=272k long tier
+        on any multi-question segment, roughly doubling the reported cost)."""
         if not prior_token_usage:
             return
         with self._lock:
@@ -206,7 +207,7 @@ class UsageTracker(BaseCallbackHandler):
                 bucket["input_tokens"]  += inp
                 bucket["cached_tokens"] += cached
                 bucket["output_tokens"] += out
-                bucket["estimated_usd"] += _call_cost(model, inp, cached, out)
+                bucket["estimated_usd"] += float(b.get("estimated_usd", 0.0))
 
             sh = prior_token_usage.get("__sh_cumulative__")
             if sh:

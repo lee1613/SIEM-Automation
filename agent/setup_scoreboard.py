@@ -66,6 +66,11 @@ def kv_post(app: str, collection: str, records: list, headers: dict):
         else:
             print(f"  ! INSERT failed ({r.status_code}): {r.text[:120]}")
     print(f"  Loaded {ok}/{len(records)} records into {app}/{collection}")
+    if ok != len(records):
+        # The collection was cleared above; a partial load means missing answers
+        # would silently score correct submissions as wrong on every future run.
+        sys.exit(f"FATAL: only {ok}/{len(records)} records loaded into "
+                 f"{app}/{collection} — re-run setup before using the scoreboard.")
 
 
 def load_csv(path: str) -> list[dict]:

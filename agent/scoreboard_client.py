@@ -77,6 +77,15 @@ class ScoreboardClient:
             headers=self._hdr,
             params={"output_mode": "json", "count": 0},
         )
+        if r.status_code == 401:
+            # Session token expired mid-run — re-authenticate and retry once.
+            self._hdr = None
+            self._ensure_auth()
+            r = self._sess.get(
+                f"{self.base}/servicesNS/nobody/{app}/storage/collections/data/{collection}",
+                headers=self._hdr,
+                params={"output_mode": "json", "count": 0},
+            )
         r.raise_for_status()
         return r.json()
 
@@ -146,6 +155,9 @@ class ScoreboardClient:
                         correct: bool, base_pts: int, earned: int):
         """Write a submission event to index=scoreboard via the REST receivers endpoint."""
         result_str = "Correct" if correct else "Incorrect"
+        # Keep answers from corrupting the comma/quote-delimited event format.
+        submitted = submitted.replace('"', "'")
+        official  = official.replace('"', "'")
         # Format mirrors the original controller log line so the scoreboard
         # dashboard's SPL (which parses these fields) works correctly.
         event_line = (
@@ -160,16 +172,25 @@ class ScoreboardClient:
             f'Answer="{submitted}",'
             f'AnswerOfficial="{official}"'
         )
-        try:
-            self._sess.post(
-                f"{self.base}/services/receivers/simple",
-                headers=self._hdr,
-                params={"sourcetype": "scoreboard", "index": "scoreboard",
-                        "source": "scoreboard_controller"},
-                data=event_line.encode("utf-8"),
-            )
-        except Exception:
-            pass  # logging is best-effort
+        # This event IS the scoreboard's scoring record (get_score() sums these),
+        # so a failed write must surface, not vanish. Retry once with a fresh
+        # session token, then raise.
+        for attempt in (1, 2):
+            try:
+                r = self._sess.post(
+                    f"{self.base}/services/receivers/simple",
+                    headers=self._hdr,
+                    params={"sourcetype": "scoreboard", "index": "scoreboard",
+                            "source": "scoreboard_controller"},
+                    data=event_line.encode("utf-8"),
+                )
+                r.raise_for_status()
+                return
+            except Exception:
+                if attempt == 2:
+                    raise
+                self._hdr = None
+                self._ensure_auth()
 
     # ── Score summary ─────────────────────────────────────────────────────────
 
@@ -181,9 +202,11 @@ class ScoreboardClient:
         spl = (
             'search index=scoreboard sourcetype=scoreboard '
             '| rex field=_raw "user=\\"(?P<user>[^\\"]+)\\"" '
+            '| rex field=_raw "Number=(?P<Number>[0-9]+)" '
             '| rex field=_raw "Result=(?P<Result>[^,]+)" '
             '| rex field=_raw "BasePointsAwarded=(?P<pts>[0-9]+)" '
             f'| search user="{escaped_user}" Result=Correct '
+            '| dedup Number '
             '| stats sum(pts) as total_points count as correct_count'
         )
         r = self._sess.post(
@@ -206,12 +229,15 @@ class ScoreboardClient:
     def get_all_submissions(self) -> list[dict]:
         """Return all submissions this user has made (from scoreboard index)."""
         self._ensure_auth()
+        escaped_user = self.user.replace('"', '\\"')
         spl = (
-            f'search index=scoreboard user=\\"{self.user}\\" '
-            f'| rex field=_raw "Number=(?P<Number>[0-9]+)" '
-            f'| rex field=_raw "Result=(?P<Result>[^,]+)" '
-            f'| rex field=_raw "BasePointsAwarded=(?P<BasePointsAwarded>[0-9]+)" '
-            f'| table _time Number Result BasePointsAwarded'
+            'search index=scoreboard sourcetype=scoreboard '
+            '| rex field=_raw "user=\\"(?P<user>[^\\"]+)\\"" '
+            '| rex field=_raw "Number=(?P<Number>[0-9]+)" '
+            '| rex field=_raw "Result=(?P<Result>[^,]+)" '
+            '| rex field=_raw "BasePointsAwarded=(?P<BasePointsAwarded>[0-9]+)" '
+            f'| search user="{escaped_user}" '
+            '| table _time Number Result BasePointsAwarded'
         )
         r = self._sess.post(
             f"{self.base}/services/search/jobs/export",
