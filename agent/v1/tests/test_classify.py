@@ -16,3 +16,9 @@ def test_empty_is_failed():
 def test_prose_without_final_answer_tag_is_failed():
     # Q330 case: non-empty transcript tail but no FINAL ANSWER committed
     assert _classify("I was still looking at cisco:asa message_id 113019 when") == "failed"
+
+def test_final_answer_wins_when_partial_phrase_also_present():
+    """A response that mentions 'partial answer' in passing but commits to a
+    FINAL ANSWER must classify as solved, not partial."""
+    answer = "No partial answer is needed here — FINAL ANSWER: 42"
+    assert _classify(answer) == "solved"

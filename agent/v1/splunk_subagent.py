@@ -97,10 +97,10 @@ def _classify(answer: str) -> str:
     upper = a.upper()
     if "ESCALATE:" in upper or upper.startswith("ESCALATE"):
         return "too_big"
-    if "PARTIAL ANSWER" in upper:
-        return "partial"
     if "FINAL ANSWER" in upper:
         return "solved"
+    if "PARTIAL ANSWER" in upper:
+        return "partial"
     return "failed"
 
 
