@@ -29,6 +29,8 @@ from web_tool import web_lookup
 # the actual iteration count.
 HIGH_VALUE_THRESHOLD = 500
 
+VERIFIER_MAX_ITER = 8  # verifier runs <=3 targeted queries; no 25-iter wandering
+
 
 ESCALATE_INSTRUCTIONS = (
     "RESPONSE PROTOCOL — end every response with exactly ONE of these three modes:\n\n"
@@ -129,13 +131,24 @@ class SplunkWorkerPool:
             extra_tools=[web_lookup],
             max_iter=iter_budget(HIGH_VALUE_THRESHOLD),
         )
+        self.verifier_graph, _ = agent_mod.create_agent(
+            senior_api_key, splunk,
+            model=senior_model, base_url=senior_base_url,
+            extra_instructions=ESCALATE_INSTRUCTIONS,
+            extra_tools=[web_lookup],
+            max_iter=VERIFIER_MAX_ITER,
+        )
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int,
                    points: int = 0, max_iter: int | None = None) -> dict:
-        """`max_iter` overrides the points-based budget (e.g. the Verifier's
-        targeted <=3-query pass gets a tight cap instead of the 25-iter
-        high-value budget)."""
-        budget = max_iter if max_iter is not None else iter_budget(points)
+        """`max_iter` overrides the points-based budget for the one caller that
+        needs a different real graph cap (the Verifier's <=3-query pass) —
+        routed to a dedicated pre-built graph so the override actually reaches
+        the LangGraph step-cap check baked in at create_agent() build time."""
+        if max_iter is not None:
+            return self._run("senior", self.verifier_graph, self.senior_model,
+                             subquestion, parent_qid, idx, max_iter=max_iter)
+        budget = iter_budget(points)
         graph  = self.senior_graph_hi if budget > MAX_ITER else self.senior_graph
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)

@@ -30,11 +30,11 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 
 from grounding import is_grounded, best_candidate
+from splunk_subagent import VERIFIER_MAX_ITER
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
-VERIFIER_MAX_ITER = 8  # verifier runs <=3 targeted queries; no 25-iter wandering
 MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.

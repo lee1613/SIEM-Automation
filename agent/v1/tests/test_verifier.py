@@ -1,6 +1,27 @@
 from orchestrator import parse_verifier_verdict
 
 
+def test_pool_builds_dedicated_verifier_graph():
+    from splunk_subagent import SplunkWorkerPool, VERIFIER_MAX_ITER
+
+    calls = []
+
+    def fake_create_agent(*a, **kw):
+        calls.append(kw.get("max_iter"))
+        return (f"graph_maxiter_{kw.get('max_iter')}", None)
+
+    import splunk_subagent
+    orig = splunk_subagent.agent_mod.create_agent
+    splunk_subagent.agent_mod.create_agent = fake_create_agent
+    try:
+        pool = SplunkWorkerPool(splunk=None, senior_api_key="x")
+    finally:
+        splunk_subagent.agent_mod.create_agent = orig
+
+    assert VERIFIER_MAX_ITER in calls
+    assert pool.verifier_graph == f"graph_maxiter_{VERIFIER_MAX_ITER}"
+
+
 def test_confirm_verdict():
     v = parse_verifier_verdict("Checked event order by _time. CONFIRMED: 30358")
     assert v["verdict"] == "confirmed"
