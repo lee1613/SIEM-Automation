@@ -49,7 +49,7 @@ from usage_tracker import UsageTracker
 from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
-from grounding import is_grounded
+from grounding import is_grounded, best_candidate
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
@@ -128,6 +128,21 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
         "cost_by_role": {r: round(v.get("estimated_usd", 0.0), 6)
                          for r, v in usage_by_role.items()},
     }
+
+
+def extractor_fallback_answer(sh_answer: str, delegations: list) -> str:
+    """Used when the extractor fails all retries — prefer a real worker's
+    answer (best_candidate, same ranking the joiner's own ungrounded-fallback
+    uses) over blindly taking the last line of sh_answer, which can be raw
+    multi-line prose when sh_answer came from decide_joiner_answer's
+    best_candidate fallback rather than a single-line FINAL ANSWER tag."""
+    task_results = {i: {"answer": d.get("answer"), "status": d.get("status")}
+                    for i, d in enumerate(delegations)}
+    cand = best_candidate(task_results)
+    if cand:
+        return cand
+    stripped = (sh_answer or "").strip()
+    return stripped.splitlines()[-1].strip() if stripped else ""
 
 
 def upsert_metrics_row(rows: list, row: dict) -> None:
@@ -336,10 +351,12 @@ def main():
             try:
                 clean = extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)
             except Exception as exc:
-                # Extractor outage must not kill the run: fall back to the SH
-                # answer's last non-empty line (grounded finals are often bare).
-                clean = (sh_answer or "").strip().splitlines()[-1].strip() if (sh_answer or "").strip() else ""
-                print(f"[EXTRACTOR] FAILED after retries ({exc}); falling back to raw SH line")
+                # Extractor outage must not kill the run: fall back to the best
+                # worker answer (best_candidate) rather than blindly taking
+                # sh_answer's raw last line, which can be unrelated prose when
+                # sh_answer came from the joiner's own best_candidate fallback.
+                clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                print(f"[EXTRACTOR] FAILED after retries ({exc}); falling back to best worker answer")
                 logger.events.emit("extract_failed", qid=qid, error=str(exc)[:200])
         stage_ms["extract"] = t_ext.ms
         print(f"[EXTRACTOR] clean={clean!r}")
