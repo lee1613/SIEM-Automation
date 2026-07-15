@@ -51,6 +51,7 @@ from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 from grounding import is_grounded, best_candidate
 from case_file import CaseFile, build_ledger
+from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
@@ -99,7 +100,7 @@ def build_sh_message(qid, qtext, guidance):
 
 
 def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations,
-                      stage_ms, usage_by_role, question_text=""):
+                      stage_ms, usage_by_role, question_text="", hint_cost=0):
     """Assemble one per-question metrics row (pure data — unit-testable).
 
     `grounded` reuses grounding.is_grounded (component-wise for comma-joined
@@ -119,6 +120,7 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
         "earned": earned,
         "clean_answer": clean_answer,
         "grounded": grounded,
+        "hint_cost": hint_cost,
         "delegations": len(delegations),
         "statuses": statuses,
         "cap_hits": cap_hits,
@@ -199,6 +201,8 @@ def main():
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     parser.add_argument("--recon", action="store_true",
                         help="Run the Phase-0 recon pass before the question loop (seeds the case file).")
+    parser.add_argument("--hints", action="store_true",
+                        help="Buy official hint 1 on ungrounded >=500pt answers (cost deducted from earned points).")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
@@ -262,6 +266,7 @@ def main():
         answers_csv=os.path.join(PROJECT_ROOT, "botsv3content", "ctf_answers.csv"),
         results_path=os.path.join(logger.run_dir, "scoreboard_submissions.json"),
     )
+    hint_book = HintBook(os.path.join(PROJECT_ROOT, "botsv3content", "ctf_hints.csv")) if args.hints else None
     print(f"Connected.  {splunk}")
 
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
@@ -391,10 +396,37 @@ def main():
         stage_ms["extract"] = t_ext.ms
         print(f"[EXTRACTOR] clean={clean!r}")
 
+        # ── Hint economy: ungrounded >=500pt answer buys official hint 1 ─────────
+        hint_cost = 0
+        if hint_book and points >= 500:
+            tr = {i: {"answer": d.get("answer")} for i, d in enumerate(ctx.q_delegations)}
+            if not is_grounded(clean, tr, qtext):
+                hint = hint_book.get_hint(q_number, 1)
+                if hint:
+                    hint_cost = hint["cost"]
+                    print(f"[HINT] buying hint 1 for {qid} (cost {hint_cost}): {hint['text']!r}")
+                    logger.events.emit("hint_bought", qid=qid, cost=hint_cost)
+                    with logger.events.timer() as t_hint:
+                        sh_answer, _ = run_sh(
+                            sh_graph,
+                            (f"OFFICIAL HINT for {qid} (cost {hint_cost} pts, already "
+                             f"paid): {hint['text']}\nRe-investigate with this hint "
+                             f"and give a corrected FINAL ANSWER."),
+                            run_thread, qid=qid, run_name=f"SH-{qid}-hint",
+                            tracker=tracker)
+                    stage_ms["hint"] = t_hint.ms
+                    try:
+                        clean = extractor.extract(qtext, guidance, sh_answer,
+                                                  qid=qid, expected_shape=guidance)
+                    except Exception:
+                        clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                    print(f"[HINT] post-hint clean={clean!r}")
+
         # ── Single scoreboard submission ──────────────────────────────────────────
         try:
             sb = scoreboard.submit(q_number, clean)
             pts_earned = sb.earned
+            pts_earned = max(0, pts_earned - hint_cost)
             sb_correct = sb.correct
             earned_pts += pts_earned
             verdict = "[CORRECT]" if sb_correct else "[WRONG]"
@@ -431,6 +463,7 @@ def main():
             "clean_answer":     clean,
             "sb_correct":       sb_correct,
             "earned":           pts_earned,
+            "hint_cost":        hint_cost,
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
             "candidate_ledger": build_ledger(ctx.q_delegations),
@@ -445,6 +478,7 @@ def main():
             qid=qid, points=points, verdict=verdict_str, earned=pts_earned,
             clean_answer=clean, delegations=ctx.q_delegations,
             stage_ms=stage_ms, usage_by_role=ubr, question_text=qtext,
+            hint_cost=hint_cost,
         )
         logger.events.emit("submit", qid=qid, verdict=verdict_str, earned=pts_earned,
                            grounded=row["grounded"], clean=clean)
