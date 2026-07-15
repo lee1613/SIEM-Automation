@@ -241,6 +241,20 @@ def parse_verifier_verdict(text: str) -> dict:
     return {"verdict": "confirmed", "correction": ""}
 
 
+def promote_from_verdict(case_file, answer: str, verdict: dict) -> None:
+    """Reflect a Verifier verdict into the case file: findings whose claim
+    contains the checked answer flip to verified/refuted accordingly."""
+    a = (answer or "").strip().lower()
+    if not a:
+        return
+    for f in case_file.iter_findings():
+        if a in f["claim"].lower():
+            if verdict["verdict"] == "confirmed":
+                case_file.set_status(f["id"], "verified")
+            elif verdict["verdict"] == "refuted":
+                case_file.set_status(f["id"], "refuted")
+
+
 def apply_case_updates(case_file, joiner_text: str, *, source_qid: str) -> int:
     """Parse a CASE UPDATES block and write it into the case file. Returns count."""
     n = 0
@@ -661,6 +675,9 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         verdict = parse_verifier_verdict(result.get("answer", ""))
         print(f"[SH VERIFIER OUTPUT] verdict={verdict['verdict']} "
               f"correction={verdict.get('correction')!r}")
+
+        if ctx.case_file and ctx.use_case_file:
+            promote_from_verdict(ctx.case_file, answer, verdict)
 
         record = {
             "worker":      f"senior#{worker_idx}",
