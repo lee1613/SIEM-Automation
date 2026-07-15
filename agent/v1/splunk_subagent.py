@@ -22,6 +22,7 @@ import uuid
 import splunk_agent as agent_mod
 from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
+from specialists import SPECIALISTS, parse_specialist_tag
 
 # Points at/above this threshold get the higher-budget worker graph (see
 # splunk_agent.iter_budget). Kept as a local constant so the pool's graph
@@ -113,24 +114,24 @@ class SplunkWorkerPool:
         self.tracker = tracker
         self.senior_model = senior_model
 
-        # Two worker graphs built once at init: the base budget (MAX_ITER) for
-        # ordinary questions, and a higher budget (iter_budget(>=500)) for
-        # high-value questions. Both share the same tools/prompt (ESCALATE
-        # protocol + web_lookup) — only max_iter differs.
-        self.senior_graph, _ = agent_mod.create_agent(
-            senior_api_key, splunk,
-            model=senior_model, base_url=senior_base_url,
-            extra_instructions=ESCALATE_INSTRUCTIONS,
-            extra_tools=[web_lookup],
-            max_iter=MAX_ITER,
-        )
-        self.senior_graph_hi, _ = agent_mod.create_agent(
-            senior_api_key, splunk,
-            model=senior_model, base_url=senior_base_url,
-            extra_instructions=ESCALATE_INSTRUCTIONS,
-            extra_tools=[web_lookup],
-            max_iter=iter_budget(HIGH_VALUE_THRESHOLD),
-        )
+        # Six worker graphs built once at init: 3 specialist roles (hunter/
+        # content/metrics, see specialists.py) x 2 budgets each — the base
+        # budget (MAX_ITER) for ordinary questions, and a higher budget
+        # (iter_budget(>=500)) for high-value questions. All share the same
+        # tools (ESCALATE protocol + web_lookup) — only the specialist's extra
+        # prompt emphasis and max_iter differ.
+        self._graphs = {}
+        for name, extra in SPECIALISTS.items():
+            instructions = ESCALATE_INSTRUCTIONS + ("\n\n" + extra if extra else "")
+            for hi, cap in ((False, MAX_ITER),
+                            (True, iter_budget(HIGH_VALUE_THRESHOLD))):
+                self._graphs[(name, hi)], _ = agent_mod.create_agent(
+                    senior_api_key, splunk,
+                    model=senior_model, base_url=senior_base_url,
+                    extra_instructions=instructions,
+                    extra_tools=[web_lookup],
+                    max_iter=cap,
+                )
         self.verifier_graph, _ = agent_mod.create_agent(
             senior_api_key, splunk,
             model=senior_model, base_url=senior_base_url,
@@ -149,7 +150,8 @@ class SplunkWorkerPool:
             return self._run("senior", self.verifier_graph, self.senior_model,
                              subquestion, parent_qid, idx, max_iter=max_iter)
         budget = iter_budget(points)
-        graph  = self.senior_graph_hi if budget > MAX_ITER else self.senior_graph
+        role   = parse_specialist_tag(subquestion)
+        graph  = self._graphs[(role, budget > MAX_ITER)]
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)
 

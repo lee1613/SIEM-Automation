@@ -88,6 +88,11 @@ RULES:
 - Also output one line:  EXPECTED SHAPE: <the exact form the scoreboard wants —
   e.g. "bare MAC address lowercase", "integer only", "comma-separated lowercase
   list no spaces", "filename with extension". Derive it from the answer guidance.>
+- Prefix every task with a specialist tag: [HUNTER] for entity hunts across
+  hosts/users/IPs, [CONTENT] when the answer is inside raw event text (emails,
+  scripts, logs to READ), [METRICS] for any computed number (averages,
+  percentiles, durations, counts with arithmetic). Untagged tasks default to
+  [HUNTER].
 
 A CASE FILE block may precede this conversation — treat `[?]`/`[X]` findings as unproven; \
 re-verify before building a plan on them."""
