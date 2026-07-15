@@ -31,6 +31,7 @@ from langsmith.run_helpers import get_current_run_tree, tracing_context
 
 from grounding import is_grounded, best_candidate
 from splunk_subagent import VERIFIER_MAX_ITER
+from case_file import build_ledger, render_ledger, snap_to_ledger
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
@@ -128,7 +129,14 @@ GROUNDING RULE — CRITICAL:
   results above (or the question). Never invent, guess, or synthesize a value
   no worker reported. If the tasks did not produce the needed value, prefer a
   focused REPLAN. If you must answer without it, use the closest value a worker
-  actually reported, not a plausible-sounding fabrication."""
+  actually reported, not a plausible-sounding fabrication.
+
+LEDGER RULE — when a CANDIDATES list is provided, your FINAL ANSWER must be one
+of those values copied character-for-character (or a value from the question
+text). Do not re-type, trim, expand, or reformat a candidate: no dropping
+domain suffixes, no rounding numbers, no removing prefixes. If two candidates
+conflict, prefer the one whose SPL and status best satisfy the question's own
+constraints, and copy it exactly."""
 
 
 # ── Verifier prompt (prove-or-refute pass for >=500pt questions) ───────────────
@@ -422,11 +430,15 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             )
         findings = "\n\n".join(parts)
 
+        ledger = build_ledger(ctx.q_delegations)
+        ledger_block = render_ledger(ledger)
+
         joiner_msg_text = (
             f"All delegated tasks are complete (round {plan_round}).\n\n"
             f"=== Task Results ===\n{findings}\n\n"
-            "Synthesize the above and give your FINAL ANSWER, "
-            "or request a focused REPLAN if a critical datum is missing."
+            + (ledger_block + "\n\n" if ledger_block else "")
+            + "Synthesize the above and give your FINAL ANSWER, "
+              "or request a focused REPLAN if a critical datum is missing."
         )
         joiner_hm = HumanMessage(content=joiner_msg_text)
 
@@ -440,6 +452,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         fa_m = re.search(r'FINAL ANSWER:\s*(.+)', jtext, re.IGNORECASE | re.DOTALL)
         if fa_m:
             answer = fa_m.group(1).strip().split('\n')[0].strip()
+            snapped = snap_to_ledger(answer, ledger)
+            if snapped != answer:
+                print(f"[SH JOINER] ledger snap: {answer!r} -> {snapped!r}")
+                answer = snapped
             # ctx.current_question, NOT a scan of state["messages"]: the persistent
             # cross-question thread's first HumanMessage is always the run's first
             # question, and later HumanMessages are joiner/replan scaffolding.

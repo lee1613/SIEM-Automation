@@ -50,6 +50,7 @@ from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 from grounding import is_grounded, best_candidate
+from case_file import build_ledger
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
@@ -415,6 +416,7 @@ def main():
             "earned":           pts_earned,
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
+            "candidate_ledger": build_ledger(ctx.q_delegations),
         })
         with open(os.path.join(questions_dir, f"{qid}.json"), "w", encoding="utf-8") as f:
             json.dump(results[-1], f, indent=2, ensure_ascii=False)
