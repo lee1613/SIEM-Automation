@@ -3,7 +3,7 @@
 v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
-    -> parallel Senior Splunk workers (GLM-5.2-fp8 via Vultr)
+    -> parallel Senior Splunk workers (gpt-5.4 via OpenAI)
     -> Extractor (DeepSeek-V4-Flash via Vultr, prose-strip only)
     -> scoreboard (1x)
 
@@ -55,7 +55,7 @@ from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
-SENIOR_MODEL  = "GLM-5.2-fp8"
+SENIOR_MODEL  = "gpt-5.4"
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -194,9 +194,9 @@ def main():
     parser.add_argument("--senior-base-url", default=None,
                         help="Base URL for Senior's API (NIM: https://integrate.api.nvidia.com/v1, "
                              "Vultr: https://api.vultrinference.com/v1). Omit to use OpenAI.")
-    parser.add_argument("--senior-api-key-env", default="VULTR_SERVERLESS_INFERENCE_API_KEY",
+    parser.add_argument("--senior-api-key-env", default="OPENAI_API_KEY",
                         help="Name of the env var holding the Senior API key "
-                             "(default: VULTR_SERVERLESS_INFERENCE_API_KEY for GLM-5.2-fp8).")
+                             "(default: OPENAI_API_KEY for gpt-5.4).")
     parser.add_argument("--run-name", default=None,
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     parser.add_argument("--recon", action="store_true",
@@ -206,14 +206,18 @@ def main():
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
-    senior_base_url = args.senior_base_url or VULTR_BASE_URL
+    senior_base_url = args.senior_base_url          # None -> OpenAI
     senior_api_key  = os.getenv(args.senior_api_key_env, "")
+    vultr_api_key   = os.getenv("VULTR_SERVERLESS_INFERENCE_API_KEY", "")
 
     if not OPENAI_API_KEY:
         sys.exit("OPENAI_API_KEY not set — check .env")
     if not senior_api_key:
         sys.exit(f"{args.senior_api_key_env} not set — check .env  "
                  f"(Senior model={senior_model}, base_url={senior_base_url})")
+    if not vultr_api_key:
+        sys.exit("VULTR_SERVERLESS_INFERENCE_API_KEY not set — check .env "
+                 "(Extractor still runs on Vultr)")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -279,7 +283,7 @@ def main():
     checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
     sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx,
                                           checkpoint_db_path=checkpoint_db_path)
-    extractor = Extractor(senior_api_key, VULTR_BASE_URL, tracker=tracker)
+    extractor = Extractor(vultr_api_key, VULTR_BASE_URL, tracker=tracker)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
