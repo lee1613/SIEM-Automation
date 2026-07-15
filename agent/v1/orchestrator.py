@@ -226,6 +226,35 @@ def parse_verifier_verdict(text: str) -> dict:
     return {"verdict": "confirmed", "correction": ""}
 
 
+HANDOFF_MAX_CHARS = 1500
+HANDOFF_KEEP      = 3      # most recent digests injected per question
+
+
+def build_handoff_digest(record: dict) -> str:
+    """Structured handoff for the worker that replaces a failed/too_big/cap-hit
+    delegation: what was tried, what to not repeat, where the trail went cold.
+    run_1.2 burned $26.53 on replacement workers re-running discovery from zero.
+    """
+    label = record.get("status", "?")
+    if record.get("cap_hit"):
+        label += ", cap-hit"
+    lines = [f"PRIOR ATTEMPT ({label}, {record.get('iterations', 0)} iterations) "
+             f"by {record.get('worker', '?')}:"]
+    sts = record.get("sourcetypes") or []
+    if sts:
+        lines.append(f"- sourcetypes already examined: {', '.join(sts)}")
+    spl = record.get("spl_used") or []
+    if spl:
+        lines.append("- SPL already run (do NOT repeat these; go one step further):")
+        lines += [f"    {q[:200]}" for q in spl[-6:]]
+    tail = (record.get("answer") or "").strip()
+    if tail:
+        lines.append(f"- where the trail went cold: {tail[-400:]}")
+    out = "\n".join(lines)
+    # ponytail: char truncation, not token-aware; upgrade if digests start clipping SPL
+    return out[:HANDOFF_MAX_CHARS]
+
+
 def substitute_deps(subquestion: str, completed: dict) -> str:
     """Replace $N references with a brief summary of task N's result."""
     def _replace(m):
@@ -262,6 +291,7 @@ class DelegationContext:
         self.current_question   = ""
         self.failed_delegations = 0
         self.q_delegations      = []
+        self.q_handoffs         = []
         self.all_delegations    = []
 
     def reset_question(self, qid: str, points: int = 0, question: str = "") -> None:
@@ -269,6 +299,7 @@ class DelegationContext:
         self.current_points   = points
         self.current_question = question
         self.q_delegations    = []
+        self.q_handoffs       = []
 
 
 def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
@@ -366,6 +397,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 futures: dict = {}
                 for t in ready:
                     subq       = substitute_deps(t.subquestion, completed)
+                    if ctx.q_handoffs:
+                        subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
+                                 "(resume the hunt, do not restart it):\n"
+                                 + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]))
                     worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
                     print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
                     futures[exe.submit(_run_senior, ctx, subq, worker_idx, parent_run_tree)] = (t, worker_idx, subq)
@@ -382,8 +417,12 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                         }
                     completed[t.idx] = result
 
-                    if result["status"] in ("too_big", "failed"):
-                        ctx.failed_delegations += 1
+                    if (result["status"] in ("too_big", "failed")
+                            or result.get("cap_hit")):
+                        if result["status"] in ("too_big", "failed"):
+                            ctx.failed_delegations += 1
+                        ctx.q_handoffs.append(build_handoff_digest(
+                            {**result, "worker": f"senior#{worker_idx}"}))
 
                     record = {
                         "worker":      f"senior#{worker_idx}",
@@ -433,10 +472,16 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         ledger = build_ledger(ctx.q_delegations)
         ledger_block = render_ledger(ledger)
 
+        handoff_block = ""
+        if ctx.q_handoffs:
+            handoff_block = ("=== Failed-Attempt Digests ===\n"
+                             + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]) + "\n\n")
+
         joiner_msg_text = (
             f"All delegated tasks are complete (round {plan_round}).\n\n"
             f"=== Task Results ===\n{findings}\n\n"
             + (ledger_block + "\n\n" if ledger_block else "")
+            + handoff_block
             + "Synthesize the above and give your FINAL ANSWER, "
               "or request a focused REPLAN if a critical datum is missing."
         )
