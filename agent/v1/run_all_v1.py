@@ -4,7 +4,7 @@ v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
     -> parallel Senior Splunk workers (gpt-5.4 via OpenAI)
-    -> Extractor (DeepSeek-V4-Flash via Vultr, prose-strip only)
+    -> Extractor (Llama-3.3-70B via NIM, prose-strip only)
     -> scoreboard (1x)
 
 The SH plans a DAG of tasks and dispatches independent tasks concurrently via
@@ -68,7 +68,7 @@ SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
 QUESTIONS_PATH = os.path.join(PROJECT_ROOT, "datasets", "botsv3_questions.json")
 ANSWERS_PATH   = os.path.join(PROJECT_ROOT, "datasets", "botsv3_answers.json")
 
-VULTR_BASE_URL = "https://api.vultrinference.com/v1"
+NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 def force_utf8_stdio() -> None:
@@ -208,16 +208,15 @@ def main():
     senior_model    = args.senior_model or SENIOR_MODEL
     senior_base_url = args.senior_base_url          # None -> OpenAI
     senior_api_key  = os.getenv(args.senior_api_key_env, "")
-    vultr_api_key   = os.getenv("VULTR_SERVERLESS_INFERENCE_API_KEY", "")
+    nim_api_key     = os.getenv("NIM_API_KEY", "")
 
     if not OPENAI_API_KEY:
         sys.exit("OPENAI_API_KEY not set — check .env")
     if not senior_api_key:
         sys.exit(f"{args.senior_api_key_env} not set — check .env  "
                  f"(Senior model={senior_model}, base_url={senior_base_url})")
-    if not vultr_api_key:
-        sys.exit("VULTR_SERVERLESS_INFERENCE_API_KEY not set — check .env "
-                 "(Extractor still runs on Vultr)")
+    if not nim_api_key:
+        sys.exit("NIM_API_KEY not set — check .env (Extractor runs on NIM)")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -283,13 +282,13 @@ def main():
     checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
     sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx,
                                           checkpoint_db_path=checkpoint_db_path)
-    extractor = Extractor(vultr_api_key, VULTR_BASE_URL, tracker=tracker)
+    extractor = Extractor(nim_api_key, NIM_BASE_URL, tracker=tracker)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
-    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor={extractor.model}(Vultr)")
+    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor={extractor.model}(NIM)")
     print(f"  Questions: {len(selected)}   Log dir: {logger.run_dir}")
     print(f"  LangSmith project: {ls_project}")
     print("=" * 80)
