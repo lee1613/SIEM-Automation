@@ -197,6 +197,8 @@ def main():
                              "(default: VULTR_SERVERLESS_INFERENCE_API_KEY for GLM-5.2-fp8).")
     parser.add_argument("--run-name", default=None,
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
+    parser.add_argument("--recon", action="store_true",
+                        help="Run the Phase-0 recon pass before the question loop (seeds the case file).")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
@@ -328,6 +330,20 @@ def main():
 
     # Never re-run (and double-count) a question already recorded in this run dir.
     done_ids = {r["id"] for r in results}
+
+    if args.recon:
+        already = any(f.get("source_qid") == "RECON"
+                      for f in case_file.iter_findings())
+        if already:
+            print("[RECON] case file already seeded — skipping (resume).")
+        else:
+            from recon import run_recon, seed_case_from_recon
+            print("[RECON] Phase-0 incident recon ...")
+            recon_results = run_recon(ctx)
+            seeded = seed_case_from_recon(case_file, recon_results)
+            logger.events.emit("recon_done", findings=seeded,
+                               tasks=len(recon_results))
+            print(f"[RECON] seeded {seeded} verified finding(s).")
 
     for q in selected:
         qid      = q["id"]
