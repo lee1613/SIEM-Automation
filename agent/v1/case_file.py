@@ -138,6 +138,8 @@ class CaseFile:
         """Planner-facing view: verified first, hypotheses next, refuted last
         with a warning marker so the planner distrusts them."""
         ents = self._data["entities"]
+        if not ents and not self._data["findings"]:
+            return ""   # empty case file -> no digest, planner injects nothing
         ent_line = ("ENTITIES: " + ", ".join(f"{e['type']}={e['value']}"
                                              for e in ents)) if ents else ""
         order = {"verified": 0, "hypothesis": 1, "refuted": 2}

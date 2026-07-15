@@ -20,6 +20,10 @@ def test_finding_status_promote_and_refute(tmp_path):
     assert "[X]" in cf.render_digest()
 
 
+def test_empty_case_file_digest_is_empty(tmp_path):
+    assert CaseFile(str(tmp_path / "c.json")).render_digest() == ""
+
+
 def test_persist_and_reload(tmp_path):
     p = str(tmp_path / "case.json")
     CaseFile(p).add_entity("user", "mkraeusen", qid="Q330")
