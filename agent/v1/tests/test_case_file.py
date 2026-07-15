@@ -51,3 +51,13 @@ CASE UPDATES:
 
 def test_parse_case_updates_absent_returns_empty():
     assert parse_case_updates("FINAL ANSWER: x\n(no updates)") == []
+
+
+def test_corrupt_file_loads_empty_and_round_trips(tmp_path):
+    p = str(tmp_path / "case.json")
+    with open(p, "wb") as f:
+        f.write(b"not valid json {{{")
+    cf = CaseFile(p)
+    assert cf.render_digest() == ""
+    cf.add_entity("host", "BSTOLL-L.froth.ly", qid="Q210")
+    assert "BSTOLL-L.froth.ly" in CaseFile(p).render_digest()

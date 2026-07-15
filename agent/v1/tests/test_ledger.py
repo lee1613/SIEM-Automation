@@ -1,4 +1,4 @@
-from case_file import extract_candidate, build_ledger, snap_to_ledger
+from case_file import extract_candidate, build_ledger, snap_to_ledger, render_ledger
 
 
 def _deleg(answer, status="solved", spl=None, worker="senior#1"):
@@ -44,3 +44,16 @@ def test_snap_never_changes_a_different_value():
     # A truncation is a DIFFERENT pick, not a casing slip — snap must not "fix" it.
     assert snap_to_ledger("BSTOLL-L", ledger) == "BSTOLL-L"
     assert snap_to_ledger("mkraeusen", ledger) == "mkraeusen"
+
+
+def test_render_ledger_entry_boundary_cap_preserves_values_verbatim():
+    delegations = [_deleg(f"FINAL ANSWER: candidate-value-{i:03d}-" + "x" * 40,
+                          worker=f"senior#{i}")
+                   for i in range(100)]
+    ledger = build_ledger(delegations)
+    assert len(ledger) == 100
+    block = render_ledger(ledger)
+    assert len(block) <= 4200
+    assert "...[" in block and "omitted]" in block
+    first_value = ledger[0]["value"]
+    assert f"`{first_value}`" in block  # present entries are verbatim, not clipped

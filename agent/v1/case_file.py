@@ -64,16 +64,32 @@ def snap_to_ledger(answer: str, ledger: list) -> str:
     return answer
 
 
+_LEDGER_MAX_CHARS = 4000
+
+
 def render_ledger(ledger: list) -> str:
-    """Joiner-facing candidate block."""
+    """Joiner-facing candidate block. Entry-boundary capped: whole entries are
+    appended until the block would exceed _LEDGER_MAX_CHARS, then a summary
+    line notes how many were omitted. Never truncates a candidate value itself
+    — the joiner copies it character-for-character, so a clipped value could
+    never snap back to the ledger's verbatim form."""
     if not ledger:
         return ""
     lines = ["CANDIDATES (each captured verbatim from a worker — your FINAL ANSWER "
              "must be copied character-for-character from one of these, or from "
              "the question text):"]
+    total = sum(len(l) + 1 for l in lines)
+    omitted = 0
     for i, c in enumerate(ledger, 1):
         spl = f"  SPL: {c['spl'][0][:160]}" if c["spl"] else ""
-        lines.append(f"  {i}. `{c['value']}`  [{c['status']}, {c['worker']}]{spl}")
+        entry = f"  {i}. `{c['value']}`  [{c['status']}, {c['worker']}]{spl}"
+        if total + len(entry) + 1 > _LEDGER_MAX_CHARS:
+            omitted = len(ledger) - i + 1
+            break
+        lines.append(entry)
+        total += len(entry) + 1
+    if omitted:
+        lines.append(f"  ...[{omitted} more candidates omitted]")
     return "\n".join(lines)
 
 
@@ -92,12 +108,18 @@ class CaseFile:
         self._lock = threading.Lock()
         self._data = {"entities": [], "findings": []}
         if os.path.exists(path):
-            with open(path, encoding="utf-8") as f:
-                self._data = json.load(f)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    self._data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                print(f"[CASE FILE] corrupt or unreadable {path} — starting empty")
+                self._data = {"entities": [], "findings": []}
 
     def _save(self) -> None:
-        with open(self.path, "w", encoding="utf-8") as f:
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, self.path)
 
     def add_entity(self, etype: str, value: str, *, qid: str = "") -> None:
         with self._lock:

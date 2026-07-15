@@ -93,6 +93,7 @@ RULES:
   scripts, logs to READ), [METRICS] for any computed number (averages,
   percentiles, durations, counts with arithmetic). Untagged tasks default to
   [HUNTER].
+- Never use DIRECT ANSWER for a value that comes from the CASE FILE block; delegate a task to re-verify it instead.
 
 A CASE FILE block may precede this conversation — treat `[?]`/`[X]` findings as unproven; \
 re-verify before building a plan on them."""
@@ -248,11 +249,14 @@ def promote_from_verdict(case_file, answer: str, verdict: dict) -> None:
     if not a:
         return
     for f in case_file.iter_findings():
-        if a in f["claim"].lower():
-            if verdict["verdict"] == "confirmed":
-                case_file.set_status(f["id"], "verified")
-            elif verdict["verdict"] == "refuted":
-                case_file.set_status(f["id"], "refuted")
+        if len(a) < 4 or f.get("source_qid") == "RECON":
+            continue
+        if not re.search(rf'(?<!\w){re.escape(a)}(?!\w)', f["claim"].lower()):
+            continue
+        if verdict["verdict"] == "confirmed":
+            case_file.set_status(f["id"], "verified")
+        elif verdict["verdict"] == "refuted":
+            case_file.set_status(f["id"], "refuted")
 
 
 def apply_case_updates(case_file, joiner_text: str, *, source_qid: str) -> int:
