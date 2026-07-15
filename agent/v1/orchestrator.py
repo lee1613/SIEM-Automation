@@ -31,7 +31,7 @@ from langsmith.run_helpers import get_current_run_tree, tracing_context
 
 from grounding import is_grounded, best_candidate
 from splunk_subagent import VERIFIER_MAX_ITER
-from case_file import build_ledger, render_ledger, snap_to_ledger
+from case_file import build_ledger, render_ledger, snap_to_ledger, CaseFile, parse_case_updates
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
@@ -87,7 +87,10 @@ RULES:
   Do NOT write TASKS in that case.
 - Also output one line:  EXPECTED SHAPE: <the exact form the scoreboard wants —
   e.g. "bare MAC address lowercase", "integer only", "comma-separated lowercase
-  list no spaces", "filename with extension". Derive it from the answer guidance.>"""
+  list no spaces", "filename with extension". Derive it from the answer guidance.>
+
+A CASE FILE block may precede this conversation — treat `[?]`/`[X]` findings as unproven; \
+re-verify before building a plan on them."""
 
 
 # ── Joiner prompt ──────────────────────────────────────────────────────────────
@@ -136,7 +139,14 @@ of those values copied character-for-character (or a value from the question
 text). Do not re-type, trim, expand, or reformat a candidate: no dropping
 domain suffixes, no rounding numbers, no removing prefixes. If two candidates
 conflict, prefer the one whose SPL and status best satisfy the question's own
-constraints, and copy it exactly."""
+constraints, and copy it exactly.
+
+CASE UPDATES — after your FINAL ANSWER line, record durable incident facts:
+CASE UPDATES:
+- entity <host|user|ip|domain|file|hash|bucket|cve> <value>
+- finding [verified|hypothesis] <one-sentence claim> | evidence: <sourcetype/SPL fragment>
+Only include facts a future question could reuse. Mark [verified] only if a
+worker proved it with a query this round."""
 
 
 # ── Verifier prompt (prove-or-refute pass for >=500pt questions) ───────────────
@@ -226,6 +236,20 @@ def parse_verifier_verdict(text: str) -> dict:
     return {"verdict": "confirmed", "correction": ""}
 
 
+def apply_case_updates(case_file, joiner_text: str, *, source_qid: str) -> int:
+    """Parse a CASE UPDATES block and write it into the case file. Returns count."""
+    n = 0
+    for u in parse_case_updates(joiner_text):
+        if u["kind"] == "entity":
+            case_file.add_entity(u["etype"], u["value"], qid=source_qid)
+            n += 1
+        elif u["kind"] == "finding":
+            case_file.add_finding(u["claim"], evidence=u.get("evidence", ""),
+                                  source_qid=source_qid, status=u["status"])
+            n += 1
+    return n
+
+
 HANDOFF_MAX_CHARS = 1500
 HANDOFF_KEEP      = 3      # most recent digests injected per question
 
@@ -283,9 +307,11 @@ class SHState(TypedDict):
 class DelegationContext:
     """Shared mutable context: pool, logger, and per-question delegation log."""
 
-    def __init__(self, pool, logger):
-        self.pool   = pool
-        self.logger = logger
+    def __init__(self, pool, logger, case_file=None, use_case_file=True):
+        self.pool          = pool
+        self.logger        = logger
+        self.case_file     = case_file
+        self.use_case_file = use_case_file
         self.current_qid        = None
         self.current_points     = 0
         self.current_question   = ""
@@ -323,7 +349,15 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         round_n  = state.get("plan_round", 0) + 1
         print(f"\n[SH PLANNER — round {round_n}]")
 
-        msgs      = [sys_planner] + _window(state["messages"])
+        extra = []
+        if ctx.case_file and ctx.use_case_file:
+            digest = ctx.case_file.render_digest()
+            if digest.strip():
+                extra = [SystemMessage(content=(
+                    "CASE FILE (known incident state — verified [OK], "
+                    "hypothesis [?], refuted [X]; re-verify [?]/[X] findings "
+                    "before relying on them):\n" + digest))]
+        msgs      = [sys_planner] + extra + _window(state["messages"])
         response  = llm.invoke(msgs)
         plan_text = (response.content or "").strip()
         print(f"\n[SH PLAN]\n{plan_text}\n")
@@ -536,6 +570,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                     "needs_replan": True,
                 }
             answer = decision["answer"]
+            if ctx.case_file and ctx.use_case_file:
+                apply_case_updates(ctx.case_file, jtext, source_qid=ctx.current_qid)
             return {
                 "messages":     [joiner_hm, response],
                 "plan_text":    jtext,

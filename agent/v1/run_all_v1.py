@@ -50,7 +50,7 @@ from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 from grounding import is_grounded, best_candidate
-from case_file import build_ledger
+from case_file import CaseFile, build_ledger
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
@@ -242,6 +242,7 @@ def main():
         selected = selected[:args.limit]
 
     logger  = RunLogger(full_run=full_run, version_major=1, run_name=args.run_name)
+    case_file = CaseFile(os.path.join(logger.run_dir, "case_file.json"))
     tracker = UsageTracker()
 
     # Each run gets its own LangSmith project, named after the run so traces
@@ -265,7 +266,7 @@ def main():
                                  senior_model=senior_model,
                                  senior_base_url=senior_base_url,
                                  tracker=tracker)
-    ctx       = DelegationContext(pool, logger)
+    ctx       = DelegationContext(pool, logger, case_file=case_file)
     # SQLite-backed so cross-question memory survives a killed/resumed process
     # (same --run-name -> same run_dir -> same checkpoint file picked back up).
     checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
