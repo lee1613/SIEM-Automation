@@ -3,7 +3,7 @@
 v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
-    -> parallel Senior Splunk workers (gpt-5.4 via OpenAI)
+    -> parallel Senior Splunk workers (gpt-5.4-mini via OpenAI)
     -> Extractor (Llama-3.3-70B via NIM, prose-strip only)
     -> scoreboard (1x)
 
@@ -55,7 +55,7 @@ from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
-SENIOR_MODEL  = "gpt-5.4"
+SENIOR_MODEL  = "gpt-5.4-mini"
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -196,7 +196,7 @@ def main():
                              "Vultr: https://api.vultrinference.com/v1). Omit to use OpenAI.")
     parser.add_argument("--senior-api-key-env", default="OPENAI_API_KEY",
                         help="Name of the env var holding the Senior API key "
-                             "(default: OPENAI_API_KEY for gpt-5.4).")
+                             "(default: OPENAI_API_KEY for gpt-5.4-mini).")
     parser.add_argument("--run-name", default=None,
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     parser.add_argument("--recon", action="store_true",
