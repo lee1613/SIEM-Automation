@@ -64,6 +64,31 @@ def snap_to_ledger(answer: str, ledger: list) -> str:
     return answer
 
 
+# 'UF = 2059' — short alnum label, '=', then the value. Deliberately narrow so
+# sentence-shaped answers are never touched.
+_LABEL_PREFIX = re.compile(r'^\s*[A-Za-z][A-Za-z0-9_ ]{0,30}=\s*(?=\S)')
+
+
+def finalize_answer(clean: str, delegations: list) -> str:
+    """Last normalization before scoreboard submit (both the normal and the
+    post-hint extract paths). Snap first — a verbatim ledger match is never
+    modified — then strip a leading '<label> = ' and snap again. Q331
+    regression: post-hint extractor emitted 'UF = 2059' and it was submitted
+    raw because snap_to_ledger only ran inside joiner_node."""
+    clean = (clean or "").strip()
+    ledger = build_ledger(delegations)
+    # Check if the answer matches any ledger value exactly (case-insensitive)
+    a_lower = clean.lower()
+    for c in ledger:
+        if c["value"].strip().lower() == a_lower:
+            return c["value"]  # Return the exact ledger form
+    # If no ledger match, try stripping the label prefix and snapping again
+    stripped = _LABEL_PREFIX.sub("", clean).strip()
+    if stripped and stripped != clean:
+        return snap_to_ledger(stripped, ledger)
+    return clean
+
+
 _LEDGER_MAX_CHARS = 4000
 
 
