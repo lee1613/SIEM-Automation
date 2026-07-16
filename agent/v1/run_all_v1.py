@@ -50,7 +50,7 @@ from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 from grounding import is_grounded, best_candidate
-from case_file import CaseFile, build_ledger
+from case_file import CaseFile, build_ledger, finalize_answer
 from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
@@ -397,6 +397,7 @@ def main():
                 print(f"[EXTRACTOR] FAILED after retries ({exc}); falling back to best worker answer")
                 logger.events.emit("extract_failed", qid=qid, error=str(exc)[:200])
         stage_ms["extract"] = t_ext.ms
+        clean = finalize_answer(clean, ctx.q_delegations)
         print(f"[EXTRACTOR] clean={clean!r}")
 
         # ── Hint economy: ungrounded >=500pt answer buys official hint 1 ─────────
@@ -423,6 +424,7 @@ def main():
                                                   qid=qid, expected_shape=guidance)
                     except Exception:
                         clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                    clean = finalize_answer(clean, ctx.q_delegations)
                     print(f"[HINT] post-hint clean={clean!r}")
 
         # ── Single scoreboard submission ──────────────────────────────────────────
