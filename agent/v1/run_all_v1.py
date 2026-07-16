@@ -50,7 +50,7 @@ from splunk_subagent import SplunkWorkerPool
 from extractor import Extractor
 from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
 from grounding import is_grounded, best_candidate
-from case_file import CaseFile, build_ledger, finalize_answer
+from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
 from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
@@ -435,6 +435,9 @@ def main():
             sb_correct = sb.correct
             earned_pts += pts_earned
             verdict = "[CORRECT]" if sb_correct else "[WRONG]"
+            demoted = reconcile_findings(case_file, qid, sb_correct)
+            if demoted:
+                print(f"[CASE] verdict WRONG — demoted {demoted} finding(s) from {qid} to hypothesis")
         except Exception as exc:
             pts_earned, sb_correct = 0, False
             verdict = f"[SB UNAVAILABLE: {exc}]"

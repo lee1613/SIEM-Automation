@@ -203,6 +203,21 @@ class CaseFile:
         return out
 
 
+def reconcile_findings(case_file, qid: str, correct: bool) -> int:
+    """Post-submit truth feedback: a WRONG scoreboard verdict demotes that
+    question's verified findings to hypothesis so later planners re-verify
+    them (the joiner over-marks [verified] — smoke test_20260716_095627 put
+    12/12 findings verified, including from wrong answers). Returns count."""
+    if correct:
+        return 0
+    n = 0
+    for f in case_file.iter_findings():
+        if f["source_qid"] == qid and f["status"] == "verified":
+            case_file.set_status(f["id"], "hypothesis")
+            n += 1
+    return n
+
+
 def parse_case_updates(text: str) -> list[dict]:
     """Parse a `CASE UPDATES:` block. Grammar (one per line under the header):
       - entity <type> <value>
