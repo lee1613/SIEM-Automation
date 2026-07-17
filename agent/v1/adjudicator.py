@@ -13,6 +13,7 @@ submit a value the adjudicator invented — Q321's `1000`-from-nowhere class.
 from __future__ import annotations
 
 import re
+from case_file import extract_candidate
 
 _STATUS_RANK = {"solved": 3, "partial": 2, "too_big": 1, "failed": 0}
 
@@ -117,3 +118,24 @@ def adjudicate_once(invoke, question: str, guidance: str, ledger: list) -> dict:
     answer = resolve_choice(parsed["choice"], ledger, question)
     return {"answer": answer, "confidence": parsed["confidence"],
             "tiebreak": parsed["tiebreak"], "raw": raw}
+
+
+def majority_answer(records: list) -> dict | None:
+    """C4 self-consistency: metrics tasks are sampled 3x (temperature 0.3);
+    the value extracted from a strict majority (>=2) of records wins. Returns
+    the winning record (best status among the majority's holders) so the
+    executor can use it verbatim as the task result; None when no majority —
+    caller falls back to its first result. Q206's 2.9348->2.94 rounding slip
+    and Q331's manual-vs-SPL method split are both caught by a 3-sample vote."""
+    votes: dict[str, list] = {}
+    for r in records:
+        c = extract_candidate(r)
+        if not c:
+            continue
+        votes.setdefault(c["value"].strip().lower(), []).append(r)
+    if not votes:
+        return None
+    holders = max(votes.values(), key=len)
+    if len(holders) < 2:
+        return None
+    return max(holders, key=lambda r: _STATUS_RANK.get(r.get("status"), 0))
