@@ -97,6 +97,10 @@ RULES:
   scripts, logs to READ), [METRICS] for any computed number (averages,
   percentiles, durations, counts with arithmetic). Untagged tasks default to
   [HUNTER].
+- If the question message contains a DUAL-TRACK instruction: your TASKS must
+  form two clearly orthogonal approaches (different sourcetype families or
+  methods), 2-3 tasks each within the 6-task cap, and at least one task must
+  enumerate the whole population unfiltered before narrowing.
 - Never use DIRECT ANSWER for a value that comes from the CASE FILE block; delegate a task to re-verify it instead.
 
 A CASE FILE block may precede this conversation — treat `[?]`/`[X]` findings as unproven; \

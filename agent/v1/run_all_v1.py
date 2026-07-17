@@ -56,6 +56,7 @@ from hint_client import HintBook
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL      = "gpt-5.4"
 SENIOR_MODEL  = "gpt-5.4-mini"
+DUAL_TRACK_MIN_POINTS = 1000   # C2: 1000-pt questions get two orthogonal plan tracks
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -87,10 +88,20 @@ def force_utf8_stdio() -> None:
             pass
 
 
-def build_sh_message(qid, qtext, guidance):
+def build_sh_message(qid, qtext, guidance, points=0):
     lines = [f"New question — {qid}.", f"Question: {qtext}"]
     if guidance:
         lines.append(f"Answer format guidance: {guidance}")
+    if points >= DUAL_TRACK_MIN_POINTS:
+        lines.append(
+            "DUAL-TRACK: this is a 1000-point question. Produce TWO orthogonal "
+            "task tracks that attack it via DIFFERENT sourcetype families or "
+            "approaches (2-3 tasks each). At least one task must enumerate the "
+            "whole candidate population UNFILTERED (e.g. `stats count by "
+            "<entity>` / `stats sum(bytes) by Username`) before any track "
+            "narrows to a specific lead. Keep tracks $N-independent so they "
+            "run in parallel."
+        )
     lines.append(
         "Write your PLAN block, then produce your TASKS list. "
         "Scan your memory for relevant prior findings (hosts, IPs, usernames, bucket names, "
