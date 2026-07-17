@@ -54,8 +54,9 @@ from case_file import CaseFile, build_ledger, finalize_answer, reconcile_finding
 from hint_client import HintBook
 
 # ── Models ───────────────────────────────────────────────────────────────────────
-SH_MODEL      = "gpt-5.4"
-SENIOR_MODEL  = "gpt-5.4-mini"
+SH_MODEL         = "gpt-5.4"
+SENIOR_MODEL     = "gpt-5.4-mini"
+ESCALATION_MODEL = "gpt-5.4"   # C3: adjudicator's strong-model track B
 DUAL_TRACK_MIN_POINTS = 1000   # C2: 1000-pt questions get two orthogonal plan tracks
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
@@ -286,7 +287,9 @@ def main():
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
                                  senior_model=senior_model,
                                  senior_base_url=senior_base_url,
-                                 tracker=tracker)
+                                 tracker=tracker,
+                                 escalation_api_key=OPENAI_API_KEY,
+                                 escalation_model=ESCALATION_MODEL)
     ctx       = DelegationContext(pool, logger, case_file=case_file)
     # SQLite-backed so cross-question memory survives a killed/resumed process
     # (same --run-name -> same run_dir -> same checkpoint file picked back up).
@@ -299,7 +302,8 @@ def main():
     ls_project = os.environ["LANGSMITH_PROJECT"]
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
-    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  Extractor={extractor.model}(NIM)")
+    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  "
+          f"Escalation={ESCALATION_MODEL}  Extractor={extractor.model}(NIM)")
     print(f"  Questions: {len(selected)}   Log dir: {logger.run_dir}")
     print(f"  LangSmith project: {ls_project}")
     print("=" * 80)
@@ -376,7 +380,7 @@ def main():
         correct  = (answers.get(qid, {}) or {}).get("answer", "") or ""
         total_points += points
 
-        ctx.reset_question(qid, points=points, question=qtext)
+        ctx.reset_question(qid, points=points, question=qtext, guidance=guidance)
         tracker.reset_sh_question()
         logger.timeline_question_header(qid, qtext, points)
         print(f"\n{'-'*80}\n[{qid}]  {points} pts  |  {qtext[:90]}")
