@@ -32,6 +32,8 @@ from langsmith.run_helpers import get_current_run_tree, tracing_context
 from grounding import is_grounded, best_candidate
 from splunk_subagent import VERIFIER_MAX_ITER
 from case_file import build_ledger, render_ledger, snap_to_ledger, CaseFile, parse_case_updates
+from adjudicator import (adjudicate_once, resolve_choice, fallback_choice,
+                         ADJUDICATOR_SYSTEM_PROMPT)
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
@@ -39,6 +41,8 @@ MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
 MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
+ADJUDICATE_MIN_CANDIDATES = 2     # adjudication only when selection is a real choice
+ESCALATE_MIN_POINTS       = 1000  # C3: low-confidence 1000-pt questions escalate to gpt-5.4
 
 
 def _window(messages):
@@ -325,6 +329,7 @@ class SHState(TypedDict):
     done:         bool
     needs_replan: bool                           # True -> route joiner back to planner
     verified:     bool                           # True once the verifier pass has run
+    adjudicated:  bool                           # True once the adjudicator pass has run
 
 
 class DelegationContext:
@@ -338,15 +343,18 @@ class DelegationContext:
         self.current_qid        = None
         self.current_points     = 0
         self.current_question   = ""
+        self.current_guidance   = ""
         self.failed_delegations = 0
         self.q_delegations      = []
         self.q_handoffs         = []
         self.all_delegations    = []
 
-    def reset_question(self, qid: str, points: int = 0, question: str = "") -> None:
+    def reset_question(self, qid: str, points: int = 0, question: str = "",
+                       guidance: str = "") -> None:
         self.current_qid      = qid
         self.current_points   = points
         self.current_question = question
+        self.current_guidance = guidance
         self.q_delegations    = []
         self.q_handoffs       = []
 
@@ -721,6 +729,93 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         # the joiner<->verifier loop always terminates.
         return {"verified": True, "done": True}
 
+    # ── Adjudicator (Plan C: rule-ranked selection over the candidate ledger) ─
+    def adjudicator_node(state: SHState) -> dict:
+        answer = state.get("final_answer", "")
+        ledger = build_ledger(ctx.q_delegations)
+        if len(ledger) < ADJUDICATE_MIN_CANDIDATES:
+            return {"adjudicated": True}   # nothing to select between
+
+        def _invoke(prompt_text: str) -> str:
+            resp = llm.invoke([SystemMessage(content=ADJUDICATOR_SYSTEM_PROMPT),
+                               HumanMessage(content=prompt_text)])
+            return (resp.content or "").strip()
+
+        print(f"\n[SH ADJUDICATOR]  {len(ledger)} candidate(s), joiner pick={answer!r}")
+        verdict = adjudicate_once(_invoke, ctx.current_question,
+                                  ctx.current_guidance, ledger)
+
+        # One bounded follow-up per question: a targeted tiebreak query, or —
+        # on low-confidence 1000-pt questions — a strong-model escalation run.
+        escalate = ctx.current_points >= ESCALATE_MIN_POINTS
+        needs_followup = bool(verdict["tiebreak"]) or (
+            verdict["confidence"] == "low" and escalate)
+        if needs_followup:
+            subq = verdict["tiebreak"] or (
+                f"{ctx.current_question}\n\nPrior workers produced conflicting "
+                f"candidates (below). Independently determine the answer using "
+                f"a DIFFERENT approach or sourcetype family — do not just "
+                f"re-run their queries.\n\n{render_ledger(ledger)}")
+            worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
+            label = "ESCALATION" if escalate else "TIEBREAK"
+            print(f"[SH ADJUDICATOR] {label} -> senior#{worker_idx}: {subq[:200]}")
+            try:
+                result = _run_senior(ctx, subq, worker_idx,
+                                     get_current_run_tree(), escalate=escalate)
+            except Exception as exc:
+                result = None
+                print(f"[SH ADJUDICATOR] {label} worker crashed: {exc} — "
+                      f"adjudicating on the existing ledger")
+            if result is not None:
+                record = {
+                    "worker":      f"senior#{worker_idx}",
+                    "qid":         ctx.current_qid,
+                    "subquestion": subq,
+                    "status":      result.get("status", "?"),
+                    "answer":      result.get("answer", ""),
+                    "spl_used":    result.get("spl_used", []),
+                    "sourcetypes": result.get("sourcetypes", []),
+                    "full_state":  result.get("full_state", []),
+                    "iterations":  result.get("iterations", 0),
+                    "cap_hit":     result.get("cap_hit", False),
+                }
+                ctx.q_delegations.append(record)
+                ctx.all_delegations.append(record)
+                ctx.logger.timeline(
+                    f"- **Adjudicator {label.lower()} #{worker_idx}**  "
+                    f"_[{record['status']}]_\n"
+                    f"    - answer: {(record['answer'] or '').strip()[:400]}")
+                ledger = build_ledger(ctx.q_delegations)
+                verdict = adjudicate_once(_invoke, ctx.current_question,
+                                          ctx.current_guidance, ledger)
+
+        chosen = verdict["answer"]
+        if not chosen:
+            # UNKNOWN / synthesized choice. Q321 hard rule: keep the joiner's
+            # answer if it is itself an honest ledger/question value, else take
+            # the best honest candidate — never a value from nowhere.
+            if resolve_choice(answer, ledger, ctx.current_question):
+                chosen = answer
+            else:
+                chosen = fallback_choice(ledger) or answer
+        changed = (chosen != answer)
+        print(f"[SH ADJUDICATOR] choice={chosen!r} "
+              f"confidence={verdict['confidence']} changed={changed}")
+        _emit = getattr(ctx.logger, "events", None)
+        if _emit:
+            _emit.emit("adjudication", qid=ctx.current_qid, chosen=chosen,
+                       confidence=verdict["confidence"], changed=changed,
+                       candidates=len(ledger))
+        ctx.logger.timeline(
+            f"- **Adjudicator**  confidence={verdict['confidence']} "
+            f"candidates={len(ledger)}\n"
+            f"    - joiner pick: {answer!r}\n"
+            f"    - adjudicated: {chosen!r}{'  (CHANGED)' if changed else ''}")
+        out: dict = {"adjudicated": True}
+        if changed:
+            out["final_answer"] = chosen
+        return out
+
     # ── Graph wiring ──────────────────────────────────────────────────────────
     def route_planner(state: SHState) -> str:
         return END if state.get("done") else "executor"
@@ -729,27 +824,33 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         if state.get("needs_replan"):
             return "planner"
         if state.get("done"):
-            if _should_verify(ctx) and not state.get("verified"):
-                return "verifier"
-            return END
+            return "adjudicator"
         if state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
             return END
         if state.get("tasks"):      # replan set new tasks
             return "executor"
         return END
 
+    def route_adjudicator(state: SHState) -> str:
+        if _should_verify(ctx) and not state.get("verified"):
+            return "verifier"
+        return END
+
     g = StateGraph(SHState)
-    g.add_node("planner",  planner_node)
-    g.add_node("executor", executor_node)
-    g.add_node("joiner",   joiner_node)
-    g.add_node("verifier", verifier_node)
+    g.add_node("planner",     planner_node)
+    g.add_node("executor",    executor_node)
+    g.add_node("joiner",      joiner_node)
+    g.add_node("adjudicator", adjudicator_node)
+    g.add_node("verifier",    verifier_node)
     g.set_entry_point("planner")
     g.add_conditional_edges("planner",  route_planner,
                             {"executor": "executor", END: END})
     g.add_edge("executor", "joiner")
     g.add_conditional_edges("joiner",   route_joiner,
                             {"executor": "executor", "planner": "planner",
-                             "verifier": "verifier", END: END})
+                             "adjudicator": "adjudicator", END: END})
+    g.add_conditional_edges("adjudicator", route_adjudicator,
+                            {"verifier": "verifier", END: END})
     g.add_edge("verifier", END)
 
     if checkpoint_db_path:
@@ -761,7 +862,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
 
 def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree,
-                max_iter: int | None = None) -> dict:
+                max_iter: int | None = None, sample: bool = False,
+                escalate: bool = False) -> dict:
     """Submit one Senior worker task (called from ThreadPoolExecutor thread).
 
     contextvars (which LangSmith's tracing relies on) don't propagate into a
@@ -772,7 +874,8 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
     """
     with tracing_context(parent=parent_run_tree):
         return ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
-                                   points=ctx.current_points, max_iter=max_iter)
+                                   points=ctx.current_points, max_iter=max_iter,
+                                   sample=sample, escalate=escalate)
 
 
 def run_sh(graph, message: str, thread_id: str,
@@ -805,6 +908,7 @@ def run_sh(graph, message: str, thread_id: str,
             "done":         False,
             "needs_replan": False,
             "verified":     False,
+            "adjudicated":  False,
         },
         config=config,
     )
