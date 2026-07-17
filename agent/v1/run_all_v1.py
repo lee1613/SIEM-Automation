@@ -387,7 +387,7 @@ def main():
         with logger.events.timer() as t_sh:
             sh_answer, _ = run_sh(
                 sh_graph,
-                build_sh_message(qid, qtext, guidance),
+                build_sh_message(qid, qtext, guidance, points=points),
                 run_thread,
                 qid=qid,
                 run_name=f"SH-{qid}",
