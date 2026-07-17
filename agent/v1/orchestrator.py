@@ -33,7 +33,8 @@ from grounding import is_grounded, best_candidate
 from splunk_subagent import VERIFIER_MAX_ITER
 from case_file import build_ledger, render_ledger, snap_to_ledger, CaseFile, parse_case_updates
 from adjudicator import (adjudicate_once, resolve_choice, fallback_choice,
-                         ADJUDICATOR_SYSTEM_PROMPT)
+                         ADJUDICATOR_SYSTEM_PROMPT, majority_answer)
+from specialists import parse_specialist_tag
 
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
@@ -43,6 +44,8 @@ MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
 ADJUDICATE_MIN_CANDIDATES = 2     # adjudication only when selection is a real choice
 ESCALATE_MIN_POINTS       = 1000  # C3: low-confidence 1000-pt questions escalate to gpt-5.4
+METRICS_SAMPLES   = 3     # C4: samples per metrics task (majority vote)
+SAMPLE_MIN_POINTS = 500   # only high-value questions pay the 3x metrics cost
 
 
 def _window(messages):
@@ -323,6 +326,17 @@ def substitute_deps(subquestion: str, completed: dict) -> str:
     return re.sub(r'\$(\d+)', _replace, subquestion)
 
 
+def plan_samples(subquestion: str, points: int) -> int:
+    """C4 self-consistency: [METRICS] tasks on high-value questions run 3x
+    (temperature 0.3) and the majority extracted value wins. Everything else
+    runs once. Gated at >=500pt as a cost guard — the spec samples all metrics
+    questions, but low-value ones can't recoup the 3x spend."""
+    if (parse_specialist_tag(subquestion) == "metrics"
+            and (points or 0) >= SAMPLE_MIN_POINTS):
+        return METRICS_SAMPLES
+    return 1
+
+
 class SHState(TypedDict):
     messages:     Annotated[list, add_messages]  # persistent across all questions
     plan_text:    str                            # last plan/replan text (debug)
@@ -457,23 +471,33 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 print("[SH EXECUTOR] unresolvable dependency — running first pending task")
                 ready = [remaining[0]]
 
-            n_workers = min(len(ready), MAX_WORKERS)
-            print(f"\n[SH EXECUTOR] dispatching {len(ready)} task(s) "
-                  f"({n_workers} parallel worker slot(s))")
+            submissions = sum(plan_samples(t.subquestion, ctx.current_points)
+                              for t in ready)
+            n_workers = min(submissions, MAX_WORKERS)
+            print(f"\n[SH EXECUTOR] dispatching {len(ready)} task(s), "
+                  f"{submissions} worker run(s) ({n_workers} parallel slot(s))")
 
             parent_run_tree = get_current_run_tree()
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as exe:
                 futures: dict = {}
                 for t in ready:
-                    subq       = substitute_deps(t.subquestion, completed)
+                    subq = substitute_deps(t.subquestion, completed)
                     if ctx.q_handoffs:
                         subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
                                  "(resume the hunt, do not restart it):\n"
                                  + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]))
-                    worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
-                    print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
-                    futures[exe.submit(_run_senior, ctx, subq, worker_idx, parent_run_tree)] = (t, worker_idx, subq)
+                    n = plan_samples(t.subquestion, ctx.current_points)
+                    if n > 1:
+                        print(f"[SH EXECUTOR] metrics task {t.idx}: sampling {n}x "
+                              f"(temperature 0.3, majority vote)")
+                    for _s in range(n):
+                        worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
+                        print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
+                        futures[exe.submit(_run_senior, ctx, subq, worker_idx,
+                                           parent_run_tree,
+                                           sample=(n > 1))] = (t, worker_idx, subq)
 
+                per_task: dict[int, list] = {}
                 for fut, (t, worker_idx, subq) in futures.items():
                     try:
                         result = fut.result()
@@ -484,7 +508,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                             "spl_used": [], "sourcetypes": [], "full_state": [],
                             "iterations": 0, "cap_hit": False,
                         }
-                    completed[t.idx] = result
+                    per_task.setdefault(t.idx, []).append(result)
 
                     if (result["status"] in ("too_big", "failed")
                             or result.get("cap_hit")):
@@ -514,6 +538,16 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                         f"    - answer: {(result['answer'] or '').strip()[:400]}\n"
                         f"    - SPL: {result['spl_used']}"
                     )
+
+                for idx_, res_list in per_task.items():
+                    if len(res_list) > 1:
+                        winner = majority_answer(res_list)
+                        if winner is not None:
+                            print(f"[SH EXECUTOR] task {idx_}: majority vote -> "
+                                  f"{(winner.get('answer') or '')[:120]!r}")
+                        completed[idx_] = winner or res_list[0]
+                    else:
+                        completed[idx_] = res_list[0]
 
             remaining = [t for t in remaining if t.idx not in completed]
 
