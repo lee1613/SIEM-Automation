@@ -392,7 +392,7 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
 def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
                  extra_instructions: str = "", extra_tools: list | None = None,
-                 max_iter: int = MAX_ITER):
+                 max_iter: int = MAX_ITER, temperature: float = 0):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -414,6 +414,9 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                             higher-budget graph (see `iter_budget`) for >=500pt
                             questions. All in-closure iteration-cap checks use this
                             local value, not the module constant.
+        temperature:        sampling temperature (default 0 — deterministic;
+                            the v1 pool passes 0.3 for self-consistency
+                            sampling of metrics tasks).
     """
     tools    = make_tools(splunk)
     if extra_tools:
@@ -428,7 +431,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         api_key=api_key,
         model=model,
         base_url=base_url,
-        temperature=0,
+        temperature=temperature,
         **token_kwargs,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
