@@ -47,6 +47,15 @@ def test_resolve_choice_rejects_synthesized_value():
     assert resolve_choice("", LEDGER) is None
 
 
+def test_resolve_choice_word_boundary_on_question_text():
+    # accept: whole-token match against question text still works
+    assert resolve_choice("Frothly", LEDGER, "Which host at Frothly?") == "Frothly"
+    # reject: a substring of a larger number/word must not validate — raw
+    # substring match let "42" pass against "142.51", the exact class of
+    # synthesized-value leak the Q321 hard rule exists to prevent.
+    assert resolve_choice("42", LEDGER, "what is 142.51 bytes?") is None
+
+
 def test_fallback_choice_prefers_solved_over_partial():
     assert fallback_choice(LEDGER) == "1367.875"
     assert fallback_choice([]) is None

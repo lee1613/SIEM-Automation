@@ -76,7 +76,7 @@ def resolve_choice(choice: str, ledger: list, question_text: str = "") -> str | 
     for entry in ledger:
         if entry["value"].strip().lower() == cl:
             return entry["value"]
-    if question_text and cl in question_text.lower():
+    if question_text and re.search(rf'(?<!\w){re.escape(cl)}(?!\w)', question_text.lower()):
         return c
     return None
 

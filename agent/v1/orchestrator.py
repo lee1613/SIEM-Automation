@@ -326,6 +326,23 @@ def substitute_deps(subquestion: str, completed: dict) -> str:
     return re.sub(r'\$(\d+)', _replace, subquestion)
 
 
+def _delegation_record(worker_idx, qid, subq: str, result: dict) -> dict:
+    """The delegation-record dict shape shared by executor/verifier/adjudicator
+    nodes — same 10 keys, same values, every call site."""
+    return {
+        "worker":      f"senior#{worker_idx}",
+        "qid":         qid,
+        "subquestion": subq,
+        "status":      result.get("status", "?"),
+        "answer":      result.get("answer", ""),
+        "spl_used":    result.get("spl_used", []),
+        "sourcetypes": result.get("sourcetypes", []),
+        "full_state":  result.get("full_state", []),
+        "iterations":  result.get("iterations", 0),
+        "cap_hit":     result.get("cap_hit", False),
+    }
+
+
 def plan_samples(subquestion: str, points: int) -> int:
     """C4 self-consistency: [METRICS] tasks on high-value questions run 3x
     (temperature 0.3) and the majority extracted value wins. Everything else
@@ -498,6 +515,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                                            sample=(n > 1))] = (t, worker_idx, subq)
 
                 per_task: dict[int, list] = {}
+                # A sampled [METRICS] task (plan_samples>1) dispatches up to 3
+                # futures for the SAME t.idx — count/hand-off its failure at
+                # most once per task per round, not once per failing sample.
+                counted_failed_idx: set[int] = set()
                 for fut, (t, worker_idx, subq) in futures.items():
                     try:
                         result = fut.result()
@@ -512,23 +533,14 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
                     if (result["status"] in ("too_big", "failed")
                             or result.get("cap_hit")):
-                        if result["status"] in ("too_big", "failed"):
-                            ctx.failed_delegations += 1
-                        ctx.q_handoffs.append(build_handoff_digest(
-                            {**result, "worker": f"senior#{worker_idx}"}))
+                        if t.idx not in counted_failed_idx:
+                            if result["status"] in ("too_big", "failed"):
+                                ctx.failed_delegations += 1
+                            ctx.q_handoffs.append(build_handoff_digest(
+                                {**result, "worker": f"senior#{worker_idx}"}))
+                            counted_failed_idx.add(t.idx)
 
-                    record = {
-                        "worker":      f"senior#{worker_idx}",
-                        "qid":         ctx.current_qid,
-                        "subquestion": subq,
-                        "status":      result["status"],
-                        "answer":      result["answer"],
-                        "spl_used":    result["spl_used"],
-                        "sourcetypes": result["sourcetypes"],
-                        "full_state":  result["full_state"],
-                        "iterations":  result.get("iterations", 0),
-                        "cap_hit":     result.get("cap_hit", False),
-                    }
+                    record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
                     ctx.q_delegations.append(record)
                     ctx.all_delegations.append(record)
 
@@ -729,18 +741,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         if ctx.case_file and ctx.use_case_file:
             promote_from_verdict(ctx.case_file, answer, verdict)
 
-        record = {
-            "worker":      f"senior#{worker_idx}",
-            "qid":         ctx.current_qid,
-            "subquestion": verify_subq,
-            "status":      result.get("status", "?"),
-            "answer":      result.get("answer", ""),
-            "spl_used":    result.get("spl_used", []),
-            "sourcetypes": result.get("sourcetypes", []),
-            "full_state":  result.get("full_state", []),
-            "iterations":  result.get("iterations", 0),
-            "cap_hit":     result.get("cap_hit", False),
-        }
+        record = _delegation_record(worker_idx, ctx.current_qid, verify_subq, result)
         ctx.q_delegations.append(record)
         ctx.all_delegations.append(record)
         ctx.logger.timeline(
@@ -805,18 +806,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 print(f"[SH ADJUDICATOR] {label} worker crashed: {exc} — "
                       f"adjudicating on the existing ledger")
             if result is not None:
-                record = {
-                    "worker":      f"senior#{worker_idx}",
-                    "qid":         ctx.current_qid,
-                    "subquestion": subq,
-                    "status":      result.get("status", "?"),
-                    "answer":      result.get("answer", ""),
-                    "spl_used":    result.get("spl_used", []),
-                    "sourcetypes": result.get("sourcetypes", []),
-                    "full_state":  result.get("full_state", []),
-                    "iterations":  result.get("iterations", 0),
-                    "cap_hit":     result.get("cap_hit", False),
-                }
+                record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
                 ctx.q_delegations.append(record)
                 ctx.all_delegations.append(record)
                 ctx.logger.timeline(
