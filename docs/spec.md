@@ -85,8 +85,8 @@ python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
 ├── datasets/                  # botsv3_questions.json / answers.json (answers = reference only)
 ├── botsv3/                    # raw BOTSv3 dataset (922M; tgz + extracted app) — data plane source
 ├── botsv3content/             # official CTF CSVs (loaded into KV stores)
-├── log/                       # v1/run_1.x/ versioned; temp/ unversioned
-└── results/                   # legacy v0 outputs (frozen, archive)
+├── log/                       # v1/run_1.x/ versioned; baseline/ baseline runs; temp/ unversioned
+
 ```
 
 Structure rule: **infra is shared, architecture is versioned.** New major

@@ -277,11 +277,11 @@ def main():
     print(f"Connecting to Splunk at {SPLUNK_HOST} (pool size=6) ...")
     splunk     = SplunkConnectionPool(SPLUNK_HOST, SPLUNK_USER, SPLUNK_PASS, size=6)
     scoreboard = LocalScoreboard(
-        questions_csv=os.path.join(PROJECT_ROOT, "botsv3content", "ctf_questions.csv"),
-        answers_csv=os.path.join(PROJECT_ROOT, "botsv3content", "ctf_answers.csv"),
+        questions_csv=os.path.join(PROJECT_ROOT, "datasets", "botsv3", "ctf_questions.csv"),
+        answers_csv=os.path.join(PROJECT_ROOT, "datasets", "botsv3", "ctf_answers.csv"),
         results_path=os.path.join(logger.run_dir, "scoreboard_submissions.json"),
     )
-    hint_book = HintBook(os.path.join(PROJECT_ROOT, "botsv3content", "ctf_hints.csv")) if args.hints else None
+    hint_book = HintBook(os.path.join(PROJECT_ROOT, "datasets", "botsv3", "ctf_hints.csv")) if args.hints else None
     print(f"Connected.  {splunk}")
 
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,

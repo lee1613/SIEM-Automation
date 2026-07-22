@@ -36,7 +36,7 @@ SPLUNK_USER = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS = os.getenv("SPLUNK_PASS", "")
 BASE_URL    = "https://localhost:8089"
 
-CONTENT_DIR = os.path.join(PROJECT_ROOT, "botsv3content")
+CONTENT_DIR = os.path.join(PROJECT_ROOT, "datasets", "botsv3")
 
 SESS = requests.Session()
 SESS.verify = False

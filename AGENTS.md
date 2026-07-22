@@ -55,9 +55,9 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 | `agent/run_all.py` | Runs agent on all questions and scores via scoreboard |
 | `agent/setup_scoreboard.py` | One-time setup: loads KV data, creates EULA/user |
 | `agent/botsv3_fields.json` | Local field manifest (102 sourcetypes, searched by agent) |
-| `botsv3content/ctf_questions.csv` | Official BOTSv3 questions (loaded into `ctf_questions` KV store) |
-| `botsv3content/ctf_answers.csv` | Official BOTSv3 answers (loaded into `ctf_answers` KV store) |
-| `botsv3content/ctf_hints.csv` | Official BOTSv3 hints (loaded into `ctf_hints` KV store) |
+| `datasets/botsv3/ctf_questions.csv` | Official BOTSv3 questions (loaded into `ctf_questions` KV store) |
+| `datasets/botsv3/ctf_answers.csv` | Official BOTSv3 answers (loaded into `ctf_answers` KV store) |
+| `datasets/botsv3/ctf_hints.csv` | Official BOTSv3 hints (loaded into `ctf_hints` KV store) |
 | `datasets/botsv3_questions.json` | Questions in JSON format (used by `run_all.py`) |
 | `datasets/botsv3_answers.json` | Answers in JSON format (reference only — scoring uses KV store) |
 
