@@ -29,57 +29,10 @@ Cost:     $31.36 (whole run)
   Qwen/Qwen3.6-27B             $0.0000
 ```
 
-The other verified evaluator commands report:
-
-```text
-$ python3 scripts/run_eval.py
-Run:      run_1.2
-Accuracy: 26/56 = 46.4%
-Points:   8000 / 22900
-
-By tier:
-   100 pt   15/24   62.5%
-   500 pt    9/23   39.1%
-  1000 pt    2/9    22.2%
-
-Cost:     $31.36 (whole run)
-  zai-org/GLM-5.2-FP8          $26.5326
-  gpt-5.4-2026-03-05           $4.8297
-  Qwen/Qwen3.6-27B             $0.0000
-
-$ python3 scripts/run_eval.py --ids Q332,Q333
-Run:      run_1.2
-Accuracy: 2/2 = 100.0%
-Points:   2000 / 2000
-
-By tier:
-  1000 pt    2/2   100.0%
-
-Cost:     $31.36 (whole run)
-  zai-org/GLM-5.2-FP8          $26.5326
-  gpt-5.4-2026-03-05           $4.8297
-  Qwen/Qwen3.6-27B             $0.0000
-
-$ python3 scripts/run_eval.py --run run_1.1
-Run:      run_1.1
-Accuracy: 26/56 = 46.4%
-Points:   8300 / 22900
-
-By tier:
-   100 pt   13/24   54.2%
-   500 pt   12/23   52.2%
-  1000 pt    1/9    11.1%
-
-Cost:     $0.63 (whole run)
-  zai-org/GLM-5.2-FP8          $0.5594
-  gpt-5.4-2026-03-05           $0.0701
-  deepseek-ai/DeepSeek-V4-Flash $0.0003
-```
-
 ## Running the tests
 
 ```bash
-pip install pytest ruff && pytest -q && ruff check .
+pip install -r agent/requirements.txt pytest ruff && pytest -q && ruff check .
 ```
 
 ## Live runs (requires Splunk + API keys)
