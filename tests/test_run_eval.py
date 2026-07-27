@@ -138,3 +138,33 @@ def test_render_report_states_accuracy_points_and_cost():
     assert "46.4%" in text
     assert "8000" in text
     assert "$31.36" in text
+
+
+def test_render_leaderboard_contains_both_tables_and_real_numbers():
+    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    markdown = run_eval.render_leaderboard_markdown(
+        run_eval.summarize(rows), run_eval.load_versions()["versions"]
+    )
+    assert "| 1000 pt | 2 / 9 | 22.2% |" in markdown
+    assert "| 100 pt | 15 / 24 | 62.5% |" in markdown
+    assert "46.4%" in markdown
+    assert "$0.63" in markdown  # v1.1 row
+    assert "$31.36" in markdown  # v1.2 row
+
+
+@pytest.mark.xfail(reason="README markers land in Task 9", strict=True)
+def test_readme_leaderboard_block_is_in_sync():
+    # Guards the exact invariant CI enforces with --check.
+    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    expected = run_eval.render_leaderboard_markdown(
+        run_eval.summarize(rows), run_eval.load_versions()["versions"]
+    )
+    assert run_eval.extract_block((REPO / "README.md").read_text()) == expected.strip()
+
+
+def test_replace_block_is_idempotent():
+    original = "intro\n<!-- LEADERBOARD:START -->\nold\n<!-- LEADERBOARD:END -->\noutro\n"
+    once = run_eval.replace_block(original, "new")
+    assert run_eval.replace_block(once, "new") == once
+    assert "old" not in once
+    assert "intro" in once and "outro" in once

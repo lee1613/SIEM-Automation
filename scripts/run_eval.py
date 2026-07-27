@@ -14,12 +14,18 @@ NOT trustworthy — run_1.1's were overwritten by a later partial re-run. Only
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 LOG_ROOT = REPO / "log" / "v1"
 TIERS = (100, 500, 1000)
+EVAL_DIR = REPO / "datasets" / "evaluation"
+README = REPO / "README.md"
+BLOCK_RE = re.compile(
+    r"(?<=<!-- LEADERBOARD:START -->\n).*?(?=\n<!-- LEADERBOARD:END -->)", re.DOTALL
+)
 
 
 def is_correct(submitted: str | None, official: str | None) -> bool:
@@ -129,6 +135,77 @@ def render_report(run_dir: Path, summary: dict, cost: dict) -> str:
     return "\n".join(lines)
 
 
+def load_versions() -> dict:
+    return json.loads((EVAL_DIR / "versions.json").read_text())
+
+
+def render_leaderboard_markdown(summary: dict, versions: list[dict]) -> str:
+    correct, total = summary["correct"], summary["total"]
+    lines = ["| Tier | Solved / Total | Rate |", "|------|:---:|:---:|"]
+    for tier, stats in sorted(summary["tiers"].items()):
+        rate = 100 * stats["correct"] / stats["total"]
+        lines.append(f"| {tier} pt | {stats['correct']} / {stats['total']} | {rate:.1f}% |")
+    lines.append(
+        f"| **Overall** | **{correct} / {total}** | **{100 * correct / total:.1f}%** "
+        f"— {summary['points_earned']} / {summary['points_possible']} pts |"
+    )
+    lines += ["", "| Version | Correct | Points | Cost | Notes |", "|---|:---:|:---:|:---:|---|"]
+    for version in versions:
+        lines.append(
+            f"| {version['version']} | {version['correct']} / {version['questions']} | "
+            f"{version['points']} | ${version['cost_usd']:.2f} | {version['label']} |"
+        )
+    return "\n".join(lines)
+
+
+def extract_block(readme_text: str) -> str | None:
+    match = BLOCK_RE.search(readme_text)
+    return match.group(0).strip() if match else None
+
+
+def replace_block(readme_text: str, markdown: str) -> str:
+    if not BLOCK_RE.search(readme_text):
+        sys.exit("README.md is missing the <!-- LEADERBOARD:START/END --> markers.")
+    return BLOCK_RE.sub(lambda _: markdown.strip(), readme_text)
+
+
+def write_artifacts(run_dir: Path, summary: dict, cost: dict) -> None:
+    EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    (EVAL_DIR / "leaderboard.json").write_text(
+        json.dumps(
+            {
+                "_generated_by": "scripts/run_eval.py --write — do not hand-edit",
+                "run": run_dir.name,
+                "overall": {"correct": summary["correct"], "total": summary["total"]},
+                "points": {
+                    "earned": summary["points_earned"],
+                    "possible": summary["points_possible"],
+                },
+                "tiers": summary["tiers"],
+                "cost": cost,
+                "versions": load_versions()["versions"],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    markdown = render_leaderboard_markdown(summary, load_versions()["versions"])
+    README.write_text(replace_block(README.read_text(), markdown))
+    print(f"Wrote {EVAL_DIR / 'leaderboard.json'} and refreshed the README leaderboard block.")
+
+
+def check_artifacts(summary: dict) -> int:
+    expected = render_leaderboard_markdown(summary, load_versions()["versions"]).strip()
+    if extract_block(README.read_text()) != expected:
+        print(
+            "README leaderboard is stale. Run: python3 scripts/run_eval.py --write",
+            file=sys.stderr,
+        )
+        return 1
+    print("README leaderboard is in sync.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -138,13 +215,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", help="Run directory name, e.g. run_1.1 (default: latest scorable run)")
     parser.add_argument("--tier", type=int, choices=TIERS, help="Score only this point tier")
     parser.add_argument("--ids", help="Comma-separated question ids, e.g. Q332,Q333")
+    parser.add_argument("--write", action="store_true", help="Regenerate leaderboard.json and the README table")
+    parser.add_argument("--check", action="store_true", help="Exit 1 if the README leaderboard is stale (CI)")
     args = parser.parse_args(argv)
+
+    if args.write and args.check:
+        sys.exit("--write and --check are mutually exclusive.")
+    if (args.tier or args.ids) and (args.write or args.check):
+        sys.exit("--write/--check operate on the full run; drop --tier/--ids.")
 
     run_dir = LOG_ROOT / args.run if args.run else latest_run()
     if not run_dir.exists():
         sys.exit(f"No such run: {run_dir}")
     rows = filter_rows(load_rows(run_dir), args.tier, args.ids.split(",") if args.ids else None)
-    print(render_report(run_dir, summarize(rows), load_cost(run_dir)))
+    summary = summarize(rows)
+    cost = load_cost(run_dir)
+
+    if args.write:
+        write_artifacts(run_dir, summary, cost)
+        return 0
+    if args.check:
+        return check_artifacts(summary)
+
+    print(render_report(run_dir, summary, cost))
     return 0
 
 
