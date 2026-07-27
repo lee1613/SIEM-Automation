@@ -24,7 +24,7 @@ This repository is an agent-engineering benchmark built around 56 real forensic 
 |---|:---:|:---:|:---:|---|
 | v0 | 20 / 56 | 5700 | $7.73 | single agent |
 | v1.0 | 20 / 58 | 5650 | $7.36 | SH + Senior pool |
-| v1.1 | 26 / 56 | 8000 | $0.63 | + Junior tier, cheaper Senior model |
+| v1.1 | 26 / 56 | 8300 | $0.63 | + Junior tier, cheaper Senior model |
 | v1.2 | 26 / 56 | 8000 | $31.36 | + grounding guard, structured findings |
 <!-- LEADERBOARD:END -->
 
@@ -38,22 +38,29 @@ v1.3/Plan C is the current architecture; all published metrics below come from t
 flowchart TD
     Q[BOTSv3 question] --> SH[SH orchestrator<br/>persistent-memory planner]
     SH -->|decompose| D{Planning mode}
-    D -->|standard| W[Senior worker pool]
-    D -->|dual-track<br/>high-value Qs| W2[Track A + Track B<br/>orthogonal evidence paths]
-    W --> SPL[(Splunk<br/>index=botsv3)]
-    W2 --> SPL
-    SPL --> F[Structured findings<br/>+ grounding check]
-    F -->|ungrounded| R[Refuse: no fabricated IOC]
-    F -->|grounded| ADJ[Adjudicator<br/>3x self-consistency vote]
-    ADJ -->|low confidence| ESC[Escalate to<br/>stronger model]
+    D -->|standard| T[Worker tasks]
+    D -->|dual-track<br/>1000-point Qs| T2[Track A + Track B<br/>orthogonal worker tasks]
+    T --> W[Senior worker pool<br/>searches Splunk]
+    T2 --> W
+    W -->|one run by default| J[Joiner<br/>synthesizes findings]
+    W -->|eligible metrics task<br/>3 worker samples| M[Strict-majority<br/>worker result]
+    M --> J
+    J --> G{Grounding gate}
+    G -->|grounded| ADJ[Adjudicator<br/>ranks competing candidates]
+    G -->|ungrounded<br/>rounds remain| RP[Bounded targeted replan]
+    RP --> D
+    G -->|round budget exhausted| FB[Best available result<br/>may be an explicit refusal]
+    FB --> ADJ
+    ADJ -->|tie or low confidence<br/>at 1000 points| ESC[One tiebreak or<br/>strong-model follow-up]
     ESC --> ADJ
-    ADJ --> X[Extractor<br/>prose to bare answer]
-    R --> X
+    ADJ -->|500+ points| V[Verifier<br/>prove or refute once]
+    ADJ -->|under 500 points| X[Extractor<br/>prose to bare answer]
+    V --> X
     X --> S[Scoreboard submit<br/>exact match]
 ```
 
-- **Grounding guard:** accepts only answer values present in the question or worker evidence; v1.2 stopped all four previously observed fabrications, although three still scored wrong.
-- **Adjudication + 3× sampling:** Plan C ranks competing candidates and uses a strict-majority vote for eligible high-value metrics tasks; its cost and score impact are not yet measured.
+- **Grounding gate:** grounded values continue; ungrounded values trigger a bounded replan or best-available-result fallback. An explicit refusal can survive as that fallback, but the gate does not manufacture one. In v1.2, all four previously observed fabrications stopped, although three still scored wrong.
+- **Worker sampling + adjudication:** the executor samples only eligible 500+-point metrics tasks three times and takes a strict-majority worker result; later, the adjudicator ranks competing ledger candidates. Their cost and score impact are not yet measured.
 - **Escalation:** one bounded follow-up can route low-confidence 1000-point work to a stronger model, then re-adjudicate; this path is unbenchmarked.
 - **Dual-track planning:** 1000-point questions require two orthogonal evidence paths, including one unfiltered population enumeration, targeting the measured 2/9 hard-tier result.
 
@@ -72,7 +79,7 @@ See [the architecture document](docs/ARCHITECTURE.md) for responsibilities, impl
 
 - Q303 searched `linux_audit`, `linux_secure`, shell, process, and cloud-init evidence, but found no plaintext password-setting event.
 - The agent returned *"The password is not provided in the context"* and was scored **wrong**.
-- In a SOC, a confident wrong IOC costs an analyst hours of chasing; the grounding guard makes the agent decline instead of guessing.
+- In a SOC, a confident wrong IOC costs an analyst hours of chasing; after evidence search and bounded fallback, an explicit refusal can be a safer output than a guess. The grounding gate itself does not manufacture that refusal.
 - **11 of 56 outputs failed grounding; two were explicit refusals (Q303 and Q328).** (`grounded: false` in the [run summary](log/v1/run_1.2/run_summary.json)). Those refusals cost benchmark points and reflect a deliberate safety trade.
 - Evidence: [full Q303 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 

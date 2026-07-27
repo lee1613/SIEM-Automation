@@ -22,17 +22,24 @@ The Extractor in `agent/v1/extractor.py` uses `meta/llama-3.3-70b-instruct` at t
 flowchart TD
     Q[BOTSv3 question] --> SH[SH orchestrator<br/>persistent-memory planner]
     SH -->|decompose| D{Planning mode}
-    D -->|standard| W[Senior worker pool]
-    D -->|dual-track<br/>high-value Qs| W2[Track A + Track B<br/>orthogonal evidence paths]
-    W --> SPL[(Splunk<br/>index=botsv3)]
-    W2 --> SPL
-    SPL --> F[Structured findings<br/>+ grounding check]
-    F -->|ungrounded| R[Refuse: no fabricated IOC]
-    F -->|grounded| ADJ[Adjudicator<br/>3x self-consistency vote]
-    ADJ -->|low confidence| ESC[Escalate to<br/>stronger model]
+    D -->|standard| T[Worker tasks]
+    D -->|dual-track<br/>1000-point Qs| T2[Track A + Track B<br/>orthogonal worker tasks]
+    T --> W[Senior worker pool<br/>searches Splunk]
+    T2 --> W
+    W -->|one run by default| J[Joiner<br/>synthesizes findings]
+    W -->|eligible metrics task<br/>3 worker samples| M[Strict-majority<br/>worker result]
+    M --> J
+    J --> G{Grounding gate}
+    G -->|grounded| ADJ[Adjudicator<br/>ranks competing candidates]
+    G -->|ungrounded<br/>rounds remain| RP[Bounded targeted replan]
+    RP --> D
+    G -->|round budget exhausted| FB[Best available result<br/>may be an explicit refusal]
+    FB --> ADJ
+    ADJ -->|tie or low confidence<br/>at 1000 points| ESC[One tiebreak or<br/>strong-model follow-up]
     ESC --> ADJ
-    ADJ --> X[Extractor<br/>prose to bare answer]
-    R --> X
+    ADJ -->|500+ points| V[Verifier<br/>prove or refute once]
+    ADJ -->|under 500 points| X[Extractor<br/>prose to bare answer]
+    V --> X
     X --> S[Scoreboard submit<br/>exact match]
 ```
 
@@ -40,11 +47,11 @@ flowchart TD
 
 ### Grounding guard
 
-`agent/v1/grounding.py`, enforced by `agent/v1/orchestrator.py`, accepts an answer only when the whole value—or every component of a genuine comma-separated list—appears in the question or worker evidence. Plan C also guards thousands-separated numbers and carries evidence across replan rounds. In the v1.2 full run, all four previously fabricated cases stopped fabricating, but three remained wrong, so the measured benefit was safer failure rather than recovered points; repeated failed-worker replans still helped drive failed delegations from 1 to 62. See `docs/scoreboard_result/v1/v1.2.md` and the fixes recorded in `docs/version_architecture/v1/v1.3.md`. Plan C's strengthened guard is unit-tested but has no end-to-end cost or score measurement yet.
+`agent/v1/grounding.py`, enforced by `agent/v1/orchestrator.py`, accepts an answer only when the whole value—or every component of a genuine comma-separated list—appears in the question or worker evidence. Plan C also guards thousands-separated numbers and carries evidence across replan rounds. An ungrounded joiner value is not automatically replaced with a refusal: the orchestrator requests a targeted replan while rounds remain, then falls back to the best available result when the budget is exhausted before continuing to adjudication. An explicit refusal can survive as that result, but the guard never manufactures one. In the v1.2 full run, all four previously fabricated cases stopped fabricating, but three remained wrong, so the measured benefit was safer failure rather than recovered points; repeated failed-worker replans still helped drive failed delegations from 1 to 62. See `docs/scoreboard_result/v1/v1.2.md` and the fixes recorded in `docs/version_architecture/v1/v1.3.md`. Plan C's strengthened guard is unit-tested but has no end-to-end cost or score measurement yet.
 
-### Adjudication and 3× sampling
+### Worker sampling and adjudication
 
-`agent/v1/adjudicator.py` ranks ledger candidates by question constraints, verbatim field fidelity, answer shape, and evidence strength; `agent/v1/orchestrator.py` invokes it when at least two candidates exist. For metrics tasks worth at least 500 points, the executor runs three temperature-0.3 samples and keeps a strict-majority verbatim candidate when one exists. The v1.2 result shows why selection matters—several misses were grounded but wrong—but v1.2 had neither mechanism. Plan C deliberately pays up to three worker runs for eligible metrics tasks; `docs/version_architecture/v1/v1.3.md` records the cost guard and unit coverage, but no full-run cost or benefit has been measured.
+For metrics worker tasks worth at least 500 points, the executor runs three temperature-0.3 samples and keeps a strict-majority verbatim candidate when one exists; every other worker task runs once. After the joiner and grounding gate, `agent/v1/adjudicator.py` ranks ledger candidates by question constraints, verbatim field fidelity, answer shape, and evidence strength when at least two candidates exist. The v1.2 result shows why selection matters—several misses were grounded but wrong—but v1.2 had neither mechanism. Plan C deliberately pays up to three worker runs for eligible metrics tasks; `docs/version_architecture/v1/v1.3.md` records the cost guard and unit coverage, but no full-run cost or benefit has been measured.
 
 ### Escalation
 

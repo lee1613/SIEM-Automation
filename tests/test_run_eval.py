@@ -3,6 +3,7 @@
 The v1.2 run is the fixture: its numbers are published in the README, so if
 these tests drift from the run artifacts, the storefront is lying.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -12,6 +13,50 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 import run_eval  # noqa: E402
+
+
+@pytest.fixture
+def isolated_artifacts(tmp_path, monkeypatch):
+    """A complete on-disk run + generated-artifact workspace for CLI checks."""
+    log_root = tmp_path / "log" / "v1"
+    run_dir = log_root / "run_1.9"
+    run_dir.mkdir(parents=True)
+    (run_dir / "scoreboard_submissions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "number": 200,
+                    "submitted": "right",
+                    "official": "right",
+                    "base_points": 100,
+                }
+            ]
+        )
+    )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "token_usage": {
+                    "fixture-model": {"estimated_usd": 1.25},
+                    "__total__": {"estimated_usd": 1.25},
+                }
+            }
+        )
+    )
+
+    eval_dir = tmp_path / "datasets" / "evaluation"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "versions.json").write_text('{"versions": []}\n')
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "intro\n<!-- LEADERBOARD:START -->\nold\n<!-- LEADERBOARD:END -->\noutro\n"
+    )
+
+    monkeypatch.setattr(run_eval, "LOG_ROOT", log_root)
+    monkeypatch.setattr(run_eval, "EVAL_DIR", eval_dir)
+    monkeypatch.setattr(run_eval, "README", readme)
+    assert run_eval.main(["--run", "run_1.9", "--write"]) == 0
+    return eval_dir / "leaderboard.json"
 
 
 def test_is_correct_ignores_case_and_surrounding_whitespace():
@@ -123,8 +168,43 @@ def test_load_cost_tolerates_a_run_without_token_usage():
     assert cost["models"] == {}
 
 
-def test_latest_run_picks_the_highest_version_not_the_alphabetical_last():
-    assert run_eval.latest_run().name == "run_1.2"
+def test_historical_versions_match_every_parseable_run_artifact():
+    expected = {
+        "v1.1": (26, 56, 8300, 0.63),
+        "v1.2": (26, 56, 8000, 31.36),
+    }
+    checked = set()
+    for version in run_eval.load_versions()["versions"]:
+        run_dir = REPO / "log" / "v1" / f"run_{version['version'].removeprefix('v')}"
+        if not (run_dir / "scoreboard_submissions.json").exists():
+            continue
+        summary = run_eval.summarize(run_eval.load_rows(run_dir))
+        cost = run_eval.load_cost(run_dir)
+        artifact_values = (
+            summary["correct"],
+            summary["total"],
+            summary["points_earned"],
+            round(cost["total_usd"], 2),
+        )
+        curated_values = (
+            version["correct"],
+            version["questions"],
+            version["points"],
+            version["cost_usd"],
+        )
+        assert artifact_values == expected[version["version"]]
+        assert curated_values == artifact_values
+        checked.add(version["version"])
+    assert checked >= {"v1.1", "v1.2"}
+
+
+def test_latest_run_uses_numeric_order_and_ignores_non_numeric_backups(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval, "LOG_ROOT", tmp_path)
+    for name in ("run_1.9", "run_1.10", "run_1.backup"):
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        (run_dir / "scoreboard_submissions.json").write_text("[]")
+    assert run_eval.latest_run().name == "run_1.10"
 
 
 def test_render_report_states_accuracy_points_and_cost():
@@ -159,6 +239,33 @@ def test_readme_leaderboard_block_is_in_sync():
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
     assert run_eval.extract_block((REPO / "README.md").read_text()) == expected.strip()
+
+
+def test_check_rejects_a_missing_leaderboard_json(isolated_artifacts, capsys):
+    isolated_artifacts.unlink()
+    assert run_eval.main(["--run", "run_1.9", "--check"]) == 1
+    assert "leaderboard.json is missing" in capsys.readouterr().err
+
+
+def test_check_rejects_a_malformed_leaderboard_json(isolated_artifacts, capsys):
+    isolated_artifacts.write_text("{not json")
+    assert run_eval.main(["--run", "run_1.9", "--check"]) == 1
+    assert "leaderboard.json is malformed" in capsys.readouterr().err
+
+
+def test_check_rejects_a_stale_leaderboard_json(isolated_artifacts, capsys):
+    payload = json.loads(isolated_artifacts.read_text())
+    payload["points"]["earned"] = 0
+    isolated_artifacts.write_text(json.dumps(payload))
+    assert run_eval.main(["--run", "run_1.9", "--check"]) == 1
+    assert "leaderboard.json is stale" in capsys.readouterr().err
+
+
+def test_check_rejects_a_stale_readme_block(isolated_artifacts, capsys):
+    readme = isolated_artifacts.parents[2] / "README.md"
+    readme.write_text(readme.read_text().replace("100 / 100", "0 / 100"))
+    assert run_eval.main(["--run", "run_1.9", "--check"]) == 1
+    assert "README leaderboard is stale" in capsys.readouterr().err
 
 
 def test_replace_block_is_idempotent():

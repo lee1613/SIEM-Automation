@@ -111,10 +111,14 @@ def load_cost(run_dir: Path) -> dict:
 
 def latest_run() -> Path:
     """Highest-numbered scorable run_1.N directory, compared numerically."""
-    runs = [p for p in LOG_ROOT.glob("run_1.*") if (p / "scoreboard_submissions.json").exists()]
+    runs = []
+    for path in LOG_ROOT.glob("run_1.*"):
+        match = re.fullmatch(r"run_1\.(\d+)", path.name)
+        if match and (path / "scoreboard_submissions.json").exists():
+            runs.append((int(match.group(1)), path))
     if not runs:
         sys.exit(f"No scorable runs under {LOG_ROOT}")
-    return max(runs, key=lambda p: [int(n) for n in p.name.split("_")[1].split(".")])
+    return max(runs, key=lambda item: item[0])[1]
 
 
 def render_report(run_dir: Path, summary: dict, cost: dict) -> str:
@@ -169,40 +173,70 @@ def replace_block(readme_text: str, markdown: str) -> str:
     return BLOCK_RE.sub(lambda _: markdown.strip(), readme_text)
 
 
+def build_leaderboard_payload(run_dir: Path, summary: dict, cost: dict) -> dict:
+    """Canonical generated JSON content used by both --write and --check."""
+    return {
+        "_generated_by": "scripts/run_eval.py --write — do not hand-edit",
+        "run": run_dir.name,
+        "overall": {"correct": summary["correct"], "total": summary["total"]},
+        "points": {
+            "earned": summary["points_earned"],
+            "possible": summary["points_possible"],
+        },
+        "tiers": {str(tier): stats for tier, stats in summary["tiers"].items()},
+        "cost": cost,
+        "versions": load_versions()["versions"],
+    }
+
+
 def write_artifacts(run_dir: Path, summary: dict, cost: dict) -> None:
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    payload = build_leaderboard_payload(run_dir, summary, cost)
     (EVAL_DIR / "leaderboard.json").write_text(
-        json.dumps(
-            {
-                "_generated_by": "scripts/run_eval.py --write — do not hand-edit",
-                "run": run_dir.name,
-                "overall": {"correct": summary["correct"], "total": summary["total"]},
-                "points": {
-                    "earned": summary["points_earned"],
-                    "possible": summary["points_possible"],
-                },
-                "tiers": summary["tiers"],
-                "cost": cost,
-                "versions": load_versions()["versions"],
-            },
-            indent=2,
-        )
-        + "\n"
+        json.dumps(payload, indent=2) + "\n"
     )
-    markdown = render_leaderboard_markdown(summary, load_versions()["versions"])
+    markdown = render_leaderboard_markdown(summary, payload["versions"])
     README.write_text(replace_block(README.read_text(), markdown))
     print(f"Wrote {EVAL_DIR / 'leaderboard.json'} and refreshed the README leaderboard block.")
 
 
-def check_artifacts(summary: dict) -> int:
-    expected = render_leaderboard_markdown(summary, load_versions()["versions"]).strip()
+def check_artifacts(run_dir: Path, summary: dict, cost: dict) -> int:
+    payload = build_leaderboard_payload(run_dir, summary, cost)
+    failed = False
+    leaderboard = EVAL_DIR / "leaderboard.json"
+    try:
+        actual_payload = json.loads(leaderboard.read_text())
+    except FileNotFoundError:
+        print(
+            "leaderboard.json is missing. Run: python3 scripts/run_eval.py --write",
+            file=sys.stderr,
+        )
+        failed = True
+    except json.JSONDecodeError as exc:
+        print(
+            f"leaderboard.json is malformed ({exc}). "
+            "Run: python3 scripts/run_eval.py --write",
+            file=sys.stderr,
+        )
+        failed = True
+    else:
+        if actual_payload != payload:
+            print(
+                "leaderboard.json is stale. Run: python3 scripts/run_eval.py --write",
+                file=sys.stderr,
+            )
+            failed = True
+
+    expected = render_leaderboard_markdown(summary, payload["versions"]).strip()
     if extract_block(README.read_text()) != expected:
         print(
             "README leaderboard is stale. Run: python3 scripts/run_eval.py --write",
             file=sys.stderr,
         )
+        failed = True
+    if failed:
         return 1
-    print("README leaderboard is in sync.")
+    print("Generated leaderboard artifacts are in sync.")
     return 0
 
 
@@ -235,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         write_artifacts(run_dir, summary, cost)
         return 0
     if args.check:
-        return check_artifacts(summary)
+        return check_artifacts(run_dir, summary, cost)
 
     print(render_report(run_dir, summary, cost))
     return 0

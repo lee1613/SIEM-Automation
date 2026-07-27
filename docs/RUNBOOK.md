@@ -37,7 +37,15 @@ pip install -r agent/requirements.txt pytest ruff && pytest -q && ruff check .
 
 ## Live runs (requires Splunk + API keys)
 
-Install and load Splunk and the BOTSv3 data first; see [the BOTSv3 setup guide](BOTS_V3_SETUP.md). Copy `agent/.env.example` to `agent/.env` and provide the Splunk credentials and API keys it describes.
+Install and load Splunk and the BOTSv3 data first; see [the BOTSv3 setup guide](BOTS_V3_SETUP.md). Copy `agent/.env.example` to `agent/.env`.
+
+The runner preflight requires these non-empty values:
+
+- `OPENAI_API_KEY` — SH planner, default GPT-5.4-mini Senior workers, and GPT-5.4 escalation.
+- `NIM_API_KEY` — Llama 3.3 Extractor on NVIDIA NIM.
+- `SPLUNK_PASS` — local Splunk authentication.
+
+`SPLUNK_HOST` and `SPLUNK_USER` default to `https://localhost:8089` and `admin`. If `--senior-api-key-env` names a different variable, that variable is required too. LangSmith settings remain optional.
 
 Run this five-question smoke test before any full run:
 
