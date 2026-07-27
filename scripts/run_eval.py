@@ -78,3 +78,75 @@ def summarize(rows: list[dict]) -> dict:
         "points_earned": points_earned,
         "points_possible": points_possible,
     }
+
+
+def load_cost(run_dir: Path) -> dict:
+    """Per-model USD from run_summary['token_usage'].
+
+    Keys wrapped in double underscores are bookkeeping aggregates, not models.
+    Runs predating cost tracking (run_1.0) simply report zero.
+    """
+    path = run_dir / "run_summary.json"
+    if not path.exists():
+        return {"models": {}, "total_usd": 0.0}
+    usage = json.loads(path.read_text()).get("token_usage") or {}
+    models = {
+        name: entry.get("estimated_usd", 0.0)
+        for name, entry in usage.items()
+        if not name.startswith("__") and isinstance(entry, dict)
+    }
+    aggregate = usage.get("__total__")
+    total = aggregate.get("estimated_usd") if isinstance(aggregate, dict) else None
+    return {
+        "models": models,
+        "total_usd": float(total if total is not None else sum(models.values())),
+    }
+
+
+def latest_run() -> Path:
+    """Highest-numbered scorable run_1.N directory, compared numerically."""
+    runs = [p for p in LOG_ROOT.glob("run_1.*") if (p / "scoreboard_submissions.json").exists()]
+    if not runs:
+        sys.exit(f"No scorable runs under {LOG_ROOT}")
+    return max(runs, key=lambda p: [int(n) for n in p.name.split("_")[1].split(".")])
+
+
+def render_report(run_dir: Path, summary: dict, cost: dict) -> str:
+    correct, total = summary["correct"], summary["total"]
+    lines = [
+        f"Run:      {run_dir.name}",
+        f"Accuracy: {correct}/{total} = {100 * correct / total:.1f}%",
+        f"Points:   {summary['points_earned']} / {summary['points_possible']}",
+        "",
+        "By tier:",
+    ]
+    for tier, stats in sorted(summary["tiers"].items()):
+        tier_pct = 100 * stats["correct"] / stats["total"]
+        lines.append(f"  {tier:>4} pt   {stats['correct']:>2}/{stats['total']:<2}  {tier_pct:5.1f}%")
+    lines += ["", f"Cost:     ${cost['total_usd']:.2f} (whole run)"]
+    for name, usd in sorted(cost["models"].items(), key=lambda kv: -kv[1]):
+        lines.append(f"  {name:<28} ${usd:.4f}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Score a BOTSv3 agent run offline. No API key, no Splunk, no LLM calls."
+    )
+    parser.add_argument("--run", help="Run directory name, e.g. run_1.1 (default: latest scorable run)")
+    parser.add_argument("--tier", type=int, choices=TIERS, help="Score only this point tier")
+    parser.add_argument("--ids", help="Comma-separated question ids, e.g. Q332,Q333")
+    args = parser.parse_args(argv)
+
+    run_dir = LOG_ROOT / args.run if args.run else latest_run()
+    if not run_dir.exists():
+        sys.exit(f"No such run: {run_dir}")
+    rows = filter_rows(load_rows(run_dir), args.tier, args.ids.split(",") if args.ids else None)
+    print(render_report(run_dir, summarize(rows), load_cost(run_dir)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

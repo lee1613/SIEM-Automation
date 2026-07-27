@@ -105,3 +105,36 @@ def test_filter_by_ids_rejects_a_doubled_prefix():
     # "QQ332" is not a real question id; it should not resolve to 332.
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["QQ332"])
+
+
+def test_load_cost_matches_the_published_v12_total():
+    cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.2")
+    assert round(cost["total_usd"], 2) == 31.36
+    assert "gpt-5.4-2026-03-05" in cost["models"]
+    # Bookkeeping keys must not be reported as if they were models.
+    assert "__total__" not in cost["models"]
+    assert "__sh_cumulative__" not in cost["models"]
+
+
+def test_load_cost_tolerates_a_run_without_token_usage():
+    # run_1.0 predates cost tracking; the scorer must degrade, not crash.
+    cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.0")
+    assert cost["total_usd"] == 0.0
+    assert cost["models"] == {}
+
+
+def test_latest_run_picks_the_highest_version_not_the_alphabetical_last():
+    assert run_eval.latest_run().name == "run_1.2"
+
+
+def test_render_report_states_accuracy_points_and_cost():
+    run_dir = REPO / "log" / "v1" / "run_1.2"
+    text = run_eval.render_report(
+        run_dir,
+        run_eval.summarize(run_eval.load_rows(run_dir)),
+        run_eval.load_cost(run_dir),
+    )
+    assert "26/56" in text
+    assert "46.4%" in text
+    assert "8000" in text
+    assert "$31.36" in text
