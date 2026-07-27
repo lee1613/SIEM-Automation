@@ -1,5 +1,4 @@
-from adjudicator import (parse_adjudication, resolve_choice, fallback_choice,
-                         render_adjudication_input, adjudicate_once)
+from adjudicator import adjudicate_once, fallback_choice, parse_adjudication, render_adjudication_input, resolve_choice
 
 LEDGER = [
     {"value": "1367.875", "status": "solved",  "worker": "senior#2",

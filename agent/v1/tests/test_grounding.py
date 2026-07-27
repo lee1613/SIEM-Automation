@@ -1,4 +1,4 @@
-from grounding import is_grounded, best_candidate
+from grounding import best_candidate, is_grounded
 
 
 def test_grounded_when_answer_in_a_task_result():

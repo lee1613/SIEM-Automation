@@ -1,4 +1,4 @@
-from run_all_v1 import build_sh_message, DUAL_TRACK_MIN_POINTS
+from run_all_v1 import DUAL_TRACK_MIN_POINTS, build_sh_message
 
 
 def test_dual_track_line_for_1000pt():

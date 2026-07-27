@@ -26,11 +26,11 @@ Any use of --ids or --limit marks the run as a TEST run (output under log/temp, 
 logged as a versioned run, never cost-tracked).
 """
 
-import os
-import sys
-import json
 import argparse
+import json
+import os
 import subprocess
+import sys
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))     # agent/v1
 AGENT_DIR    = os.path.dirname(SCRIPT_DIR)                    # agent
@@ -39,19 +39,17 @@ for p in (AGENT_DIR, SCRIPT_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from dotenv import load_dotenv
-from splunk_client import SplunkClient
-from splunk_pool import SplunkConnectionPool
-from local_scoreboard import LocalScoreboard
-
 from agent_logger import RunLogger
-from usage_tracker import UsageTracker
-from splunk_subagent import SplunkWorkerPool
-from extractor import Extractor
-from orchestrator import (DelegationContext, build_sh_agent_compiler, run_sh)
-from grounding import is_grounded, best_candidate
 from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
+from dotenv import load_dotenv
+from extractor import Extractor
+from grounding import best_candidate, is_grounded
 from hint_client import HintBook
+from local_scoreboard import LocalScoreboard
+from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
+from splunk_pool import SplunkConnectionPool
+from splunk_subagent import SplunkWorkerPool
+from usage_tracker import UsageTracker
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL         = "gpt-5.4"

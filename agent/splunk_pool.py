@@ -58,14 +58,12 @@ starts queuing jobs and throughput actually drops.
 from __future__ import annotations
 
 import queue
-import time
 from contextlib import contextmanager
 
 import requests
+from splunk_client import SplunkClient
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
-
-from splunk_client import SplunkClient
 
 disable_warnings(InsecureRequestWarning)
 

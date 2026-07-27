@@ -30,7 +30,6 @@ import threading
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
-
 # ── Price table ───────────────────────────────────────────────────────────────
 # Structure per model:
 #   "short": prices when prompt_tokens < long_ctx_threshold (or no tier exists)

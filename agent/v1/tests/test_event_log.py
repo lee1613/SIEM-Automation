@@ -1,7 +1,6 @@
 import json
-import os
 
-from event_log import EventLog, SCHEMA_VERSION
+from event_log import SCHEMA_VERSION, EventLog
 
 
 def _read(path):
@@ -53,7 +52,9 @@ def test_concurrent_emit_is_line_safe(tmp_path):
         for j in range(20):
             log.emit("task_end", qid=f"Q{i}", task_idx=j)
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     rows = _read(tmp_path / "events.jsonl")     # every line must be valid JSON
     assert len(rows) == 120

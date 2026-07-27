@@ -1,6 +1,6 @@
 import json
 
-from make_report import render_report, load_events, load_metrics
+from make_report import load_events, load_metrics, render_report
 
 
 def _write_jsonl(path, rows):

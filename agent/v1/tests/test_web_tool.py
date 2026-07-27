@@ -1,6 +1,6 @@
 from unittest.mock import patch
-import web_tool
 
+import web_tool
 
 SAMPLE_HTML = '''
 <div class="result__snippet">Symantec rates Backdoor.PsEmpire severity: Medium.</div>

@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 import splunk_agent
 
 
@@ -11,8 +12,6 @@ def test_get_raw_events_registered_and_bounded():
     tools["get_raw_events"].invoke({"sourcetype": "stream:smtp",
                                     "keyword": "financial", "limit": 999})
     # the clamp happens before the splunk call; assert splunk got count<=20
-    _, kwargs = fake.sample_events.call_args
-    called_count = kwargs.get("count", (fake.sample_events.call_args[0] or [None]*5))
     assert True  # presence + no exception is the contract; clamp asserted below
 
 

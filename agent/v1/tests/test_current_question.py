@@ -1,11 +1,11 @@
 """Regression: run_1.2 Q202 — verifier/joiner must judge against the CURRENT
 question, and SH history fed to the LLM must be bounded."""
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from orchestrator import DelegationContext, _window, MAX_HISTORY_MSGS
+from orchestrator import MAX_HISTORY_MSGS, DelegationContext, _window
 
 
 def test_reset_question_stores_question_text():

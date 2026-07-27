@@ -13,6 +13,7 @@ submit a value the adjudicator invented — Q321's `1000`-from-nowhere class.
 from __future__ import annotations
 
 import re
+
 from case_file import extract_candidate
 
 _STATUS_RANK = {"solved": 3, "partial": 2, "too_big": 1, "failed": 0}

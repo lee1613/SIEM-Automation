@@ -2,7 +2,7 @@ from orchestrator import parse_verifier_verdict
 
 
 def test_pool_builds_dedicated_verifier_graph():
-    from splunk_subagent import SplunkWorkerPool, VERIFIER_MAX_ITER
+    from splunk_subagent import VERIFIER_MAX_ITER, SplunkWorkerPool
 
     calls = []
 

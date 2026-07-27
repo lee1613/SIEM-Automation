@@ -103,7 +103,7 @@ def render_ledger(ledger: list) -> str:
     lines = ["CANDIDATES (each captured verbatim from a worker — your FINAL ANSWER "
              "must be copied character-for-character from one of these, or from "
              "the question text):"]
-    total = sum(len(l) + 1 for l in lines)
+    total = sum(len(line) + 1 for line in lines)
     omitted = 0
     for i, c in enumerate(ledger, 1):
         spl = f"  SPL: {c['spl'][0][:160]}" if c["spl"] else ""

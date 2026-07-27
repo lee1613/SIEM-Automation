@@ -19,8 +19,14 @@ Run from project root or agent/ directory after both SA-ctf_scoreboard apps
 have been cloned into $SPLUNK_HOME/etc/apps/.
 """
 
-import os, sys, csv, json, time, uuid, subprocess, secrets
+import csv
+import os
+import secrets
+import sys
+import time
+
 import requests
+
 requests.packages.urllib3.disable_warnings()
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +34,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, SCRIPT_DIR)
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
@@ -220,8 +227,8 @@ def main():
     setup_user(headers)
 
     print("\nSetup complete.")
-    print(f"  Scoreboard UI : http://localhost:8000/en-US/app/SA-ctf_scoreboard/")
-    print(f"  Admin UI      : http://localhost:8000/en-US/app/SA-ctf_scoreboard_admin/")
+    print("  Scoreboard UI : http://localhost:8000/en-US/app/SA-ctf_scoreboard/")
+    print("  Admin UI      : http://localhost:8000/en-US/app/SA-ctf_scoreboard_admin/")
 
 
 if __name__ == "__main__":

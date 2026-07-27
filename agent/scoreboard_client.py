@@ -17,9 +17,11 @@ ScoreboardClient(splunkd_url, username, password)
     .get_all_submissions()                  -> list[dict]
 """
 
-import time
 import json
+import time
+
 import requests
+
 requests.packages.urllib3.disable_warnings()
 
 

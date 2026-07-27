@@ -10,10 +10,11 @@ Usage (from agent/ directory):
     python build_manifest.py
 """
 
+import json
 import os
 import sys
-import json
 import time
+
 from dotenv import load_dotenv
 from splunk_client import SplunkClient
 

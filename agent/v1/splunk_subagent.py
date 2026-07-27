@@ -20,9 +20,9 @@ import re
 import uuid
 
 import splunk_agent as agent_mod
+from specialists import SPECIALISTS, parse_specialist_tag
 from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
-from specialists import SPECIALISTS, parse_specialist_tag
 
 # Points at/above this threshold get the higher-budget worker graph (see
 # splunk_agent.iter_budget). Kept as a local constant so the pool's graph

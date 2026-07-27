@@ -1,5 +1,6 @@
-from make_report import progress_line, load_metrics
 import json
+
+from make_report import load_metrics, progress_line
 
 
 def test_progress_line_counts_and_cost(tmp_path):

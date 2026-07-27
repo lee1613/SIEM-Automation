@@ -12,10 +12,9 @@ Full runs go to  log/v1/run_1.<minor>/  (auto-incrementing).
 Test runs  go to  log/temp/<timestamp>/  and are never versioned.
 """
 
+import datetime
 import os
 import re
-import datetime
-
 
 _THIS_DIR    = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))

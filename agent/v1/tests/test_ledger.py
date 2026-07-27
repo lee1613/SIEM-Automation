@@ -1,4 +1,4 @@
-from case_file import extract_candidate, build_ledger, snap_to_ledger, render_ledger
+from case_file import build_ledger, extract_candidate, render_ledger, snap_to_ledger
 
 
 def _deleg(answer, status="solved", spl=None, worker="senior#1"):

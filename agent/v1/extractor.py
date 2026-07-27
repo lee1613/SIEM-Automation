@@ -81,7 +81,10 @@ class Extractor:
             except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as exc:
                 if attempt == EXTRACT_MAX_RETRIES:
                     raise
-                print(f"[EXTRACTOR] API call failed (attempt {attempt}/{EXTRACT_MAX_RETRIES}): {exc}. Retrying in {delay:.0f}s...")
+                print(
+                    f"[EXTRACTOR] API call failed (attempt {attempt}/{EXTRACT_MAX_RETRIES}): "
+                    f"{exc}. Retrying in {delay:.0f}s..."
+                )
                 time.sleep(delay)
                 delay *= 2
         if self.tracker and resp.usage:

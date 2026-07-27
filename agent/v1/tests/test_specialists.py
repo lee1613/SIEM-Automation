@@ -1,4 +1,4 @@
-from specialists import parse_specialist_tag, SPECIALISTS
+from specialists import SPECIALISTS, parse_specialist_tag
 
 
 def test_parse_tag_defaults_to_hunter():

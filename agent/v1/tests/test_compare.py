@@ -1,6 +1,6 @@
 import json
 
-from compare import load_run, diff_runs, render_comparison
+from compare import diff_runs, load_run, render_comparison
 
 
 def _new_schema(dirp):
@@ -36,7 +36,10 @@ def test_load_old_schema_fallback(tmp_path):
 
 
 def test_diff_identifies_fixes_and_regressions(tmp_path):
-    a = tmp_path / "a"; b = tmp_path / "b"; a.mkdir(); b.mkdir()
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
     _old_schema(a)     # Q1 wrong, Q2 correct
     _new_schema(b)     # Q1 correct, Q2 wrong
     d = diff_runs(load_run(str(a)), load_run(str(b)))
@@ -45,8 +48,12 @@ def test_diff_identifies_fixes_and_regressions(tmp_path):
 
 
 def test_render_includes_both_sections(tmp_path):
-    a = tmp_path / "a"; b = tmp_path / "b"; a.mkdir(); b.mkdir()
-    _old_schema(a); _new_schema(b)
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    _old_schema(a)
+    _new_schema(b)
     md = render_comparison("a", "b", diff_runs(load_run(str(a)), load_run(str(b))))
     assert "Fixed" in md and "Regressed" in md
     assert "Q1" in md and "Q2" in md

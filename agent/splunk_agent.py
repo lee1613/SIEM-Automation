@@ -19,22 +19,21 @@ Brain:  LangGraph StateGraph + MemorySaver (cross-question statefulness)
 Data:   Splunk Enterprise REST API (port 8089)
 """
 
+import json
 import os
 import re
 import sys
-import json
 import textwrap
 import threading
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
-
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
 from splunk_client import SplunkClient
 
 load_dotenv()
@@ -458,7 +457,8 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
             tcs  = getattr(last, "tool_calls", None)
             if tcs:
                 for tc in tcs:
-                    print(f"  last_msg: {kind} -> tool_call: {tc['name']}({json.dumps(tc['args'], separators=(',', ':'))})")
+                    args_str = json.dumps(tc['args'], separators=(',', ':'))
+                    print(f"  last_msg: {kind} -> tool_call: {tc['name']}({args_str})")
             else:
                 snippet = (getattr(last, "content", "") or "")[:120].replace("\n", " ")
                 print(f"  last_msg: {kind} -> {snippet!r}")

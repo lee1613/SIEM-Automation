@@ -50,8 +50,8 @@ def seed_case_from_recon(case_file, results: list) -> int:
 def run_recon(ctx) -> list[dict]:
     """Dispatch RECON_TASKS in parallel through the existing pool (mirrors
     executor_node's ThreadPoolExecutor pattern; qid label 'RECON')."""
-    from orchestrator import MAX_WORKERS, _run_senior
     from langsmith.run_helpers import get_current_run_tree
+    from orchestrator import MAX_WORKERS, _run_senior
 
     ctx.reset_question("RECON", points=0, question="Phase-0 incident recon")
     parent = get_current_run_tree()

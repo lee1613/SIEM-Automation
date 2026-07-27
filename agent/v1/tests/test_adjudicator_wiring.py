@@ -1,5 +1,5 @@
 import orchestrator
-from orchestrator import build_sh_agent_compiler, DelegationContext
+from orchestrator import DelegationContext, build_sh_agent_compiler
 
 
 class _FakeLogger:

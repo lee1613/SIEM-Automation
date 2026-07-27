@@ -1,4 +1,4 @@
-from orchestrator import plan_samples, METRICS_SAMPLES
+from orchestrator import METRICS_SAMPLES, plan_samples
 
 
 def test_metrics_high_value_sampled_3x():

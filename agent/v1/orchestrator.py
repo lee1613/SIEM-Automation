@@ -15,27 +15,24 @@ Cross-question memory is preserved: the MemorySaver thread accumulates every
 plan + task-results summary + final answer across all 58 questions.
 """
 
+import concurrent.futures
 import re
 import sqlite3
-import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
 
+from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
+from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
+from grounding import best_candidate, is_grounded
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
 from langsmith.run_helpers import get_current_run_tree, tracing_context
-
-from grounding import is_grounded, best_candidate
-from splunk_subagent import VERIFIER_MAX_ITER
-from case_file import build_ledger, render_ledger, snap_to_ledger, CaseFile, parse_case_updates
-from adjudicator import (adjudicate_once, resolve_choice, fallback_choice,
-                         ADJUDICATOR_SYSTEM_PROMPT, majority_answer)
 from specialists import parse_specialist_tag
-
+from splunk_subagent import VERIFIER_MAX_ITER
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
@@ -689,7 +686,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             answer = cand
         else:
             print("[SH JOINER] no FINAL ANSWER / REPLAN tag — extracting from last line")
-            lines  = [l.strip() for l in jtext.splitlines() if l.strip()]
+            lines  = [ln.strip() for ln in jtext.splitlines() if ln.strip()]
             answer = lines[-1] if lines else jtext[:200]
         return {
             "messages":     [joiner_hm, response],

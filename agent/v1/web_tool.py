@@ -10,8 +10,8 @@ than raising, so offline runs and unit tests never break the worker graph.
 
 from __future__ import annotations
 
-import re
 import html
+import re
 
 import requests
 from langchain_core.tools import tool
