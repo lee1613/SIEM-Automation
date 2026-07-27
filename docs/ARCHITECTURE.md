@@ -56,7 +56,7 @@ For each 1000-point question, `agent/v1/run_all_v1.py` adds a dual-track instruc
 
 ## Run artifacts
 
-A versioned full run uses the log/v1/run_1.N/ layout. The artifact contract reserves `SH/` for orchestrator captures, `Senior Splunk/` and `Junior Splunk/` for worker captures, and `Extractor/` for normalization captures; the Junior directory can be empty because current Plan C has no Junior dispatch path. The same run root contains `timeline.md` for the sequential narrative, `run_summary.json` for rollups and token usage, and `scoreboard_submissions.json` for submitted and official answers. The v1.2 example is `log/v1/run_1.2/`.
+A versioned full run uses a log/v1/run_1.N/ root. Historical project documentation names `SH/`, `Senior Splunk/`, `Junior Splunk/`, and `Extractor/` role directories, but current Plan C does not emit them; it sends per-step LLM and tool traces to LangSmith, and it has no Junior dispatch path. Locally, `agent/v1/agent_logger.py` creates the run root, `timeline.md`, and `events.jsonl`, while `agent/v1/run_all_v1.py` writes `case_file.json`, `sh_checkpoints.sqlite`, `scoreboard_submissions.json`, `metrics.json`, `run_summary.json`, and per-question `questions/<qid>.json` records. The checked-in v1.2 example is `log/v1/run_1.2/`.
 
 `scripts/run_eval.py` consumes only `scoreboard_submissions.json` for exact-match verdicts and the `token_usage` object in `run_summary.json` for cost. It intentionally ignores the role logs, `timeline.md`, and the summary's cached score fields. In particular, `run_summary["score"]` can be stale: run_1.1 was overwritten by a later partial re-run, so verdicts come from `scoreboard_submissions.json`, not the summary.
 
