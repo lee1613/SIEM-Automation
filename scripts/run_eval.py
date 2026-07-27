@@ -26,7 +26,7 @@ def is_correct(submitted: str | None, official: str | None) -> bool:
     """The scoreboard's rule, mirrored from agent/scoreboard_client.py:9."""
     if submitted is None or official is None:
         return False
-    return submitted.lower().strip() == official.lower().strip()
+    return str(submitted).lower().strip() == str(official).lower().strip()
 
 
 def load_rows(run_dir: Path) -> list[dict]:
@@ -41,23 +41,25 @@ def load_rows(run_dir: Path) -> list[dict]:
 
 def filter_rows(rows: list[dict], tier: int | None, ids: list[str] | None) -> list[dict]:
     selected = rows
-    if tier is not None:
-        selected = [r for r in selected if r["base_points"] == tier]
     if ids:
-        wanted = {i.strip().upper().lstrip("Q") for i in ids}
-        selected = [r for r in selected if str(r["number"]) in wanted]
-        found = {str(r["number"]) for r in selected}
-        missing = sorted(wanted - found)
+        wanted = {i.strip().upper().removeprefix("Q") for i in ids}
+        # Check id existence against full rows before tier narrowing
+        found_in_all = {str(r["number"]) for r in rows}
+        missing = sorted(wanted - found_in_all)
         if missing:
             sys.exit(f"No such question(s) in this run: {', '.join('Q' + m for m in missing)}")
+        # Now narrow by ids
+        selected = [r for r in selected if str(r["number"]) in wanted]
+    if tier is not None:
+        selected = [r for r in selected if r["base_points"] == tier]
     if not selected:
         sys.exit("Filter matched no questions.")
     return selected
 
 
 def summarize(rows: list[dict]) -> dict:
-    tiers = {t: {"correct": 0, "total": 0} for t in TIERS}
     correct = points_earned = points_possible = 0
+    tiers = {}
     for row in rows:
         hit = is_correct(row["submitted"], row["official"])
         points = row["base_points"]
@@ -65,11 +67,12 @@ def summarize(rows: list[dict]) -> dict:
         if hit:
             correct += 1
             points_earned += points
-        if points in tiers:
-            tiers[points]["total"] += 1
-            tiers[points]["correct"] += int(hit)
+        if points not in tiers:
+            tiers[points] = {"correct": 0, "total": 0}
+        tiers[points]["total"] += 1
+        tiers[points]["correct"] += int(hit)
     return {
-        "tiers": {t: v for t, v in tiers.items() if v["total"]},
+        "tiers": {t: tiers[t] for t in sorted(tiers.keys())},
         "correct": correct,
         "total": len(rows),
         "points_earned": points_earned,
