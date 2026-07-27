@@ -73,7 +73,7 @@ See [the architecture document](docs/ARCHITECTURE.md) for responsibilities, impl
 - Q303 searched `linux_audit`, `linux_secure`, shell, process, and cloud-init evidence, but found no plaintext password-setting event.
 - The agent returned *"The password is not provided in the context"* and was scored **wrong**.
 - In a SOC, a confident wrong IOC costs an analyst hours of chasing; the grounding guard makes the agent decline instead of guessing.
-- **11 of 56 answers were refusals rather than guesses** (`grounded: false` in the [run summary](log/v1/run_1.2/run_summary.json)). This costs benchmark points and is a deliberate trade.
+- **11 of 56 outputs failed grounding; two were explicit refusals (Q303 and Q328).** (`grounded: false` in the [run summary](log/v1/run_1.2/run_summary.json)). Those refusals cost benchmark points and reflect a deliberate safety trade.
 - Evidence: [full Q303 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 
 ## Quick start
@@ -104,9 +104,9 @@ See the [runbook](docs/RUNBOOK.md) for full-run, per-question, test, and live-Sp
 
 ## Lessons learned
 
-1. **Cost is an architecture bug, not a billing line.** v1.1 and v1.2 both scored 26/56, but cost $0.63 and $31.36 respectively as failed delegations rose from 1 to 62. An uncapped retry path turned a held score into a 50× bill. [Evidence](docs/scoreboard_result/v1/v1.2.md)
+1. **Cost is an architecture bug, not a billing line.** v1.1 and v1.2 both scored 26/56, but cost $0.63 and $31.36 respectively as failed delegations rose from 1 to 62. A permissive retry path restarted fresh workers without carrying context, turning a held score into a 50× bill. [Evidence](docs/scoreboard_result/v1/v1.2.md)
 
-2. **Refusal is a feature.** The grounding guard trades benchmark points for trustworthy output: 11 of 56 answers declined rather than fabricate. [Evidence](log/v1/run_1.2/run_summary.json)
+2. **Refusal is a feature.** Eleven of 56 outputs failed grounding; two—Q303 and Q328—explicitly refused rather than fabricate. That safer behavior still lost benchmark points. [Evidence](log/v1/run_1.2/run_summary.json)
 
 3. **The frontier is multi-hop.** The 100-point tier reached 62.5%; the 1000-point tier reached 22.2%. The remaining hard-tier work is chained inference, not lookup. [Evidence](datasets/evaluation/leaderboard.json)
 
