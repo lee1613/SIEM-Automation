@@ -1,215 +1,134 @@
-# SIEM Automation - BOTS V3 Dataset Project
+# SIEM Automation
 
-## Project Overview
+A three-tier LLM agent that investigates realistic SOC incidents in Splunk, benchmarked on Boss of the SOC v3: 26/56 (46.4%), with every trajectory logged.
 
-This project is designed to build and test a SIEM (Security Information and Event Management) automation agent using the **BOTS V3 (Boss of the SOC v3)** dataset from Splunk.
+[![ci](https://github.com/lee1613/SIEM-Automation/actions/workflows/ci.yml/badge.svg)](https://github.com/lee1613/SIEM-Automation/actions/workflows/ci.yml)
+![benchmark](https://img.shields.io/badge/BOTSv3-26%2F56%20(46.4%25)-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-**Goal:** Create an AI agent that can analyze, correlate, and detect security incidents across multiple log sources.
+## What this is
 
----
+This repository is an agent-engineering benchmark built around 56 real forensic questions over a multi-sourcetype Splunk index. The agent plans investigations, delegates independent searches, executes SPL, joins evidence, and self-checks before submitting an exact-match answer. A single agent scored 20/56; the multi-agent pipeline scores 26/56, and the 1000-point tier is still the frontier at 2/9. SIEM is the proving ground here; the project is about observable, grounded agent control under tool and cost constraints.
 
-## Current Status
+## Leaderboard
 
-✅ **BOTS V3 Dataset Downloaded & Extracted**
-- Dataset size: 320MB (pre-indexed Splunk format)
-- MD5 verified: `d7ccca99a01cff070dff3c139cdc10eb`
-- Location: `./botsv3/botsv3_data_set/`
-- Event types: 50+ sourcetypes (Windows, Linux, AWS, Network, Web, etc.)
+<!-- LEADERBOARD:START -->
+| Tier | Solved / Total | Rate |
+|------|:---:|:---:|
+| 100 pt | 15 / 24 | 62.5% |
+| 500 pt | 9 / 23 | 39.1% |
+| 1000 pt | 2 / 9 | 22.2% |
+| **Overall** | **26 / 56** | **46.4%** — 8000 / 22900 pts |
 
-### What's Included
+| Version | Correct | Points | Cost | Notes |
+|---|:---:|:---:|:---:|---|
+| v0 | 20 / 56 | 5700 | $7.73 | single agent |
+| v1.0 | 20 / 58 | 5650 | $7.36 | SH + Senior pool |
+| v1.1 | 26 / 56 | 8000 | $0.63 | + Junior tier, cheaper Senior model |
+| v1.2 | 26 / 56 | 8000 | $31.36 | + grounding guard, structured findings |
+<!-- LEADERBOARD:END -->
 
-| File | Purpose |
-|------|---------|
-| `docs/BOTS_V3_SETUP.md` | Complete installation guide for Splunk Enterprise |
-| `docs/DATASET_EXPLORATION_GUIDE.md` | 50+ example queries to understand the dataset |
-| `botsv3/` | Cloned repository + extracted dataset |
-
----
-
-## Quick Start
-
-### 1. Install Splunk Enterprise
-Follow the steps in `docs/BOTS_V3_SETUP.md`:
-- Download Splunk Enterprise 7.1.7 (free trial)
-- Install required add-ons
-- Copy the dataset app to `$SPLUNK_HOME/etc/apps/botsv3`
-- Restart Splunk
-
-### 2. Explore the Data
-Once Splunk is running, open `docs/DATASET_EXPLORATION_GUIDE.md` and run the queries to understand:
-- Log sources and data types
-- Attack patterns and anomalies
-- Field structures and relationships
-- Timeline of events
-
-### 3. Design Your Agent
-With data understanding, plan your SIEM agent:
-- Event correlation logic
-- Attack pattern detection
-- Incident classification
-- Automated response workflows
-
----
-
-## Dataset Overview
-
-### Data Sources (50+ types)
-- **Windows:** Event logs, Sysmon, process execution
-- **Linux:** Auth logs, audit logs, syslog
-- **Network:** DNS, HTTP, TCP, UDP, SMB, SSH
-- **Cloud:** AWS CloudTrail, CloudWatch, O365
-- **Web:** Apache, IIS access logs
-- **Endpoint:** Symantec, Code42, Tenable
-- **Infrastructure:** AWS, Azure, network streams
-
-### Key Statistics
-- **Total Events:** Millions of events
-- **Time Period:** Multi-day timespan
-- **Sourcetypes:** 50+ different log types
-- **Key Fields:** src, dest, host, user, sourcetype, _time
-- **Format:** Pre-indexed Splunk (no parsing needed)
-
----
+Regenerate with `python3 scripts/run_eval.py --write`; CI fails if this table drifts from `log/v1/`.
 
 ## Architecture
 
+v1.3/Plan C is the current architecture; all published metrics below come from the v1.2 full run. The v1.3 controls are shipped and unit-tested but have not been benchmarked end to end.
+
+```mermaid
+flowchart TD
+    Q[BOTSv3 question] --> SH[SH orchestrator<br/>persistent-memory planner]
+    SH -->|decompose| D{Planning mode}
+    D -->|standard| W[Senior worker pool]
+    D -->|dual-track<br/>high-value Qs| W2[Track A + Track B<br/>orthogonal evidence paths]
+    W --> SPL[(Splunk<br/>index=botsv3)]
+    W2 --> SPL
+    SPL --> F[Structured findings<br/>+ grounding check]
+    F -->|ungrounded| R[Refuse: no fabricated IOC]
+    F -->|grounded| ADJ[Adjudicator<br/>3x self-consistency vote]
+    ADJ -->|low confidence| ESC[Escalate to<br/>stronger model]
+    ESC --> ADJ
+    ADJ --> X[Extractor<br/>prose to bare answer]
+    R --> X
+    X --> S[Scoreboard submit<br/>exact match]
 ```
-Project Root
-├── README.md (this file)
-├── docs/BOTS_V3_SETUP.md (installation guide)
-├── docs/DATASET_EXPLORATION_GUIDE.md (query examples)
-└── botsv3/
-    ├── README.md (original BOTS V3 docs)
-    ├── botsv3_data_set/ (extracted dataset)
-    │   ├── default/ (Splunk config)
-    │   ├── lookups/ (reference data)
-    │   └── var/lib/ (index data - 601MB)
-    └── botsv3_data_set.tgz (original download)
-```
 
----
+- **Grounding guard:** accepts only answer values present in the question or worker evidence; v1.2 stopped all four previously observed fabrications, although three still scored wrong.
+- **Adjudication + 3× sampling:** Plan C ranks competing candidates and uses a strict-majority vote for eligible high-value metrics tasks; its cost and score impact are not yet measured.
+- **Escalation:** one bounded follow-up can route low-confidence 1000-point work to a stronger model, then re-adjudicate; this path is unbenchmarked.
+- **Dual-track planning:** 1000-point questions require two orthogonal evidence paths, including one unfiltered population enumeration, targeting the measured 2/9 hard-tier result.
 
-## Next Steps
+See [the architecture document](docs/ARCHITECTURE.md) for responsibilities, implementation paths, and measured-versus-unmeasured tradeoffs.
 
-### Phase 1: Environment Setup
-1. [ ] Download Splunk Enterprise 7.1.7
-2. [ ] Install Splunk on local machine
-3. [ ] Install required add-ons
-4. [ ] Deploy BOTS V3 dataset
-5. [ ] Verify access with test query
+## Agent trajectory logs
 
-### Phase 2: Data Exploration
-1. [ ] Run 20+ exploration queries
-2. [ ] Document interesting patterns
-3. [ ] Identify attack signatures
-4. [ ] Map field relationships
-5. [ ] Create baseline statistics
+### A 1000-point hit
 
-### Phase 3: Agent Design
-1. [ ] Define detection rules
-2. [ ] Design correlation logic
-3. [ ] Plan incident classification
-4. [ ] Build proof-of-concept detections
-5. [ ] Document architecture
+- Q332 began: “I need to see all available sourcetypes” → `get_source_types()` → `index=botsv3 host=hoth | stats count by sourcetype | sort -count`.
+- The pivot tied `/tmp/colonel.c` to `hoth` in `osquery:results`; the extractor submitted `cve-2017-16995` — **correct**.
+- Q333 found POST requests in `stream:http` to `/frothlyinventory/integration/saveGangster.action`; “The web lookup confirms that CVE-2017-9791 (S2-048) is the vulnerability” → `cve-2017-9791` — **correct**.
+- Evidence: [full Q332/Q333 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 
-### Phase 4: Implementation
-1. [ ] Code core agent logic
-2. [ ] Implement detections
-3. [ ] Build correlation engine
-4. [ ] Add incident classification
-5. [ ] Test against BOTS V3
+### An honest refusal
 
-### Phase 5: Evaluation
-1. [ ] Measure detection accuracy
-2. [ ] Evaluate false positive rate
-3. [ ] Test performance at scale
-4. [ ] Document findings
-5. [ ] Optimize agent
+- Q303 searched `linux_audit`, `linux_secure`, shell, process, and cloud-init evidence, but found no plaintext password-setting event.
+- The agent returned *"The password is not provided in the context"* and was scored **wrong**.
+- In a SOC, a confident wrong IOC costs an analyst hours of chasing; the grounding guard makes the agent decline instead of guessing.
+- **11 of 56 answers were refusals rather than guesses** (`grounded: false` in the [run summary](log/v1/run_1.2/run_summary.json)). This costs benchmark points and is a deliberate trade.
+- Evidence: [full Q303 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 
----
+## Quick start
 
-## Important Notes
-
-### System Requirements
-- **OS:** Windows 10/11
-- **Disk Space:** ~2GB (Splunk + dataset)
-- **Memory:** 4GB+ recommended
-- **Java:** Required by Splunk (auto-installed)
-
-### Splunk License
-- Using **free Splunk Enterprise trial** (no volume limits for this dataset)
-- No licensing costs for BOTS V3 analysis
-- Pre-indexed data = fast queries
-
-### Data Sensitivity
-⚠️ The BOTS V3 dataset contains realistic security incident data and may contain:
-- Profanity and offensive language
-- Real attack signatures
-- Simulated malware artifacts
-- Educational content only
-
----
-
-## Resources
-
-### Documentation
-- [BOTS V3 GitHub Repository](https://github.com/splunk/botsv3)
-- [Splunk Documentation](https://docs.splunk.com)
-- [Splunk Community Forums](https://community.splunk.com)
-- [BOTS CTF Platform](https://github.com/splunk/SA-ctf_scoreboard)
-
-### Learning
-- BOTS V3 includes realistic attack scenarios
-- Designed for SIEM training and CTF competitions
-- Great for learning incident detection and response
-- Multiple hours of security incident data
-
-### Tools
-- **Splunk Enterprise:** SIEM platform and query engine
-- **SPL:** Splunk Processing Language (SQL-like query language)
-- **Lookups:** Reference data for enrichment
-- **Dashboards:** Visualization and exploration
-
----
-
-## License
-
-BOTS V3 Dataset: Public Domain (CC0)
-- See `botsv3/LICENSE` for details
-- Original authors: Splunk (2018)
-
-Project Documentation: Open Source
-- Use freely for educational/research purposes
-
----
-
-## Git Workflow
+Replay the checked-in hard tier offline with Python 3.10+. This needs no API key and no Splunk:
 
 ```bash
-# View setup guides
-cat docs/BOTS_V3_SETUP.md
-cat docs/DATASET_EXPLORATION_GUIDE.md
-
-# Check dataset status
-ls -lh botsv3/botsv3_data_set/
-
-# Later: commit agent code
-git add src/
-git commit -m "Add SIEM agent implementation"
+python3 scripts/run_eval.py --tier 1000
 ```
 
----
+Verified output:
 
-## Contact & Support
+```text
+Run:      run_1.2
+Accuracy: 2/9 = 22.2%
+Points:   2000 / 9000
 
-- **Questions about BOTS V3?** Check `botsv3/README.md`
-- **Splunk help?** Visit community.splunk.com
-- **Project issues?** Document in commit messages
+By tier:
+  1000 pt    2/9    22.2%
 
----
+Cost:     $31.36 (whole run)
+  zai-org/GLM-5.2-FP8          $26.5326
+  gpt-5.4-2026-03-05           $4.8297
+  Qwen/Qwen3.6-27B             $0.0000
+```
 
-**Project Created:** 2026-06-16  
-**Dataset Version:** BOTS V3  
-**Status:** Ready for Splunk installation and exploration  
+See the [runbook](docs/RUNBOOK.md) for full-run, per-question, test, and live-Splunk commands.
 
-Next: Follow `docs/BOTS_V3_SETUP.md` to install Splunk Enterprise.
+## Lessons learned
+
+1. **Cost is an architecture bug, not a billing line.** v1.1 and v1.2 both scored 26/56, but cost $0.63 and $31.36 respectively as failed delegations rose from 1 to 62. An uncapped retry path turned a held score into a 50× bill. [Evidence](docs/scoreboard_result/v1/v1.2.md)
+
+2. **Refusal is a feature.** The grounding guard trades benchmark points for trustworthy output: 11 of 56 answers declined rather than fabricate. [Evidence](log/v1/run_1.2/run_summary.json)
+
+3. **The frontier is multi-hop.** The 100-point tier reached 62.5%; the 1000-point tier reached 22.2%. The remaining hard-tier work is chained inference, not lookup. [Evidence](datasets/evaluation/leaderboard.json)
+
+4. **The scoring path needs the same rigor as the agent.** `run_summary.json` score keys were silently overwritten by a partial re-run, so the scorer now derives verdicts from submission records instead. [Evidence](docs/ARCHITECTURE.md)
+
+5. **Extractor over-trimming loses correct investigations.** In Q210, evidence supported `fyodor-L`, but extraction dropped the required `-L` and submitted `fyodor`. [Evidence](docs/scoreboard_result/v1/v1.2.md)
+
+## Repo layout
+
+| Path | Purpose |
+|---|---|
+| [`agent/`](agent/) | Three-tier investigation pipeline and Splunk tools |
+| [`datasets/`](datasets/) | BOTSv3 inputs and generated evaluation artifacts |
+| [`docs/`](docs/) | Architecture, runbook, and per-version benchmark results |
+| [`log/`](log/) | Full trajectory evidence for every scored run |
+| [`scripts/`](scripts/) | Standard-library offline scorer and leaderboard generator |
+| [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) | Agent-assisted development workflow used to build the project |
+
+## Next
+
+The open engineering problems are to cap replan rounds for high-value questions, build a portable replay view of a run's trajectory, and close the 1000-point gap without trading away grounding.
+
+## License and attribution
+
+The code is [MIT licensed](LICENSE). BOTSv3 belongs to Splunk and is redistributed under its original terms; see [dataset provenance and attribution](datasets/README.md).

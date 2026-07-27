@@ -152,7 +152,6 @@ def test_render_leaderboard_contains_both_tables_and_real_numbers():
     assert "$31.36" in markdown  # v1.2 row
 
 
-@pytest.mark.xfail(reason="README markers land in Task 9", strict=True)
 def test_readme_leaderboard_block_is_in_sync():
     # Guards the exact invariant CI enforces with --check.
     rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
