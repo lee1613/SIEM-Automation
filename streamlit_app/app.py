@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 STEPS = ["problem", "architecture", "trajectory", "score"]
@@ -97,6 +98,7 @@ questions, with the exact same visual layout:
 
 
 DEMO_TRAJECTORIES_PATH = Path(__file__).resolve().parent.parent / "datasets" / "evaluation" / "demo_trajectories.json"
+LEADERBOARD_PATH = Path(__file__).resolve().parent.parent / "datasets" / "evaluation" / "leaderboard.json"
 
 KIND_BADGE = {
     "correct": ("green", "CORRECT"),
@@ -108,6 +110,11 @@ KIND_BADGE = {
 @st.cache_data
 def load_demo_trajectories() -> dict:
     return json.loads(DEMO_TRAJECTORIES_PATH.read_text())
+
+
+@st.cache_data
+def load_leaderboard() -> dict:
+    return json.loads(LEADERBOARD_PATH.read_text())
 
 
 def render_trajectory_step() -> None:
@@ -138,6 +145,47 @@ def render_trajectory_step() -> None:
     st.markdown(f"**Final answer:** `{entry['final_answer']}`")
 
 
+def render_score_step() -> None:
+    st.header("4. The Score")
+    try:
+        board = load_leaderboard()
+    except FileNotFoundError:
+        st.error(f"Leaderboard data not found at {LEADERBOARD_PATH}.")
+        return
+
+    st.metric(
+        "Overall",
+        f"{board['overall']['correct']} / {board['overall']['total']} correct",
+        f"{board['points']['earned']} / {board['points']['possible']} pts",
+    )
+
+    tier_rows = [
+        {"Tier": f"{tier}pt", "Correct": stats["correct"], "Total": stats["total"]}
+        for tier, stats in board["tiers"].items()
+    ]
+    st.dataframe(pd.DataFrame(tier_rows), hide_index=True)
+
+    st.subheader("Version history")
+    version_rows = [
+        {
+            "Version": v["version"],
+            "Label": v["label"],
+            "Correct": v["correct"],
+            "Points": v["points"],
+        }
+        for v in board["versions"]
+    ]
+    st.dataframe(pd.DataFrame(version_rows), hide_index=True)
+
+    st.info(
+        "**Cost tracking earns trust the hard way.** A run that was restarted mid-way once "
+        "let its recorded cost silently pass through as if the run were free, because the "
+        "tracker's default for \"no usage data\" was `$0.00` instead of \"unknown.\" That's "
+        "now fixed — the tracker returns \"not tracked\" instead of a false zero — so the "
+        "numbers above are validated before they're published, not assumed correct."
+    )
+
+
 def render_step() -> None:
     step = STEPS[st.session_state["step_index"]]
     if step == "problem":
@@ -147,8 +195,7 @@ def render_step() -> None:
     elif step == "trajectory":
         render_trajectory_step()
     elif step == "score":
-        st.header("4. The Score")
-        st.info("Score step — implemented in Task 4.")
+        render_score_step()
 
 
 def main() -> None:
