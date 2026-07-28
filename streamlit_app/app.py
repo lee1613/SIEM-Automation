@@ -3,6 +3,9 @@ Reads only static committed JSON — no live Splunk/LLM calls, zero cost per vis
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import streamlit as st
 
 STEPS = ["problem", "architecture", "trajectory", "score"]
@@ -43,16 +46,106 @@ answer to a scale failure.
     )
 
 
+def render_waterfall(entries: list[dict]) -> None:
+    """Renders tier-tagged entries as an indented, color-coded waterfall.
+    Shared by the Architecture step (abstract data) and Trajectory step (real
+    data) so both use the exact same visual language.
+    """
+    indent_for_tier = {"sh": 0, "senior": 1, "extractor": 2}
+    for entry in entries:
+        tier = entry["tier"]
+        color = TIER_COLORS[tier]
+        indent = indent_for_tier[tier]
+        cols = st.columns([indent, 6 - indent]) if indent else [st.container()]
+        target = cols[-1]
+        with target:
+            st.markdown(f":{color}[**{TIER_LABELS[tier]}**]")
+            st.markdown(entry["content"])
+            if entry.get("spl"):
+                st.code(entry["spl"], language="text")
+            if entry.get("verdict"):
+                badge_color = "green" if entry["verdict"] == "CORRECT" else "red"
+                st.markdown(f":{badge_color}[{entry['verdict']}]")
+
+
+ABSTRACT_WATERFALL = [
+    {"tier": "sh", "type": "delegate", "content": "\"Investigate lateral movement on host X\" → spawns a Senior worker with a focused subquestion."},
+    {"tier": "senior", "type": "investigate", "content": "Runs Splunk searches, reasons over results, reports a finding back to SH.", "spl": "index=botsv3 host=X ..."},
+    {"tier": "extractor", "type": "answer", "content": "Strips SH's final prose answer down to the bare value the scoreboard expects."},
+]
+
+
+def render_architecture_step() -> None:
+    st.header("2. The Architecture")
+    st.markdown(
+        """
+Three tiers, each with one job:
+
+- **SH (orchestrator)** — plans, delegates focused subquestions to Senior
+  workers, and decides when it has enough to answer.
+- **Senior (investigator)** — runs the actual Splunk searches for one focused
+  subquestion, with its own bounded tool-call budget, isolated from every
+  other question's context.
+- **Extractor** — strips SH's final prose answer down to the bare value the
+  scoreboard expects, so reasoning stays readable but scoring stays exact.
+
+Here's the pattern in the abstract — the next step shows it applied to real
+questions, with the exact same visual layout:
+"""
+    )
+    render_waterfall(ABSTRACT_WATERFALL)
+
+
+DEMO_TRAJECTORIES_PATH = Path(__file__).resolve().parent.parent / "datasets" / "evaluation" / "demo_trajectories.json"
+
+KIND_BADGE = {
+    "correct": ("green", "CORRECT"),
+    "wrong": ("red", "INCORRECT"),
+    "refusal": ("orange", "REFUSED TO GUESS"),
+}
+
+
+@st.cache_data
+def load_demo_trajectories() -> dict:
+    return json.loads(DEMO_TRAJECTORIES_PATH.read_text())
+
+
+def render_trajectory_step() -> None:
+    st.header("3. Watch It Reason")
+    try:
+        trajectories = load_demo_trajectories()
+    except FileNotFoundError:
+        st.error(
+            "Trajectory data not found. Run `python3 scripts/extract_demo_trajectories.py` "
+            "and redeploy."
+        )
+        return
+
+    question_id = st.selectbox("Choose a question", list(trajectories.keys()))
+    entry = trajectories[question_id]
+
+    color, label = KIND_BADGE[entry["kind"]]
+    st.markdown(f"**{question_id}** · {entry['points']}pt · :{color}[{label}]")
+    st.markdown(f"> {entry['question']}")
+    if entry["kind"] == "refusal":
+        st.caption(
+            "The agent declined to fabricate an answer under uncertainty, rather than "
+            "guessing to avoid a zero. Scored the same as a wrong answer, but the "
+            "difference matters in a real investigation."
+        )
+
+    render_waterfall(entry["entries"])
+    st.markdown(f"**Final answer:** `{entry['final_answer']}`")
+
+
 def render_step() -> None:
     step = STEPS[st.session_state["step_index"]]
     if step == "problem":
         render_problem_step()
     elif step == "architecture":
-        st.header("2. The Architecture")
-        st.info("Architecture step — implemented in Task 3.")
+        render_architecture_step()
     elif step == "trajectory":
-        st.header("3. Watch It Reason")
-        st.info("Trajectory step — implemented in Task 3.")
+        render_trajectory_step()
     elif step == "score":
         st.header("4. The Score")
         st.info("Score step — implemented in Task 4.")
