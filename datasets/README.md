@@ -6,14 +6,20 @@ materials described below.
 
 ## BOTSv3 event dataset
 
-`botsv3/botsv3_data_set/` is the extracted pre-indexed event dataset published
-by Splunk's official [`splunk/botsv3`](https://github.com/splunk/botsv3)
-repository. The official download is
+This repository does **not** include the BOTSv3 event archive or its pre-indexed
+event files. The checked-in `botsv3/botsv3_data_set/` directory is only the
+roughly 0.9 MB, 15-file Splunk app skeleton retained from the distribution:
+configuration, license/readme files, UI placeholders, and lookup CSVs. It has
+no `var/lib/splunk/botsv3` event index.
+
+To install the events, use Splunk's official
+[`splunk/botsv3` download and installation instructions](https://github.com/splunk/botsv3#download).
+The required archive is
 [`botsv3_data_set.tgz`](https://botsdataset.s3.amazonaws.com/botsv3/botsv3_data_set.tgz)
-(320.1 MB, MD5
-`d7ccca99a01cff070dff3c139cdc10eb`), and both the primary repository and the
-bundled dataset license identify it as CC0-1.0. The lookup tables under the
-extracted app belong to this event-dataset lineage.
+(320.1 MB, MD5 `d7ccca99a01cff070dff3c139cdc10eb`); extracting that full
+distribution into Splunk supplies the pre-indexed data. The official repository
+and the license retained in the app skeleton identify this distribution as
+CC0-1.0. The checked-in lookup tables belong to this event-dataset lineage.
 
 ## BOTSv3 challenge and scoreboard materials
 
