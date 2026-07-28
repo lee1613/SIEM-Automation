@@ -8,6 +8,7 @@ delegation hierarchy visually, not just a flat tool-call log.
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -42,6 +43,20 @@ QUESTION_TEXT_RE = re.compile(r"^> (?P<text>.+)$")
 def truncate(text: str, limit: int) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def spl_to_text(spl_field: str) -> str:
+    """timeline.md stores SPL as a stringified Python list, e.g. "['search1', 'search2']".
+    Parse it into real queries joined by newlines; fall back to the raw string if it's
+    not a valid Python literal (don't crash extraction on one malformed field).
+    """
+    try:
+        queries = ast.literal_eval(spl_field)
+    except (ValueError, SyntaxError):
+        return spl_field
+    if not isinstance(queries, list):
+        return spl_field
+    return "\n".join(queries)
 
 
 def split_question_blocks(timeline_text: str) -> dict[str, str]:
@@ -142,7 +157,7 @@ def build_entries(parsed: dict) -> list[dict]:
                 "tier": "senior",
                 "type": "investigate",
                 "content": f"[{s['status']}] " + truncate(s["answer"], 400),
-                "spl": truncate(s["SPL"], 200),
+                "spl": truncate(spl_to_text(s["SPL"]), 200),
             }
         )
     entries.append(
