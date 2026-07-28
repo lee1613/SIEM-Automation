@@ -164,8 +164,22 @@ def test_load_cost_matches_the_published_v12_total():
 def test_load_cost_tolerates_a_run_without_token_usage():
     # run_1.0 predates cost tracking; the scorer must degrade, not crash.
     cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.0")
-    assert cost["total_usd"] == 0.0
+    assert cost["total_usd"] is None
     assert cost["models"] == {}
+
+
+def test_load_cost_returns_none_when_cost_was_never_tracked():
+    cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.0")
+    assert cost["total_usd"] is None
+    assert cost["models"] == {}
+
+
+def test_render_report_says_not_tracked_when_cost_is_unknown():
+    run_dir = REPO / "log" / "v1" / "run_1.2"
+    summary = run_eval.summarize(run_eval.load_rows(run_dir))
+    text = run_eval.render_report(run_dir, summary, {"models": {}, "total_usd": None})
+    assert "not tracked" in text
+    assert "$0.00" not in text
 
 
 def test_historical_versions_match_every_parseable_run_artifact():
@@ -266,6 +280,29 @@ def test_check_rejects_a_stale_readme_block(isolated_artifacts, capsys):
     readme.write_text(readme.read_text().replace("100 / 100", "0 / 100"))
     assert run_eval.main(["--run", "run_1.9", "--check"]) == 1
     assert "README leaderboard is stale" in capsys.readouterr().err
+
+
+def test_write_artifacts_writes_nothing_when_markers_are_missing(tmp_path, monkeypatch):
+    eval_dir = tmp_path / "evaluation"  # deliberately not created
+    readme = tmp_path / "README.md"
+    readme.write_text("no markers here\n")
+
+    monkeypatch.setattr(run_eval, "EVAL_DIR", eval_dir)
+    monkeypatch.setattr(run_eval, "README", readme)
+    monkeypatch.setattr(run_eval, "load_versions", lambda: {"versions": []})
+
+    run_dir = tmp_path / "log" / "v1" / "run_1.9"
+    run_dir.mkdir(parents=True)
+    summary = run_eval.summarize(
+        [{"number": 1, "submitted": "a", "official": "a", "base_points": 100}]
+    )
+    cost = {"models": {}, "total_usd": None}
+
+    with pytest.raises(SystemExit):
+        run_eval.write_artifacts(run_dir, summary, cost)
+
+    assert not eval_dir.exists()
+    assert not (eval_dir / "leaderboard.json").exists()
 
 
 def test_replace_block_is_idempotent():

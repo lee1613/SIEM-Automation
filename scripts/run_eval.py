@@ -90,12 +90,15 @@ def load_cost(run_dir: Path) -> dict:
     """Per-model USD from run_summary['token_usage'].
 
     Keys wrapped in double underscores are bookkeeping aggregates, not models.
-    Runs predating cost tracking (run_1.0) simply report zero.
+    Runs predating cost tracking (run_1.0) report total_usd=None — cost is
+    unknown for them, not zero.
     """
     path = run_dir / "run_summary.json"
     if not path.exists():
-        return {"models": {}, "total_usd": 0.0}
+        return {"models": {}, "total_usd": None}
     usage = json.loads(path.read_text()).get("token_usage") or {}
+    if not usage:
+        return {"models": {}, "total_usd": None}
     models = {
         name: entry.get("estimated_usd", 0.0)
         for name, entry in usage.items()
@@ -133,9 +136,12 @@ def render_report(run_dir: Path, summary: dict, cost: dict) -> str:
     for tier, stats in sorted(summary["tiers"].items()):
         tier_pct = 100 * stats["correct"] / stats["total"]
         lines.append(f"  {tier:>4} pt   {stats['correct']:>2}/{stats['total']:<2}  {tier_pct:5.1f}%")
-    lines += ["", f"Cost:     ${cost['total_usd']:.2f} (whole run)"]
-    for name, usd in sorted(cost["models"].items(), key=lambda kv: -kv[1]):
-        lines.append(f"  {name:<28} ${usd:.4f}")
+    if cost["total_usd"] is None:
+        lines += ["", "Cost:     not tracked for this run"]
+    else:
+        lines += ["", f"Cost:     ${cost['total_usd']:.2f} (whole run)"]
+        for name, usd in sorted(cost["models"].items(), key=lambda kv: -kv[1]):
+            lines.append(f"  {name:<28} ${usd:.4f}")
     return "\n".join(lines)
 
 
@@ -190,13 +196,15 @@ def build_leaderboard_payload(run_dir: Path, summary: dict, cost: dict) -> dict:
 
 
 def write_artifacts(run_dir: Path, summary: dict, cost: dict) -> None:
-    EVAL_DIR.mkdir(parents=True, exist_ok=True)
     payload = build_leaderboard_payload(run_dir, summary, cost)
+    markdown = render_leaderboard_markdown(summary, payload["versions"])
+    new_readme = replace_block(README.read_text(), markdown)  # can sys.exit — do first
+
+    EVAL_DIR.mkdir(parents=True, exist_ok=True)
     (EVAL_DIR / "leaderboard.json").write_text(
         json.dumps(payload, indent=2) + "\n"
     )
-    markdown = render_leaderboard_markdown(summary, payload["versions"])
-    README.write_text(replace_block(README.read_text(), markdown))
+    README.write_text(new_readme)
     print(f"Wrote {EVAL_DIR / 'leaderboard.json'} and refreshed the README leaderboard block.")
 
 
