@@ -6,6 +6,8 @@ A three-tier LLM agent that investigates realistic SOC incidents in Splunk, benc
 ![benchmark](https://img.shields.io/badge/BOTSv3-26%2F56%20(46.4%25)-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
+**Live demo:** [siem-automation.streamlit.app](https://siem-automation.streamlit.app/) — replay real trajectories tier by tier (Problem → Architecture → Trajectory → Score), no setup needed.
+
 ## What this is
 
 This repository is an agent-engineering benchmark built around 56 real forensic questions over a multi-sourcetype Splunk index. The agent plans investigations, delegates independent searches, executes SPL, joins evidence, and self-checks before submitting an exact-match answer. A single agent scored 20/56; the multi-agent pipeline scores 26/56, and the 1000-point tier is still the frontier at 2/9. SIEM is the proving ground here; the project is about observable, grounded agent control under tool and cost constraints.
