@@ -46,6 +46,11 @@ SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
 MODEL          = "gpt-5.4"
 MAX_ITER       = 15
+# Per-request LLM timeout / retry budget. SDK defaults are 600s and 2 retries;
+# 600s of silence on a stalled connection is the "process died but is still
+# running" symptom. Retries use the SDK's own capped-exponential backoff.
+LLM_TIMEOUT_S    = 120.0   # workers do long tool-heavy turns; raise if endpoint is slow
+LLM_MAX_RETRIES  = 3
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 
@@ -426,11 +431,18 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
     # (reached via base_url) expect the classic `max_tokens`. Pick the right one.
     token_kwargs = ({"max_tokens": 4096} if base_url
                     else {"max_completion_tokens": 4096})
+    # Explicit timeout + retries. The openai SDK's default timeout is 600s, so a
+    # stalled connection sits silent for 10 minutes per attempt and looks exactly
+    # like a dead-but-running process. max_retries drives the SDK's own backoff
+    # (0.5s doubling, capped 8s, jitter, honours Retry-After) - we add none of
+    # our own here. Tune these if the endpoint is genuinely slow.
     llm = ChatOpenAI(
         api_key=api_key,
         model=model,
         base_url=base_url,
         temperature=temperature,
+        timeout=LLM_TIMEOUT_S,
+        max_retries=LLM_MAX_RETRIES,
         **token_kwargs,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)

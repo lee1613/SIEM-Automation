@@ -160,13 +160,20 @@ class UsageTracker(BaseCallbackHandler):
             b["output_tokens"] += out
             b["estimated_usd"] += usd
 
-            if "SH" in tags:
+            # A Senior worker's graph.invoke() runs nested inside the SH run's
+            # still-active context, so LangChain's ambient tags=["SH", qid]
+            # leak onto it alongside its own explicit "senior" tag. Without
+            # this precedence check every Senior LLM call gets billed to SH.
+            is_senior = "senior" in tags
+            is_sh     = "SH" in tags and not is_senior
+
+            if is_sh:
                 self._sh_cum["input_tokens"]  += inp
                 self._sh_cum["cached_tokens"] += cached
                 self._sh_cum["output_tokens"] += out
                 self._sh_cum["estimated_usd"] += usd
 
-            role = "sh" if "SH" in tags else ("senior" if "senior" in tags else "other")
+            role = "senior" if is_senior else ("sh" if is_sh else "other")
             qid  = next((tg for tg in tags if isinstance(tg, str) and tg.startswith("Q")), "")
             self._add_by_q(qid, role, inp, cached, out, usd)
 

@@ -22,6 +22,20 @@ def test_by_question_buckets_sh_and_senior_separately():
     assert bq["Q200"]["senior"]["output_tokens"] == 400
 
 
+def test_senior_call_with_leaked_sh_tag_bills_to_senior_not_sh():
+    # Reproduces the real tag shape from a nested Senior graph.invoke() call:
+    # LangChain's ambient tags=["SH", qid] from the still-active SH run leak
+    # onto the Senior worker's own explicit ["senior", qid] tags. The "senior"
+    # tag must win — this call must NOT be counted as SH cost.
+    t = UsageTracker()
+    t.on_llm_end(_fake_llm_result("GLM-5.2-fp8", 5000, 400),
+                 tags=["SH", "Q200", "senior", "Q200"])
+    bq = t.by_question()
+    assert "sh" not in bq["Q200"]
+    assert bq["Q200"]["senior"]["input_tokens"] == 5000
+    assert t.sh_question_tokens()["input_tokens"] == 0
+
+
 def test_extractor_usage_attributed_to_question():
     t = UsageTracker()
     t.add_nim_usage("deepseek-ai/DeepSeek-V4-Flash", inp=200, cached=0, out=10,

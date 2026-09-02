@@ -61,6 +61,20 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 | `datasets/botsv3_questions.json` | Questions in JSON format (used by `run_all.py`) |
 | `datasets/botsv3_answers.json` | Answers in JSON format (reference only — scoring uses KV store) |
 
+## Cost-Limited Runs (active policy)
+
+**No full `run_all_v1.py` runs until the user lifts this.** v1.2's full run cost $31.36 (50x
+v1.1) with net-zero score gain — future runs must stay smoke-test scale.
+
+- Every future agent run (v1 or later) is a **smoke test on ~5 hard questions**, not a full
+  56-question run. Purpose: exercise reasoning capability / verify a fix, not score.
+- Run via `python agent/v1/run_all_v1.py --ids <5 question ids>`. Output goes to `log/temp/`
+  per the existing smoke-test rule below (unversioned, not cost-tracked, not compared in docs).
+- Default "hard" set (pick 5 from this list unless the user names specific IDs): the 1000-pt
+  residue that survived two full runs per `docs/version_architecture/v1/v1.2_improvement_plans.md`
+  — **Q216, Q217, Q224, Q328, Q329, Q330, Q331**.
+- Escalating back to a full run against the scoreboard requires explicit user go-ahead.
+
 ## Versioning & Logging (v1+ multi-agent)
 
 ### Every change must be recorded in the current in-progress version's doc

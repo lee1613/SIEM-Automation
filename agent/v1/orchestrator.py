@@ -18,12 +18,14 @@ plan + task-results summary + final answer across all 58 questions.
 import concurrent.futures
 import re
 import sqlite3
+import traceback
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
 
 from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from grounding import best_candidate, is_grounded
+from llm_errors import describe_llm_error
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
@@ -37,6 +39,8 @@ from splunk_subagent import VERIFIER_MAX_ITER
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
 MAX_HISTORY_MSGS = 24  # cross-question memory window fed to SH LLM calls
+SH_TIMEOUT_S     = 90.0  # SH turns are plan/join text only - shorter than a worker turn
+SH_MAX_RETRIES   = 3
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
 ADJUDICATE_MIN_CANDIDATES = 2     # adjudication only when selection is a real choice
@@ -402,8 +406,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     thread_id, silently dropping all prior findings.
     """
 
+    # See LLM_TIMEOUT_S note in splunk_agent.py - SDK default is 600s.
     llm         = ChatOpenAI(api_key=api_key, model=model,
-                             max_completion_tokens=4096, temperature=0)
+                             max_completion_tokens=4096, temperature=0,
+                             timeout=SH_TIMEOUT_S, max_retries=SH_MAX_RETRIES)
     sys_planner = SystemMessage(content=PLANNER_SYSTEM_PROMPT)
     sys_joiner  = SystemMessage(content=JOINER_SYSTEM_PROMPT)
 
@@ -922,21 +928,33 @@ def run_sh(graph, message: str, thread_id: str,
     if tracker is not None:
         config["callbacks"] = [tracker]
 
-    result = graph.invoke(
-        {
-            "messages":     [HumanMessage(content=message)],
-            "plan_text":    "",
-            "tasks":        [],
-            "task_results": {},
-            "plan_round":   0,
-            "final_answer": "",
-            "done":         False,
-            "needs_replan": False,
-            "verified":     False,
-            "adjudicated":  False,
-        },
-        config=config,
-    )
+    # A failed SH turn must not kill a multi-hour run - this was the only LLM
+    # call path in the pipeline with no exception guard (Senior workers have two
+    # layers). Both run_sh callers live in run_all_v1.py, so the guard goes here
+    # once rather than at each call site. Returns the empty-answer sentinel; the
+    # caller falls back to the best worker answer for that question. Cross-question
+    # memory is unaffected - the SH graph's SQLite checkpointer holds it on disk.
+    try:
+        result = graph.invoke(
+            {
+                "messages":     [HumanMessage(content=message)],
+                "plan_text":    "",
+                "tasks":        [],
+                "task_results": {},
+                "plan_round":   0,
+                "final_answer": "",
+                "done":         False,
+                "needs_replan": False,
+                "verified":     False,
+                "adjudicated":  False,
+            },
+            config=config,
+        )
+    except Exception as exc:
+        print(describe_llm_error(exc, run_name or (f"SH-{qid}" if qid else "SH")))
+        traceback.print_exc()
+        return "", {}
+
     answer = result.get("final_answer", "")
     if not answer:
         for m in reversed(result.get("messages", [])):

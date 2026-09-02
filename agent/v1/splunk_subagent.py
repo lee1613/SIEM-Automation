@@ -21,6 +21,7 @@ import uuid
 
 import splunk_agent as agent_mod
 from specialists import SPECIALISTS, parse_specialist_tag
+from llm_errors import describe_llm_error
 from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
 
@@ -125,6 +126,7 @@ class SplunkWorkerPool:
         self.splunk  = splunk
         self.tracker = tracker
         self.senior_model = senior_model
+        self.senior_base_url = senior_base_url
 
         # Six worker graphs built once at init: 3 specialist roles (hunter/
         # content/metrics, see specialists.py) x 2 budgets each — the base
@@ -216,7 +218,11 @@ class SplunkWorkerPool:
                 max_iter=max_iter,
             )
         except Exception as exc:
-            answer = f"ESCALATE: worker crashed — {exc}"
+            # str(exc) on an openai error prints only the response body, so a 429
+            # and a 500 read identically. Name the type/status/provider.
+            detail = describe_llm_error(exc, run_name, self.senior_base_url)
+            print(detail)
+            answer = f"ESCALATE: worker crashed — {detail}"
             state  = {"messages": [], "step_count": 0}
 
         print(f"\n[WORKER RESULT] {run_name}: {answer[:200]}")

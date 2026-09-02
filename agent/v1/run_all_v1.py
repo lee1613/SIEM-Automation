@@ -45,6 +45,7 @@ from dotenv import load_dotenv
 from extractor import Extractor
 from grounding import best_candidate, is_grounded
 from hint_client import HintBook
+from llm_errors import describe_llm_error
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
 from splunk_pool import SplunkConnectionPool
@@ -399,16 +400,28 @@ def main():
 
         # ── Extractor: strip prose down to the bare answer ────────────────────────
         with logger.events.timer() as t_ext:
-            try:
-                clean = extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)
-            except Exception as exc:
-                # Extractor outage must not kill the run: fall back to the best
-                # worker answer (best_candidate) rather than blindly taking
-                # sh_answer's raw last line, which can be unrelated prose when
-                # sh_answer came from the joiner's own best_candidate fallback.
+            if not sh_answer:
+                # run_sh returned its failure sentinel (it logged the reason).
+                # No prose to strip - fall back to the best worker answer this
+                # question produced before SH died, same as an extractor outage.
                 clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
-                print(f"[EXTRACTOR] FAILED after retries ({exc}); falling back to best worker answer")
-                logger.events.emit("extract_failed", qid=qid, error=str(exc)[:200])
+                print("[SH] FAILED for this question; falling back to best worker answer")
+                logger.events.emit("sh_failed", qid=qid)
+            else:
+                try:
+                    clean = extractor.extract(qtext, guidance, sh_answer, qid=qid,
+                                              expected_shape=guidance)
+                except Exception as exc:
+                    # Extractor outage must not kill the run: fall back to the best
+                    # worker answer (best_candidate) rather than blindly taking
+                    # sh_answer's raw last line, which can be unrelated prose when
+                    # sh_answer came from the joiner's own best_candidate fallback.
+                    clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                    print(f"[EXTRACTOR] FAILED after retries "
+                          f"({describe_llm_error(exc, 'Extractor', NIM_BASE_URL)}); "
+                          f"falling back to best worker answer")
+                    logger.events.emit("extract_failed", qid=qid,
+                                       error=f"{type(exc).__name__}: {str(exc)[:200]}")
         stage_ms["extract"] = t_ext.ms
         clean = finalize_answer(clean, ctx.q_delegations)
         print(f"[EXTRACTOR] clean={clean!r}")

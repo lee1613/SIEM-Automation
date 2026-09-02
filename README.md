@@ -68,6 +68,31 @@ flowchart TD
 
 See [the architecture document](docs/ARCHITECTURE.md) for responsibilities, implementation paths, and measured-versus-unmeasured tradeoffs.
 
+## Resilience — Resume & Recovery (v1.3)
+
+The SIEM agent (`agent/v1/`) runs full 56-question BOTSv3 evaluations that take
+hours and call three separate LLM providers (OpenAI, Vultr serverless, NVIDIA
+NIM). Provider outages happen mid-run — e.g. the Vultr GLM cluster went down
+partway through the v1.2 evaluation run. Two mechanisms exist so a long run
+survives that:
+
+- **Per-question fallback.** If the Extractor's API call fails after retries,
+  that single question doesn't take the run down with it — `run_all_v1.py`
+  falls back to the best worker answer already produced
+  (`extractor_fallback_answer`) and moves on to the next question.
+- **Resume-from-crash.** If the whole process dies (crash, killed terminal,
+  sustained provider outage), the next invocation
+  (`run_all_v1.py --start <question_id> --run-name <existing_run>`) doesn't
+  start over. `seed_resume_results()` rebuilds the completed-questions list
+  from the prior run's `run_summary.json`, and `UsageTracker.seed()` reloads
+  the token/cost counters so cost tracking keeps accumulating across the
+  restart instead of resetting to zero.
+
+This resume path is currently **human-triggered** — someone notices the
+process died and re-invokes it with the right flags. It is not yet an
+automatic reconnect loop that detects a dead connection and recovers on its
+own; that's active design work (see `docs/version_architecture/v1/`).
+
 ## Agent trajectory logs
 
 ### A 1000-point hit
