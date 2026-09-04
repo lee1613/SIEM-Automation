@@ -74,3 +74,18 @@ def test_pause_raises_instead_of_calling_input_when_no_tty(tmp_path, monkeypatch
     assert saved["options"] == [SKIP, ABORT]
     # Work already paid for must survive the pause - and cost no extra tokens.
     assert saved["partial"]["q_delegations"][0]["answer"] == "partial finding"
+
+
+def test_run_sh_lets_a_pause_through_instead_of_swallowing_it():
+    # Regression: RunPaused subclasses Exception, so run_sh's blanket guard
+    # caught it and returned the empty sentinel - the run then carried on past
+    # the exact failure a human was being asked to decide about, and the pause
+    # never reached main(). A pause is not a crash.
+    from orchestrator import run_sh
+
+    class _Paused:
+        def invoke(self, *a, **k):
+            raise RunPaused("/tmp/decision_request.json", "api outage on Q216")
+
+    with pytest.raises(RunPaused):
+        run_sh(_Paused(), "solve Q216", "sh_run", qid="Q216")

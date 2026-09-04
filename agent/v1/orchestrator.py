@@ -980,6 +980,11 @@ def run_sh(graph, message: str, thread_id: str,
             },
             config=config,
         )
+    except RunPaused:
+        # A deliberate pause is not a crash. It must reach main() rather than be
+        # converted into the empty sentinel, which would silently resume the run
+        # past the very failure a human was being asked to decide about.
+        raise
     except Exception as exc:
         print(describe_llm_error(exc, run_name or (f"SH-{qid}" if qid else "SH")))
         traceback.print_exc()
