@@ -80,3 +80,36 @@ def request_decision(*, qid: str, component: str, provider: str, error: str,
             print(f"[HITL] operator chose: {choice}")
             return choice
         print(f"[HITL] answer must be one of {', '.join(VALID)}")
+
+
+def pause_if_api_failed(results, *, qid: str, run_dir: str,
+                        partial: dict | None = None, where: str = "") -> bool:
+    """Ask a human what to do if any worker result is an API failure.
+
+    MUST be called on the main thread, with every worker already collected.
+    Not inside a ThreadPoolExecutor worker: `_run_senior` runs on up to 6
+    threads at once in the executor path, so a pause there would have six
+    threads racing for one prompt and clobbering one decision file, while their
+    still-running siblings kept burning tokens on the same dead provider.
+
+    Returns True if the operator chose to continue; raises RunPaused on abort,
+    or when no human is reachable.
+    """
+    failures = [r for r in results if isinstance(r, dict) and r.get("status") == "api_failed"]
+    if not failures:
+        return False
+
+    first = failures[0]
+    decision = request_decision(
+        qid=qid,
+        component=f"{where or 'Senior'} ({len(failures)} of {len(results)} failed)",
+        provider=first.get("provider", "?"),
+        error=(first.get("answer") or "")[:600],
+        run_dir=run_dir,
+        partial=partial,
+    )
+    if decision == ABORT:
+        raise RunPaused(os.path.join(run_dir, "decision_request.json"),
+                        f"operator chose to abort on {qid} ({where})")
+    print(f"[HITL] continuing past {len(failures)} API failure(s) on {qid} ({where})")
+    return True

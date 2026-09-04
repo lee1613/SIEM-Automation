@@ -26,7 +26,7 @@ from typing import Annotated, TypedDict
 from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from grounding import best_candidate, is_grounded
-from hitl import ABORT, RunPaused, request_decision
+from hitl import RunPaused, pause_if_api_failed
 from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -564,25 +564,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 # Deliberately placed after the collection loop: every future has
                 # already been .result()-ed, so no worker is in flight while we
                 # pause (nothing to cancel, nothing orphaned, no tokens wasted).
-                if api_failures:
-                    first = api_failures[0]
-                    decision = request_decision(
-                        qid=ctx.current_qid,
-                        component=f"Senior ({len(api_failures)} of "
-                                  f"{len(futures)} worker(s) failed)",
-                        provider=first.get("provider", "?"),
-                        error=(first.get("answer") or "")[:600],
-                        run_dir=ctx.logger.run_dir,
-                        # Everything this question has already paid for.
-                        partial={"q_delegations": ctx.q_delegations,
-                                 "q_handoffs":    ctx.q_handoffs},
-                    )
-                    if decision == ABORT:
-                        raise RunPaused(
-                            os.path.join(ctx.logger.run_dir, "decision_request.json"),
-                            f"operator chose to abort on {ctx.current_qid}")
-                    print(f"[HITL] continuing past {len(api_failures)} API "
-                          f"failure(s) on {ctx.current_qid}")
+                _pause_if_api_failed(ctx, api_failures, where="executor")
 
                 for idx_, res_list in per_task.items():
                     if len(res_list) > 1:
@@ -756,6 +738,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 _emit.emit("verifier_failed", qid=ctx.current_qid, error=str(exc)[:200])
             return {"verified": True, "done": True}
 
+        # Outside the try above on purpose: this raises RunPaused, and that
+        # `except Exception` would swallow it (the bug fixed in run_sh).
+        _pause_if_api_failed(ctx, [result], where="verifier")
+
         if result.get("status") in ("failed", "too_big") or result.get("cap_hit"):
             # Verifier couldn't do its <=3-query job — do NOT let it override
             # anything; keep the answer, flag loudly for post-run review.
@@ -839,6 +825,9 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 print(f"[SH ADJUDICATOR] {label} worker crashed: {exc} — "
                       f"adjudicating on the existing ledger")
             if result is not None:
+                # Outside the try above on purpose - that `except Exception`
+                # would swallow RunPaused (the bug fixed in run_sh).
+                _pause_if_api_failed(ctx, [result], where="adjudicator")
                 record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
                 ctx.q_delegations.append(record)
                 ctx.all_delegations.append(record)
@@ -920,6 +909,18 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     else:
         checkpointer = MemorySaver()
     return g.compile(checkpointer=checkpointer), checkpointer
+
+
+def _pause_if_api_failed(ctx: DelegationContext, results, *, where: str) -> bool:
+    """ctx-aware wrapper over hitl.pause_if_api_failed.
+
+    Call only from the main thread (see that function's contract).
+    """
+    return pause_if_api_failed(
+        results, qid=ctx.current_qid, run_dir=ctx.logger.run_dir, where=where,
+        # Everything this question has already paid for - plain JSON, no LLM call.
+        partial={"q_delegations": ctx.q_delegations, "q_handoffs": ctx.q_handoffs},
+    )
 
 
 def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree,

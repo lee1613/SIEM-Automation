@@ -89,3 +89,20 @@ def test_run_sh_lets_a_pause_through_instead_of_swallowing_it():
 
     with pytest.raises(RunPaused):
         run_sh(_Paused(), "solve Q216", "sh_run", qid="Q216")
+
+
+def test_pause_helper_ignores_healthy_results(tmp_path):
+    from hitl import pause_if_api_failed
+    ok = [{"status": "solved"}, {"status": "too_big"}, {"status": "failed"}]
+    assert pause_if_api_failed(ok, qid="Q216", run_dir=str(tmp_path)) is False
+    # too_big/failed are reasoning outcomes - SH handles those itself.
+
+
+def test_pause_helper_fires_on_api_failed(tmp_path, monkeypatch):
+    from hitl import pause_if_api_failed
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    mixed = [{"status": "solved"},
+             {"status": "api_failed", "provider": "api.featherless.ai",
+              "answer": "ESCALATE: worker crashed - InternalServerError"}]
+    with pytest.raises(RunPaused):
+        pause_if_api_failed(mixed, qid="Q216", run_dir=str(tmp_path), where="verifier")
