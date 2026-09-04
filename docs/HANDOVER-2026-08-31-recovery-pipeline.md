@@ -1,3 +1,7 @@
+> **SUPERSEDED (2026-09-04)** by `HANDOVER-2026-09-04-step2-executor-migration.md`.
+> Every question in Section 4 has been answered and the work is committed.
+> Kept for history; start from the newer handover.
+
 # Handover — Recovery Pipeline Design (session ending 2026-08-31)
 
 > **TO THE NEXT AGENT:** This session ended with an unfinished design and several
