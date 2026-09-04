@@ -6,7 +6,7 @@ Architecture:
     Planner → Parallel Executor → Joiner → (Replan once | FINAL ANSWER)
 
 The SH LLM (gpt-5.4, persistent MemorySaver thread) generates a numbered task
-DAG. Tasks with no $N dependencies run in parallel via ThreadPoolExecutor.
+DAG. Tasks with no $N dependencies fan out to one LangGraph node each.
 Tasks with $N references wait for those results, then run. The Joiner assembles
 all findings into a FINAL ANSWER, or requests a single focused replan round if
 a critical datum is missing.
@@ -15,7 +15,6 @@ Cross-question memory is preserved: the MemorySaver thread accumulates every
 plan + task-results summary + final answer across all 58 questions.
 """
 
-import concurrent.futures
 import os
 import re
 import sqlite3
@@ -25,8 +24,9 @@ from typing import Annotated, TypedDict
 
 from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
+from executor_graph import build_executor_graph
 from grounding import best_candidate, is_grounded
-from hitl import RunPaused, pause_if_api_failed
+from hitl import RunPaused, pause_if_api_failed, resolve_interrupt
 from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -34,6 +34,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 from specialists import parse_specialist_tag
 from splunk_subagent import VERIFIER_MAX_ITER
@@ -478,107 +479,90 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         }
 
     # ── Executor ──────────────────────────────────────────────────────────────
-    def executor_node(state: SHState) -> dict:
-        if state.get("done"):
-            return {}
+    # ── Executor: one LangGraph node per Senior worker ────────────────────────
+    # Workers used to run on a ThreadPoolExecutor *inside* one node, invisible to
+    # LangGraph, so a worker result was not graph state and an API failure had
+    # nowhere framework-native to pause. They are now a fan-out subgraph
+    # (executor_graph.py) embedded as a node: siblings finish before anything
+    # pauses, and a resume replays only the cheap hitl node - never a paid worker.
 
-        tasks     = [Task(**t) for t in state["tasks"]]
-        completed = dict(state.get("task_results") or {})
-        remaining = [t for t in tasks if t.idx not in completed]
+    def _prepare_sends(task: dict, completed: dict) -> list[dict]:
+        """One payload per worker to dispatch for this task (main dispatch node).
 
-        for _guard in range(len(remaining) + 1):
-            if not remaining:
-                break
-            ready = [t for t in remaining if all(d in completed for d in t.deps)]
-            if not ready:
-                print("[SH EXECUTOR] unresolvable dependency — running first pending task")
-                ready = [remaining[0]]
+        Worker numbering, dependency substitution and handoff context all happen
+        here, once per worker, exactly as the old executor did before submitting.
+        """
+        subq = substitute_deps(task["subquestion"], completed)
+        if ctx.q_handoffs:
+            subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
+                     "(resume the hunt, do not restart it):\n"
+                     + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]))
+        n = plan_samples(task["subquestion"], ctx.current_points)
+        if n > 1:
+            print(f"[SH EXECUTOR] metrics task {task['idx']}: sampling {n}x "
+                  f"(temperature 0.3, majority vote)")
+        # Captured here rather than inside the worker: LangGraph runs fan-out
+        # branches on its own threads and contextvars do not propagate, so the
+        # LangSmith parent must be passed explicitly (same reason _run_senior
+        # exists for the old ThreadPoolExecutor).
+        parent_run_tree = get_current_run_tree()
+        payloads = []
+        for _s in range(n):
+            worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
+            print(f"\n[SH -> SENIOR #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
+            payloads.append({"task": task, "subq": subq, "worker_idx": worker_idx,
+                             "sample": n > 1, "parent_run_tree": parent_run_tree})
+        return payloads
 
-            submissions = sum(plan_samples(t.subquestion, ctx.current_points)
-                              for t in ready)
-            n_workers = min(submissions, MAX_WORKERS)
-            print(f"\n[SH EXECUTOR] dispatching {len(ready)} task(s), "
-                  f"{submissions} worker run(s) ({n_workers} parallel slot(s))")
+    def _run_task(payload: dict) -> dict:
+        task, subq  = payload["task"], payload["subq"]
+        worker_idx  = payload["worker_idx"]
+        result = _run_senior(ctx, subq, worker_idx, payload.get("parent_run_tree"),
+                             sample=payload.get("sample", False))
+        # idx/worker_idx ride along so collect() can group samples and account.
+        result = {**result, "idx": task["idx"], "worker_idx": worker_idx}
 
-            parent_run_tree = get_current_run_tree()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as exe:
-                futures: dict = {}
-                for t in ready:
-                    subq = substitute_deps(t.subquestion, completed)
-                    if ctx.q_handoffs:
-                        subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
-                                 "(resume the hunt, do not restart it):\n"
-                                 + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]))
-                    n = plan_samples(t.subquestion, ctx.current_points)
-                    if n > 1:
-                        print(f"[SH EXECUTOR] metrics task {t.idx}: sampling {n}x "
-                              f"(temperature 0.3, majority vote)")
-                    for _s in range(n):
-                        worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
-                        print(f"\n[SH -> SENIOR #{worker_idx}  task={t.idx}]\n{subq[:300]}")
-                        futures[exe.submit(_run_senior, ctx, subq, worker_idx,
-                                           parent_run_tree,
-                                           sample=(n > 1))] = (t, worker_idx, subq)
+        record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
+        ctx.q_delegations.append(record)
+        ctx.all_delegations.append(record)
+        ctx.logger.timeline(
+            f"- **Senior #{worker_idx}**  _[{result['status']}]_  task={task['idx']}\n"
+            f"    - subquestion: {subq[:200]}\n"
+            f"    - answer: {(result.get('answer') or '').strip()[:400]}\n"
+            f"    - SPL: {result.get('spl_used')}"
+        )
+        return result
 
-                per_task: dict[int, list] = {}
-                # A sampled [METRICS] task (plan_samples>1) dispatches up to 3
-                # futures for the SAME t.idx — count/hand-off its failure at
-                # most once per task per round, not once per failing sample.
-                counted_failed_idx: set[int] = set()
-                api_failures: list[dict] = []
-                for fut, (t, worker_idx, subq) in futures.items():
-                    try:
-                        result = fut.result()
-                    except Exception as exc:
-                        result = {
-                            "status": "failed",
-                            "answer": f"worker crashed: {exc}",
-                            "spl_used": [], "sourcetypes": [], "full_state": [],
-                            "iterations": 0, "cap_hit": False,
-                        }
-                    per_task.setdefault(t.idx, []).append(result)
-                    if result.get("status") == "api_failed":
-                        api_failures.append(result)
+    def _on_wave(results: list) -> None:
+        """Per-wave accounting. A sampled task dispatches up to 3 workers for the
+        SAME idx, so its failure must count once per task per round - not once
+        per failing sample."""
+        counted: set = set()
+        for r in results:
+            if not (r.get("status") in ("too_big", "failed") or r.get("cap_hit")):
+                continue
+            idx = r.get("idx")
+            if idx in counted:
+                continue
+            if r.get("status") in ("too_big", "failed"):
+                ctx.failed_delegations += 1
+            ctx.q_handoffs.append(build_handoff_digest(
+                {**r, "worker": f"senior#{r.get('worker_idx')}"}))
+            counted.add(idx)
 
-                    if (result["status"] in ("too_big", "failed")
-                            or result.get("cap_hit")):
-                        if t.idx not in counted_failed_idx:
-                            if result["status"] in ("too_big", "failed"):
-                                ctx.failed_delegations += 1
-                            ctx.q_handoffs.append(build_handoff_digest(
-                                {**result, "worker": f"senior#{worker_idx}"}))
-                            counted_failed_idx.add(t.idx)
-
-                    record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
-                    ctx.q_delegations.append(record)
-                    ctx.all_delegations.append(record)
-
-                    ctx.logger.timeline(
-                        f"- **Senior #{worker_idx}**  _[{result['status']}]_  task={t.idx}\n"
-                        f"    - subquestion: {subq[:200]}\n"
-                        f"    - answer: {(result['answer'] or '').strip()[:400]}\n"
-                        f"    - SPL: {result['spl_used']}"
-                    )
-
-                # ── HITL: a provider outage is a human's call, not SH's ───────
-                # Deliberately placed after the collection loop: every future has
-                # already been .result()-ed, so no worker is in flight while we
-                # pause (nothing to cancel, nothing orphaned, no tokens wasted).
-                _pause_if_api_failed(ctx, api_failures, where="executor")
-
-                for idx_, res_list in per_task.items():
-                    if len(res_list) > 1:
-                        winner = majority_answer(res_list)
-                        if winner is not None:
-                            print(f"[SH EXECUTOR] task {idx_}: majority vote -> "
-                                  f"{(winner.get('answer') or '')[:120]!r}")
-                        completed[idx_] = winner or res_list[0]
-                    else:
-                        completed[idx_] = res_list[0]
-
-            remaining = [t for t in remaining if t.idx not in completed]
-
-        return {"task_results": completed}
+    # checkpointer=None on purpose: the parent SH graph's checkpointer owns this
+    # subgraph's state, which is what makes an interrupt in here resumable from
+    # the parent with Command(resume=...).
+    executor_subgraph = build_executor_graph(
+        _run_task,
+        reduce_samples=majority_answer,
+        prepare_sends=_prepare_sends,
+        on_wave=_on_wave,
+        # The old ThreadPoolExecutor bounded concurrency at MAX_WORKERS, and
+        # SplunkConnectionPool holds exactly that many connections. LangGraph
+        # would otherwise run every Send in the superstep at once.
+        max_parallel=MAX_WORKERS,
+    )
 
     # ── Joiner ────────────────────────────────────────────────────────────────
     def joiner_node(state: SHState) -> dict:
@@ -888,7 +872,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
     g = StateGraph(SHState)
     g.add_node("planner",     planner_node)
-    g.add_node("executor",    executor_node)
+    g.add_node("executor",    executor_subgraph)
     g.add_node("joiner",      joiner_node)
     g.add_node("adjudicator", adjudicator_node)
     g.add_node("verifier",    verifier_node)
@@ -941,7 +925,8 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
 
 
 def run_sh(graph, message: str, thread_id: str,
-           *, qid: str = "", run_name: str = "", tracker=None) -> tuple[str, dict]:
+           *, qid: str = "", run_name: str = "", tracker=None,
+           run_dir: str = ".") -> tuple[str, dict]:
     """Invoke the SH graph for one question or extractor-retry message.
 
     Returns (final_answer, full_state). Same interface as the v1.0 version so
@@ -990,6 +975,15 @@ def run_sh(graph, message: str, thread_id: str,
         print(describe_llm_error(exc, run_name or (f"SH-{qid}" if qid else "SH")))
         traceback.print_exc()
         return "", {}
+
+    # The executor subgraph's hitl node interrupts rather than raising, so
+    # invoke() RETURNS with __interrupt__ set. Ignoring it would hand back an
+    # empty answer and silently continue past the failure. Feed the human's
+    # choice back with Command(resume=...) - only the hitl node replays.
+    while result.get("__interrupt__"):
+        choice = resolve_interrupt(result["__interrupt__"], qid=qid, run_dir=run_dir)
+        print(f"[HITL] resuming {qid} with: {choice}")
+        result = graph.invoke(Command(resume=choice), config=config)
 
     answer = result.get("final_answer", "")
     if not answer:

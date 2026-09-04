@@ -11,7 +11,8 @@ def _tasks(*specs):
 
 
 def _stub(calls, fail_on=()):
-    def run(task):
+    def run(payload):
+        task = payload["task"]
         calls.append(task["idx"])
         if task["idx"] in fail_on:
             return {"idx": task["idx"], "status": "api_failed",
@@ -69,7 +70,8 @@ def test_resume_replays_only_the_hitl_node_not_the_paid_workers():
 def test_retry_redispatches_only_the_failed_task():
     calls = []
     runs = {"n": 0}
-    def run(task):
+    def run(payload):
+        task = payload["task"]
         calls.append(task["idx"])
         runs["n"] += 1
         # fail task 2 the first time only, so RETRY can succeed
@@ -93,7 +95,7 @@ def test_abort_stops_the_run():
 
 def test_samples_are_reduced_by_majority_vote():
     app = build_executor_graph(
-        lambda t: {"idx": t["idx"], "status": "solved", "answer": "x"},
+        lambda p: {"idx": p["task"]["idx"], "status": "solved", "answer": "x"},
         reduce_samples=lambda rs: {**rs[0], "answer": "majority"})
     out = app.invoke({"tasks": _tasks((1, [])), "task_results": {}})
     assert out["task_results"][1]["answer"] == "x"   # single sample -> untouched

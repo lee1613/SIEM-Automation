@@ -68,14 +68,36 @@ def ready_tasks(tasks: list[dict], completed: dict) -> list[dict]:
 
 def build_executor_graph(run_task: Callable[[dict], dict],
                          *, reduce_samples: Callable[[list], dict] | None = None,
+                         prepare_sends: Callable[[dict, dict], list] | None = None,
+                         on_wave: Callable[[list], None] | None = None,
+                         max_parallel: int | None = None,
                          checkpointer=None):
     """Compile the fan-out executor.
 
-    run_task(task) -> result dict carrying at least "idx" and "status".
-    reduce_samples(results) picks a winner when a task was sampled more than
-    once (majority vote); defaults to taking the first result.
+    run_task(payload)       -> result dict carrying at least "idx" and "status".
+    prepare_sends(task, completed) -> one payload per worker to dispatch for that
+                               task. This is where dependency substitution, prior
+                               handoff context and worker numbering belong, and
+                               where a sampled task fans out to several workers.
+                               Defaults to a single {"task": task} payload.
+    reduce_samples(results) -> winner when a task was sampled more than once
+                               (majority vote); defaults to the first result.
+    on_wave(results)        -> called once per wave with that wave's results,
+                               for accounting that must happen at most once per
+                               task per round (failure counters, handoff digests).
+    max_parallel            -> cap on workers dispatched in one wave. The old
+                               ThreadPoolExecutor bounded this at MAX_WORKERS,
+                               and SplunkConnectionPool only holds 6 connections,
+                               so an uncapped fan-out could starve it. Tasks that
+                               do not fit simply run in the next wave.
+
+    Pass checkpointer=None when embedding this as a node in a parent graph - the
+    parent's checkpointer then owns the subgraph's state, which is what makes an
+    interrupt inside here resumable from the parent.
     """
-    pick = reduce_samples or (lambda rs: rs[0])
+    pick    = reduce_samples or (lambda rs: rs[0])
+    prep    = prepare_sends  or (lambda task, completed: [{"task": task}])
+    account = on_wave        or (lambda results: None)
 
     def dispatch(state: ExecState) -> dict:
         completed = dict(state.get("task_results") or {})
@@ -87,21 +109,35 @@ def build_executor_graph(run_task: Callable[[dict], dict],
     def fan_out(state: ExecState):
         completed = dict(state.get("task_results") or {})
         by_idx = {t["idx"]: t for t in state.get("tasks") or []}
-        return [Send("worker", {"task": by_idx[i], "completed": completed})
-                for i in state.get("wave") or []]
+        sends = []
+        for i in state.get("wave") or []:
+            payloads = prep(by_idx[i], completed)
+            # Keep a task's samples together - splitting them across waves would
+            # break the majority vote, which reduces per task per wave.
+            if max_parallel and sends and len(sends) + len(payloads) > max_parallel:
+                break
+            for payload in payloads:
+                sends.append(Send("worker", {**payload, "completed": completed}))
+        return sends
 
     def worker(payload: dict) -> dict:
         # One Senior worker = one node. Returns its result into graph state
         # BEFORE any interrupt can happen, so a pause never re-runs this call.
-        return {"wave_results": [run_task(payload["task"])]}
+        return {"wave_results": [run_task(payload)]}
 
     def collect(state: ExecState) -> dict:
         completed = dict(state.get("task_results") or {})
+        # Accounting first, once per wave - a sampled task that failed must be
+        # counted once per task per round, not once per failing sample.
+        account(list(state.get("wave_results") or []))
         by_task: dict[Any, list] = {}
         for r in state.get("wave_results") or []:
             by_task.setdefault(r.get("idx"), []).append(r)
         for idx, results in by_task.items():
-            completed[idx] = pick(results) if len(results) > 1 else results[0]
+            # majority_answer returns None when there is no majority - the old
+            # executor guarded this with `winner or res_list[0]`; keep that.
+            winner = pick(results) if len(results) > 1 else None
+            completed[idx] = winner or results[0]
         return {"task_results": completed}
 
     def hitl(state: ExecState) -> dict:

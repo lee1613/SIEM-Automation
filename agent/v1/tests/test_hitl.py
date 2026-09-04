@@ -106,3 +106,22 @@ def test_pause_helper_fires_on_api_failed(tmp_path, monkeypatch):
               "answer": "ESCALATE: worker crashed - InternalServerError"}]
     with pytest.raises(RunPaused):
         pause_if_api_failed(mixed, qid="Q216", run_dir=str(tmp_path), where="verifier")
+
+
+def test_run_sh_resolves_an_interrupt_instead_of_returning_an_empty_answer(tmp_path, monkeypatch):
+    # The executor subgraph's hitl node interrupts rather than raising, so
+    # invoke() RETURNS with __interrupt__ set. Ignoring it would hand back ""
+    # and silently continue past the failure a human was asked about.
+    from orchestrator import run_sh
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+
+    class _Interrupting:
+        def invoke(self, *a, **k):
+            return {"__interrupt__": [type("I", (), {"value": {
+                "reason": "api_failed", "qids": [2],
+                "provider": "api.featherless.ai", "error": "boom",
+                "options": ["retry", "skip", "abort"]}})()]}
+
+    with pytest.raises(RunPaused):
+        run_sh(_Interrupting(), "solve Q216", "sh", qid="Q216", run_dir=str(tmp_path))

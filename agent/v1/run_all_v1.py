@@ -396,6 +396,7 @@ def main():
                 qid=qid,
                 run_name=f"SH-{qid}",
                 tracker=tracker,
+                run_dir=logger.run_dir,
             )
         stage_ms["sh"] = t_sh.ms
 
@@ -444,7 +445,7 @@ def main():
                              f"paid): {hint['text']}\nRe-investigate with this hint "
                              f"and give a corrected FINAL ANSWER."),
                             run_thread, qid=qid, run_name=f"SH-{qid}-hint",
-                            tracker=tracker)
+                            tracker=tracker, run_dir=logger.run_dir)
                     stage_ms["hint"] = t_hint.ms
                     try:
                         clean = extractor.extract(qtext, guidance, sh_answer,

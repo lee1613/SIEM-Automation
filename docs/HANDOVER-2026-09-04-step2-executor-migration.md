@@ -139,3 +139,57 @@ cost-tracked. Full runs need explicit user go-ahead.
 - **`retry` as a HITL option** was dropped from the `RunPaused` design (anything
   reaching it had already survived 3 SDK retries). The graph design restores it
   cheaply, because it re-dispatches only the task that actually failed.
+
+---
+
+## 8. STATUS UPDATE (end of 2026-09-04 session) — step 2 is DONE
+
+Sections 1–7 above were written before the work; this section is what actually
+landed. Read this first.
+
+**Done:**
+
+- `executor_node` is **gone**. `orchestrator.py` now registers the compiled
+  fan-out graph directly as the `executor` node
+  (`g.add_node("executor", executor_subgraph)`), with `checkpointer=None` so the
+  parent SH graph's SQLite checkpointer owns its state.
+- Verified by probe that a **subgraph-as-node** propagates its interrupt to the
+  parent's `__interrupt__`, that the parent's joiner is correctly withheld, and
+  that `Command(resume=...)` on the *parent* completes the run with **no worker
+  re-executed** (`RE-ran: []`). This is why embedding beat flattening.
+- All Section-3 behaviour ported: `substitute_deps` + handoff injection +
+  worker numbering into `prepare_sends`; delegation records and timeline into
+  `run_task`; the once-per-task-per-round failure dedupe into `on_wave`;
+  `majority_answer` as `reduce_samples`.
+- **`max_parallel=MAX_WORKERS`** added. Removing the ThreadPoolExecutor silently
+  dropped the old `min(submissions, MAX_WORKERS)` bound, and
+  `SplunkConnectionPool` holds exactly 6 connections, so an uncapped fan-out
+  could have starved it. Tasks that do not fit run in the next wave; a task's
+  samples are kept together so the majority vote still reduces per wave.
+- **`majority_answer` returning `None`** (no majority) is guarded, matching the
+  old `winner or res_list[0]`. Caught by the type checker, not by a test.
+- Hazard 2 closed: `run_sh` takes `run_dir` and loops on `__interrupt__` via
+  `hitl.resolve_interrupt`, which keeps the same two front-ends (tty prompt /
+  `decision_request.json` + `RunPaused`). Both `run_sh` call sites in
+  `run_all_v1.py` pass `run_dir`. Without this the executor's interrupt would
+  have been ignored and `run_sh` would have returned an empty answer — a silent
+  regression introduced by removing `executor_node`'s own pause.
+- Hazard 3 handled: `get_current_run_tree()` is captured in `prepare_sends` and
+  passed explicitly in each payload, since LangGraph also runs fan-out branches
+  on its own threads. **Not yet confirmed against a live LangSmith trace.**
+- Dead `import concurrent.futures` removed; module docstring updated.
+
+**Tests: 178 passed.**
+
+**What remains:**
+
+1. **No integration test has run** — the Splunk licence is still expired. The
+   Q216 smoke in Section 6 is the first real exercise of this path.
+2. **LangSmith nesting is unverified** (hazard 3). Check the first real run's
+   trace: Senior workers should nest under the SH trace, not appear as
+   disconnected roots.
+3. The verifier and adjudicator still use `pause_if_api_failed` (they are not
+   fan-out nodes). That is intentional, but it means two pause mechanisms now
+   coexist — `RunPaused` for those, graph interrupt for the executor.
+4. `retry` is now a real option again for the executor path (it re-dispatches
+   only the failed task) but is **untested against a live provider**.

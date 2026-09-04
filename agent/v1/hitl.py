@@ -113,3 +113,53 @@ def pause_if_api_failed(results, *, qid: str, run_dir: str,
                         f"operator chose to abort on {qid} ({where})")
     print(f"[HITL] continuing past {len(failures)} API failure(s) on {qid} ({where})")
     return True
+
+
+def resolve_interrupt(interrupts, *, qid: str, run_dir: str,
+                      partial: dict | None = None) -> str:
+    """Turn a LangGraph __interrupt__ into a human decision.
+
+    The executor subgraph's `hitl` node interrupts instead of raising, so
+    `graph.invoke` RETURNS with `__interrupt__` set. Feed the choice back with
+    `Command(resume=<choice>)`; only the hitl node replays, never a paid worker.
+
+    Same two front-ends as request_decision: a tty gets a prompt, anything else
+    gets a decision request on disk and RunPaused.
+    """
+    payload = {}
+    first = (list(interrupts) or [None])[0]
+    if first is not None:
+        payload = getattr(first, "value", None) or {}
+    options = [o for o in (payload.get("options") or []) if o] or [SKIP, ABORT]
+
+    record_partial = dict(partial or {})
+    record_partial.setdefault("interrupt", payload)
+    path = os.path.join(run_dir, "decision_request.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "qid":          qid,
+            "component":    "executor (fan-out worker)",
+            "provider":     payload.get("provider"),
+            "error":        payload.get("error"),
+            "failed_tasks": payload.get("qids"),
+            "options":      options,
+            "partial":      record_partial,
+        }, fh, indent=2, default=str)
+
+    banner = (f"API FAILURE on {qid} - tasks {payload.get('qids')} via "
+              f"{payload.get('provider')}")
+    if not sys.stdin.isatty():
+        raise RunPaused(path, banner + f" | decision request: {path}")
+
+    print("")
+    print("=" * 78)
+    print(f"[HITL] {banner}")
+    print(f"[HITL] {payload.get('error')}")
+    print("=" * 78)
+    while True:
+        choice = input(f"[HITL] {'/'.join(options)}> ").strip().lower()
+        if choice in options:
+            print(f"[HITL] operator chose: {choice}")
+            return choice
+        print(f"[HITL] answer must be one of {', '.join(options)}")
