@@ -193,3 +193,44 @@ landed. Read this first.
    coexist — `RunPaused` for those, graph interrupt for the executor.
 4. `retry` is now a real option again for the executor path (it re-dispatches
    only the failed task) but is **untested against a live provider**.
+
+---
+
+## 9. Next step (user-directed, 2026-09-04): give SH the same resumable fallback
+
+The executor's workers now fail into a checkpointed, resumable graph interrupt.
+**SH's own nodes still do not.** A planner/joiner LLM error hits `run_sh`'s
+`try/except`, returns the `("", {})` sentinel, and the runner falls back — the
+question's work is lost and nothing is resumable. That is the same weakness the
+JSON-record design had, still present on the SH path.
+
+Apply the executor pattern to `planner`, `joiner`, `adjudicator`, `verifier`:
+
+1. Each node catches its own LLM error and **returns an error marker into state**
+   — never calls `interrupt()` inline. Same rule as workers: those nodes make the
+   expensive call, and `interrupt()` replays its own node, so interrupting inside
+   one would re-issue its LLM call on every resume.
+2. A conditional edge routes to a single side-effect-free `sh_hitl` node that
+   interrupts. Resume replays only that node; the planner's completed work stays
+   checkpointed.
+3. `run_sh`'s `while result.get("__interrupt__")` loop already handles the
+   resume, so no runner change is needed.
+
+Payoff: one pause mechanism instead of three (`RunPaused` for
+verifier/adjudicator, graph interrupt for the executor, sentinel-plus-fallback
+for SH), and `run_sh`'s blanket `except Exception` can shrink to genuine crashes
+— removing the class of bug that caused `c5c5642`.
+
+### Pool note (do not "optimise" this away)
+
+`max_parallel=MAX_WORKERS` is not redundant with `SplunkConnectionPool`. The pool
+blocks rather than fails when full (`queue.Queue.get(block=True, timeout=...)`,
+`splunk_pool.py:108`), so over-fanning would not corrupt anything — but:
+
+- the pool's own measured table puts the throughput peak at 6-7 concurrent; past
+  8 Splunk's scheduler queues and throughput *drops* (12 -> 0.83 jobs/s, 20 -> 2
+  failures);
+- a blocked caller that exhausts `checkout_timeout` raises `TimeoutError`, which
+  now surfaces as a worker crash and is classified **`api_failed`** — so an
+  uncapped fan-out would manufacture fake API failures from self-inflicted
+  congestion and interrupt the operator for them.
