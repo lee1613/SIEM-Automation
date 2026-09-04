@@ -16,6 +16,7 @@ plan + task-results summary + final answer across all 58 questions.
 """
 
 import concurrent.futures
+import os
 import re
 import sqlite3
 import traceback
@@ -25,7 +26,8 @@ from typing import Annotated, TypedDict
 from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from grounding import best_candidate, is_grounded
-from llm_errors import describe_llm_error
+from hitl import ABORT, RunPaused, request_decision
+from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
@@ -409,7 +411,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     # See LLM_TIMEOUT_S note in splunk_agent.py - SDK default is 600s.
     llm         = ChatOpenAI(api_key=api_key, model=model,
                              max_completion_tokens=4096, temperature=0,
-                             timeout=SH_TIMEOUT_S, max_retries=SH_MAX_RETRIES)
+                             timeout=SH_TIMEOUT_S, max_retries=SH_MAX_RETRIES,
+                             http_client=resilient_http_client())
     sys_planner = SystemMessage(content=PLANNER_SYSTEM_PROMPT)
     sys_joiner  = SystemMessage(content=JOINER_SYSTEM_PROMPT)
 
@@ -522,6 +525,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 # futures for the SAME t.idx — count/hand-off its failure at
                 # most once per task per round, not once per failing sample.
                 counted_failed_idx: set[int] = set()
+                api_failures: list[dict] = []
                 for fut, (t, worker_idx, subq) in futures.items():
                     try:
                         result = fut.result()
@@ -533,6 +537,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                             "iterations": 0, "cap_hit": False,
                         }
                     per_task.setdefault(t.idx, []).append(result)
+                    if result.get("status") == "api_failed":
+                        api_failures.append(result)
 
                     if (result["status"] in ("too_big", "failed")
                             or result.get("cap_hit")):
@@ -553,6 +559,30 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                         f"    - answer: {(result['answer'] or '').strip()[:400]}\n"
                         f"    - SPL: {result['spl_used']}"
                     )
+
+                # ── HITL: a provider outage is a human's call, not SH's ───────
+                # Deliberately placed after the collection loop: every future has
+                # already been .result()-ed, so no worker is in flight while we
+                # pause (nothing to cancel, nothing orphaned, no tokens wasted).
+                if api_failures:
+                    first = api_failures[0]
+                    decision = request_decision(
+                        qid=ctx.current_qid,
+                        component=f"Senior ({len(api_failures)} of "
+                                  f"{len(futures)} worker(s) failed)",
+                        provider=first.get("provider", "?"),
+                        error=(first.get("answer") or "")[:600],
+                        run_dir=ctx.logger.run_dir,
+                        # Everything this question has already paid for.
+                        partial={"q_delegations": ctx.q_delegations,
+                                 "q_handoffs":    ctx.q_handoffs},
+                    )
+                    if decision == ABORT:
+                        raise RunPaused(
+                            os.path.join(ctx.logger.run_dir, "decision_request.json"),
+                            f"operator chose to abort on {ctx.current_qid}")
+                    print(f"[HITL] continuing past {len(api_failures)} API "
+                          f"failure(s) on {ctx.current_qid}")
 
                 for idx_, res_list in per_task.items():
                     if len(res_list) > 1:

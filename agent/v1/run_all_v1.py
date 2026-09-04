@@ -45,6 +45,7 @@ from dotenv import load_dotenv
 from extractor import Extractor
 from grounding import best_candidate, is_grounded
 from hint_client import HintBook
+from hitl import RunPaused
 from llm_errors import describe_llm_error
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
@@ -587,5 +588,24 @@ def main():
     )
 
 
+# Exit code for "paused, awaiting a human decision" - distinct from a crash (1)
+# and from success (0), so a supervisor or agent harness can tell them apart.
+# 75 is sysexits.h EX_TEMPFAIL: temporary failure, retry later.
+EXIT_PAUSED = 75
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RunPaused as paused:
+        # Not a crash. State is on disk and the run is resumable with
+        # --start <qid> --run-name <same run>; see the decision request.
+        bar = "=" * 78
+        print("")
+        print(bar)
+        print(f"[RUN PAUSED] {paused.summary}")
+        print(f"  decision request: {paused.request_path}")
+        print("  resume with: python agent/v1/run_all_v1.py "
+              "--start <qid> --run-name <this run>")
+        print(bar)
+        sys.exit(EXIT_PAUSED)

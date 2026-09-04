@@ -396,7 +396,8 @@ def _verify_call(tc: dict, seen_errors: set, seen_empty: set) -> str | None:
 def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
                  extra_instructions: str = "", extra_tools: list | None = None,
-                 max_iter: int = MAX_ITER, temperature: float = 0):
+                 max_iter: int = MAX_ITER, temperature: float = 0,
+                 http_client=None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -443,6 +444,9 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         temperature=temperature,
         timeout=LLM_TIMEOUT_S,
         max_retries=LLM_MAX_RETRIES,
+        # Optional: see llm_errors.resilient_http_client - upgrades a
+        # 200-with-error-body into a 5xx so the SDK's retry engine fires.
+        **({"http_client": http_client} if http_client else {}),
         **token_kwargs,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)

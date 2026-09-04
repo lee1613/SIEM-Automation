@@ -1,0 +1,76 @@
+import json
+
+import httpx
+import pytest
+import splunk_agent as agent_mod
+from hitl import ABORT, SKIP, RunPaused, request_decision
+from llm_errors import _ErrorBodyTransport
+from splunk_subagent import SplunkWorkerPool
+
+
+class _Fake(httpx.BaseTransport):
+    def __init__(self, body): self.body = body
+    def handle_request(self, request): return httpx.Response(200, json=self.body, request=request)
+
+
+def _through(body):
+    req = httpx.Request("POST", "https://api.featherless.ai/v1/chat/completions")
+    return _ErrorBodyTransport(_Fake(body)).handle_request(req).status_code
+
+
+def test_error_body_on_200_is_rewritten_so_the_sdk_retries():
+    # Featherless reports its own 5xx as HTTP 200 + error body. A 200 is a
+    # success to the SDK, so max_retries never fires. Rewrite it to a real 500.
+    assert _through({"error": {"message": "boom", "type": "server_error"}}) == 500
+
+
+def test_valid_completion_is_untouched():
+    assert _through({"id": "x", "choices": [{"message": {"content": "hi"}}]}) == 200
+
+
+def test_completion_with_a_soft_error_field_is_not_hijacked():
+    # Stricter than langchain's check (base.py:1771), which raises on any truthy
+    # "error" key: a usable completion must survive even if a warning rides along.
+    assert _through({"choices": [{"message": {"content": "hi"}}],
+                     "error": {"message": "soft warning"}}) == 200
+
+
+def test_non_json_body_is_passed_through():
+    class _Text(httpx.BaseTransport):
+        def handle_request(self, request):
+            return httpx.Response(200, text="not json", request=request)
+    req = httpx.Request("POST", "https://x/v1/chat/completions")
+    assert _ErrorBodyTransport(_Text()).handle_request(req).status_code == 200
+
+
+def test_api_failure_is_tagged_api_failed_not_too_big(monkeypatch):
+    # The whole point: a crashed worker's text starts with "ESCALATE:" exactly
+    # like an honest give-up, so _classify() collapses both onto "too_big" -
+    # which tells SH to DECOMPOSE and dispatch more workers at a dead provider.
+    def _boom(*a, **k):
+        raise RuntimeError("provider exploded")
+    monkeypatch.setattr(agent_mod, "run_agent_traced", _boom)
+
+    pool = object.__new__(SplunkWorkerPool)          # skip graph construction
+    pool.senior_base_url = "https://api.featherless.ai/v1"
+    pool.tracker = None
+    result = pool._run("senior", object(), "zai-org/GLM-5.3", "find it", "Q216", 5)
+
+    assert result["status"] == "api_failed"
+    assert result["provider"] == "api.featherless.ai"
+    assert "RuntimeError" in result["answer"]
+
+
+def test_pause_raises_instead_of_calling_input_when_no_tty(tmp_path, monkeypatch):
+    # Caveat (a): under an agent harness stdin is the null device, so a blocking
+    # input() would EOFError - turning a pause into a new crash.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    with pytest.raises(RunPaused) as excinfo:
+        request_decision(qid="Q216", component="Senior", provider="api.featherless.ai",
+                         error="InternalServerError (HTTP 500)", run_dir=str(tmp_path),
+                         partial={"q_delegations": [{"answer": "partial finding"}]})
+    saved = json.loads(open(excinfo.value.request_path, encoding="utf-8").read())
+    assert saved["qid"] == "Q216"
+    assert saved["options"] == [SKIP, ABORT]
+    # Work already paid for must survive the pause - and cost no extra tokens.
+    assert saved["partial"]["q_delegations"][0]["answer"] == "partial finding"

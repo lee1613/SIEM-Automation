@@ -21,7 +21,7 @@ import uuid
 
 import splunk_agent as agent_mod
 from specialists import SPECIALISTS, parse_specialist_tag
-from llm_errors import describe_llm_error
+from llm_errors import describe_llm_error, provider_of, resilient_http_client
 from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
 
@@ -127,6 +127,8 @@ class SplunkWorkerPool:
         self.tracker = tracker
         self.senior_model = senior_model
         self.senior_base_url = senior_base_url
+        # One pooled, thread-safe client shared by every worker graph.
+        self._http = resilient_http_client()
 
         # Six worker graphs built once at init: 3 specialist roles (hunter/
         # content/metrics, see specialists.py) x 2 budgets each — the base
@@ -141,14 +143,14 @@ class SplunkWorkerPool:
                             (True, iter_budget(HIGH_VALUE_THRESHOLD))):
                 self._graphs[(name, hi)], _ = agent_mod.create_agent(
                     senior_api_key, splunk,
-                    model=senior_model, base_url=senior_base_url,
+                    model=senior_model, base_url=senior_base_url, http_client=self._http,
                     extra_instructions=instructions,
                     extra_tools=[web_lookup],
                     max_iter=cap,
                 )
         self.verifier_graph, _ = agent_mod.create_agent(
             senior_api_key, splunk,
-            model=senior_model, base_url=senior_base_url,
+            model=senior_model, base_url=senior_base_url, http_client=self._http,
             extra_instructions=ESCALATE_INSTRUCTIONS,
             extra_tools=[web_lookup],
             max_iter=VERIFIER_MAX_ITER,
@@ -160,7 +162,7 @@ class SplunkWorkerPool:
                         (True, iter_budget(HIGH_VALUE_THRESHOLD))):
             self._graphs[("metrics_sampled", hi)], _ = agent_mod.create_agent(
                 senior_api_key, splunk,
-                model=senior_model, base_url=senior_base_url,
+                model=senior_model, base_url=senior_base_url, http_client=self._http,
                 extra_instructions=metrics_instr,
                 extra_tools=[web_lookup],
                 max_iter=cap,
@@ -205,8 +207,9 @@ class SplunkWorkerPool:
     def _run(self, role: str, graph, model: str,
              subquestion: str, parent_qid: str, idx: int,
              max_iter: int = MAX_ITER) -> dict:
-        thread_id = f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
-        run_name  = f"{role.capitalize()}-{idx}-{parent_qid}"
+        thread_id  = f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
+        run_name   = f"{role.capitalize()}-{idx}-{parent_qid}"
+        api_failed = False
 
         try:
             answer, state = agent_mod.run_agent_traced(
@@ -224,11 +227,16 @@ class SplunkWorkerPool:
             print(detail)
             answer = f"ESCALATE: worker crashed — {detail}"
             state  = {"messages": [], "step_count": 0}
+            api_failed = True
 
         print(f"\n[WORKER RESULT] {run_name}: {answer[:200]}")
 
         spl_used, sourcetypes = extract_spl_and_sourcetypes(state)
-        status = _classify(answer)
+        # A provider outage is not a reasoning outcome. Without this the crash
+        # text ("ESCALATE: worker crashed - ...") classifies as "too_big" exactly
+        # like an honest give-up, and SH responds to an outage by decomposing the
+        # task and dispatching more workers at the same dead endpoint.
+        status = "api_failed" if api_failed else _classify(answer)
 
         steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
         cap_hit = steps > max_iter
@@ -239,6 +247,7 @@ class SplunkWorkerPool:
             "parent_qid":  parent_qid,
             "subquestion": subquestion,
             "model":       model,
+            "provider":    provider_of(self.senior_base_url),
             "answer":      answer,
             "status":      status,
             "spl_used":    spl_used,

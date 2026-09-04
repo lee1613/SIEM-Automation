@@ -13,7 +13,7 @@ Caller submits the extracted answer directly to the scoreboard.
 import time
 
 import openai
-from llm_errors import describe_llm_error
+from llm_errors import describe_llm_error, resilient_http_client
 from openai import OpenAI
 
 try:
@@ -55,7 +55,8 @@ def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
 class Extractor:
     def __init__(self, nim_api_key: str, nim_base_url: str,
                  model: str = EXTRACT_MODEL, tracker=None):
-        self.client   = OpenAI(base_url=nim_base_url, api_key=nim_api_key)
+        self.client   = OpenAI(base_url=nim_base_url, api_key=nim_api_key,
+                               http_client=resilient_http_client())
         self.base_url = nim_base_url   # for error attribution only
         self.model   = model
         self.tracker = tracker
