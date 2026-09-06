@@ -26,7 +26,7 @@ from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_cho
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from executor_graph import build_executor_graph
 from grounding import best_candidate, is_grounded
-from hitl import RunPaused, pause_if_api_failed, resolve_interrupt
+from hitl import RunPaused, resolve_interrupt
 from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -34,7 +34,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 from specialists import parse_specialist_tag
 from splunk_subagent import VERIFIER_MAX_ITER
@@ -369,6 +369,9 @@ class SHState(TypedDict):
     needs_replan: bool                           # True -> route joiner back to planner
     verified:     bool                           # True once the verifier pass has run
     adjudicated:  bool                           # True once the adjudicator pass has run
+    api_error:    dict                           # set by a node whose worker hit a provider outage
+    sh_decision:  str                            # retry | skip | abort, from sh_hitl
+    sh_origin:    str                            # which node the outage came from
 
 
 class DelegationContext:
@@ -724,7 +727,14 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
         # Outside the try above on purpose: this raises RunPaused, and that
         # `except Exception` would swallow it (the bug fixed in run_sh).
-        _pause_if_api_failed(ctx, [result], where="verifier")
+        if result.get("status") == "api_failed":
+            # A provider outage is not a verification outcome. Mark it and let the
+            # graph route to sh_hitl. Interrupting *here* would replay this node
+            # and re-issue the verifier worker's LLM call on every resume.
+            return {"verified": True,
+                    "api_error": {"origin": "verifier", "qid": ctx.current_qid,
+                                  "provider": result.get("provider"),
+                                  "error": (result.get("answer") or "")[:600]}}
 
         if result.get("status") in ("failed", "too_big") or result.get("cap_hit"):
             # Verifier couldn't do its <=3-query job — do NOT let it override
@@ -773,6 +783,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
     # ── Adjudicator (Plan C: rule-ranked selection over the candidate ledger) ─
     def adjudicator_node(state: SHState) -> dict:
+        api_err: dict | None = None   # set if a track's worker hit a provider outage
         answer = state.get("final_answer", "")
         ledger = build_ledger(ctx.q_delegations)
         if len(ledger) < ADJUDICATE_MIN_CANDIDATES:
@@ -811,7 +822,10 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             if result is not None:
                 # Outside the try above on purpose - that `except Exception`
                 # would swallow RunPaused (the bug fixed in run_sh).
-                _pause_if_api_failed(ctx, [result], where="adjudicator")
+                if result.get("status") == "api_failed":
+                    api_err = {"origin": "adjudicator", "qid": ctx.current_qid,
+                               "provider": result.get("provider"),
+                               "error": (result.get("answer") or "")[:600]}
                 record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
                 ctx.q_delegations.append(record)
                 ctx.all_delegations.append(record)
@@ -848,7 +862,34 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         out: dict = {"adjudicated": True}
         if changed:
             out["final_answer"] = chosen
+        if api_err:
+            # Returned alongside the adjudication so the work already paid for is
+            # checkpointed; routing sends us to sh_hitl next.
+            out["api_error"] = api_err
         return out
+
+    def sh_hitl_node(state: SHState) -> dict:
+        """Side-effect-free by design - this is the node that replays on resume.
+
+        Every other SH node makes an LLM call, so none of them may interrupt in
+        place: interrupt() restarts its own node, which would re-issue that call
+        each time a human answers. They mark `api_error` in state instead and the
+        graph routes here.
+        """
+        err = state.get("api_error") or {}
+        decision = interrupt({
+            "reason":   "api_failed",
+            "origin":   err.get("origin"),
+            "qid":      err.get("qid"),
+            "provider": err.get("provider"),
+            "error":    err.get("error"),
+            "options":  ["retry", "skip", "abort"],
+        })
+        choice = decision if decision in ("retry", "skip", "abort") else "skip"
+        print(f"[SH HITL] {err.get('origin')} outage on {err.get('qid')} "
+              f"-> operator chose: {choice}")
+        return {"api_error": None, "sh_decision": choice,
+                "sh_origin": err.get("origin") or ""}
 
     # ── Graph wiring ──────────────────────────────────────────────────────────
     def route_planner(state: SHState) -> str:
@@ -866,7 +907,25 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         return END
 
     def route_adjudicator(state: SHState) -> str:
+        if state.get("api_error"):
+            return "sh_hitl"
         if _should_verify(ctx) and not state.get("verified"):
+            return "verifier"
+        return END
+
+    def route_verifier(state: SHState) -> str:
+        return "sh_hitl" if state.get("api_error") else END
+
+    def route_sh_hitl(state: SHState) -> str:
+        decision, origin = state.get("sh_decision"), state.get("sh_origin")
+        if decision == "abort":
+            return END
+        if decision == "retry":
+            # Re-enter the node that failed. Re-running its worker IS the point
+            # of retry, and only that node replays - nothing else is re-paid.
+            return origin or END
+        # skip: carry on down the origin's normal path without re-entering it.
+        if origin == "adjudicator" and _should_verify(ctx) and not state.get("verified"):
             return "verifier"
         return END
 
@@ -876,6 +935,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     g.add_node("joiner",      joiner_node)
     g.add_node("adjudicator", adjudicator_node)
     g.add_node("verifier",    verifier_node)
+    g.add_node("sh_hitl",     sh_hitl_node)
     g.set_entry_point("planner")
     g.add_conditional_edges("planner",  route_planner,
                             {"executor": "executor", END: END})
@@ -884,8 +944,12 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                             {"executor": "executor", "planner": "planner",
                              "adjudicator": "adjudicator", END: END})
     g.add_conditional_edges("adjudicator", route_adjudicator,
-                            {"verifier": "verifier", END: END})
-    g.add_edge("verifier", END)
+                            {"verifier": "verifier", "sh_hitl": "sh_hitl", END: END})
+    g.add_conditional_edges("sh_hitl", route_sh_hitl,
+                            {"verifier": "verifier", "adjudicator": "adjudicator",
+                             END: END})
+    g.add_conditional_edges("verifier", route_verifier,
+                            {"sh_hitl": "sh_hitl", END: END})
 
     if checkpoint_db_path:
         conn = sqlite3.connect(checkpoint_db_path, check_same_thread=False)
@@ -893,18 +957,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     else:
         checkpointer = MemorySaver()
     return g.compile(checkpointer=checkpointer), checkpointer
-
-
-def _pause_if_api_failed(ctx: DelegationContext, results, *, where: str) -> bool:
-    """ctx-aware wrapper over hitl.pause_if_api_failed.
-
-    Call only from the main thread (see that function's contract).
-    """
-    return pause_if_api_failed(
-        results, qid=ctx.current_qid, run_dir=ctx.logger.run_dir, where=where,
-        # Everything this question has already paid for - plain JSON, no LLM call.
-        partial={"q_delegations": ctx.q_delegations, "q_handoffs": ctx.q_handoffs},
-    )
 
 
 def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree,

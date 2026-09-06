@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 
 SKIP  = "skip"    # fall back to the best worker answer, continue the run
 ABORT = "abort"   # stop now; resume later with --start/--run-name
-VALID = (SKIP, ABORT)
+RETRY = "retry"   # re-run the node that failed; only that node replays
+VALID = (RETRY, SKIP, ABORT)
 
 
 class RunPaused(Exception):
@@ -41,78 +42,6 @@ class RunPaused(Exception):
         super().__init__(summary)
         self.request_path = request_path
         self.summary      = summary
-
-
-def request_decision(*, qid: str, component: str, provider: str, error: str,
-                     run_dir: str, partial: dict | None = None) -> str:
-    """Persist what the run has earned so far, then ask a human what to do.
-
-    Returns SKIP or ABORT when a human is present. Raises RunPaused otherwise.
-    """
-    record = {
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "qid":          qid,
-        "component":    component,
-        "provider":     provider,
-        "error":        error,
-        "options":      list(VALID),
-        # Everything the run has paid for on this question, so a resume does not
-        # have to rediscover it. Plain serialization - no LLM call.
-        "partial":      partial or {},
-    }
-    path = os.path.join(run_dir, "decision_request.json")
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(record, fh, indent=2, default=str)
-
-    banner = (f"API FAILURE on {qid} - {component} via {provider}\n"
-              f"  {error}\n"
-              f"  decision request written to: {path}")
-
-    if not sys.stdin.isatty():
-        # No human reachable. Do NOT call input() here - it would EOFError.
-        raise RunPaused(path, banner)
-
-    print(f"\n{'='*78}\n[HITL] {banner}\n{'='*78}")
-    while True:
-        choice = input(f"[HITL] {'/'.join(VALID)} (skip = fall back and continue, "
-                       f"abort = stop the run)> ").strip().lower()
-        if choice in VALID:
-            print(f"[HITL] operator chose: {choice}")
-            return choice
-        print(f"[HITL] answer must be one of {', '.join(VALID)}")
-
-
-def pause_if_api_failed(results, *, qid: str, run_dir: str,
-                        partial: dict | None = None, where: str = "") -> bool:
-    """Ask a human what to do if any worker result is an API failure.
-
-    MUST be called on the main thread, with every worker already collected.
-    Not inside a ThreadPoolExecutor worker: `_run_senior` runs on up to 6
-    threads at once in the executor path, so a pause there would have six
-    threads racing for one prompt and clobbering one decision file, while their
-    still-running siblings kept burning tokens on the same dead provider.
-
-    Returns True if the operator chose to continue; raises RunPaused on abort,
-    or when no human is reachable.
-    """
-    failures = [r for r in results if isinstance(r, dict) and r.get("status") == "api_failed"]
-    if not failures:
-        return False
-
-    first = failures[0]
-    decision = request_decision(
-        qid=qid,
-        component=f"{where or 'Senior'} ({len(failures)} of {len(results)} failed)",
-        provider=first.get("provider", "?"),
-        error=(first.get("answer") or "")[:600],
-        run_dir=run_dir,
-        partial=partial,
-    )
-    if decision == ABORT:
-        raise RunPaused(os.path.join(run_dir, "decision_request.json"),
-                        f"operator chose to abort on {qid} ({where})")
-    print(f"[HITL] continuing past {len(failures)} API failure(s) on {qid} ({where})")
-    return True
 
 
 def resolve_interrupt(interrupts, *, qid: str, run_dir: str,

@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 import splunk_agent as agent_mod
-from hitl import ABORT, SKIP, RunPaused, request_decision
+from hitl import RunPaused
 from llm_errors import _ErrorBodyTransport
 from splunk_subagent import SplunkWorkerPool
 
@@ -61,21 +61,6 @@ def test_api_failure_is_tagged_api_failed_not_too_big(monkeypatch):
     assert "RuntimeError" in result["answer"]
 
 
-def test_pause_raises_instead_of_calling_input_when_no_tty(tmp_path, monkeypatch):
-    # Caveat (a): under an agent harness stdin is the null device, so a blocking
-    # input() would EOFError - turning a pause into a new crash.
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
-    with pytest.raises(RunPaused) as excinfo:
-        request_decision(qid="Q216", component="Senior", provider="api.featherless.ai",
-                         error="InternalServerError (HTTP 500)", run_dir=str(tmp_path),
-                         partial={"q_delegations": [{"answer": "partial finding"}]})
-    saved = json.loads(open(excinfo.value.request_path, encoding="utf-8").read())
-    assert saved["qid"] == "Q216"
-    assert saved["options"] == [SKIP, ABORT]
-    # Work already paid for must survive the pause - and cost no extra tokens.
-    assert saved["partial"]["q_delegations"][0]["answer"] == "partial finding"
-
-
 def test_run_sh_lets_a_pause_through_instead_of_swallowing_it():
     # Regression: RunPaused subclasses Exception, so run_sh's blanket guard
     # caught it and returned the empty sentinel - the run then carried on past
@@ -89,23 +74,6 @@ def test_run_sh_lets_a_pause_through_instead_of_swallowing_it():
 
     with pytest.raises(RunPaused):
         run_sh(_Paused(), "solve Q216", "sh_run", qid="Q216")
-
-
-def test_pause_helper_ignores_healthy_results(tmp_path):
-    from hitl import pause_if_api_failed
-    ok = [{"status": "solved"}, {"status": "too_big"}, {"status": "failed"}]
-    assert pause_if_api_failed(ok, qid="Q216", run_dir=str(tmp_path)) is False
-    # too_big/failed are reasoning outcomes - SH handles those itself.
-
-
-def test_pause_helper_fires_on_api_failed(tmp_path, monkeypatch):
-    from hitl import pause_if_api_failed
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
-    mixed = [{"status": "solved"},
-             {"status": "api_failed", "provider": "api.featherless.ai",
-              "answer": "ESCALATE: worker crashed - InternalServerError"}]
-    with pytest.raises(RunPaused):
-        pause_if_api_failed(mixed, qid="Q216", run_dir=str(tmp_path), where="verifier")
 
 
 def test_run_sh_resolves_an_interrupt_instead_of_returning_an_empty_answer(tmp_path, monkeypatch):
@@ -125,3 +93,22 @@ def test_run_sh_resolves_an_interrupt_instead_of_returning_an_empty_answer(tmp_p
 
     with pytest.raises(RunPaused):
         run_sh(_Interrupting(), "solve Q216", "sh", qid="Q216", run_dir=str(tmp_path))
+
+
+def test_every_sh_llm_node_can_reach_the_graph_interrupt():
+    # All four SH nodes that call an LLM (planner/joiner via the executor
+    # subgraph, verifier, adjudicator) now mark api_error in state and route to
+    # one side-effect-free sh_hitl node, instead of the verifier/adjudicator
+    # raising RunPaused. None of them may interrupt in place: interrupt()
+    # replays its own node, which would re-issue that node's LLM call.
+    from orchestrator import DelegationContext, build_sh_agent_compiler
+
+    ctx = DelegationContext(pool=None, logger=None)
+    graph, _ = build_sh_agent_compiler("sk-fake-key", "gpt-5.4", ctx)
+    g = graph.get_graph()
+    assert "sh_hitl" in g.nodes
+    reaches_hitl = {e.source for e in g.edges if e.target == "sh_hitl"}
+    assert {"verifier", "adjudicator"} <= reaches_hitl, reaches_hitl
+    # and sh_hitl can send control back for a retry
+    from_hitl = {e.target for e in g.edges if e.source == "sh_hitl"}
+    assert {"verifier", "adjudicator"} <= from_hitl, from_hitl
