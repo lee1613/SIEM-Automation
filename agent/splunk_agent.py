@@ -46,6 +46,11 @@ SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
 MODEL          = "gpt-5.4"
 MAX_ITER       = 15
+# Runaway guard, NOT a working limit. A worker emits ~11-12K output tokens in
+# total across all its calls (measured over two Q216 runs), so 100K is ~8x
+# typical: reaching it means the worker is stuck, not thorough. Crossing it ends
+# the worker and routes to the HITL interrupt via status="runaway".
+OUTPUT_TOKEN_CAP = 100_000
 # Per-request LLM timeout / retry budget. SDK defaults are 600s and 2 retries;
 # 600s of silence on a stalled connection is the "process died but is still
 # running" symptom. Retries use the SDK's own capped-exponential backoff.
@@ -145,6 +150,7 @@ class AgentState(TypedDict):
     seen_errors:          list   # [[name, args_str], ...] calls that errored — reset per question
     seen_empty:           list   # [[name, args_str], ...] calls that returned 0 results — reset per question
     step_count:           int    # agent-node calls — reset per question
+    output_tokens:        int    # cumulative completion tokens — runaway guard
     verification_passed:  bool   # set by verify_node, read by after_verify router
     intention_retries:    int    # tracks retries for missing Intention — reset per question
 
@@ -430,8 +436,14 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
 
     # OpenAI's newer models require `max_completion_tokens`; NIM / open-source models
     # (reached via base_url) expect the classic `max_tokens`. Pick the right one.
-    token_kwargs = ({"max_tokens": 4096} if base_url
-                    else {"max_completion_tokens": 4096})
+    # 4096 was chosen for Llama 3.3, which had no hidden reasoning. Reasoning
+    # models spend this budget on chain-of-thought before writing `content`, so a
+    # tight cap returns an empty answer that reads as a failed delegation. 16384
+    # is well clear of any observed answer and is accepted by every model we might
+    # swap in (GLM-5.3's own hard ceiling is 32768). Runaway generation is bounded
+    # by OUTPUT_TOKEN_CAP per worker, not by this per-call limit.
+    token_kwargs = ({"max_tokens": 16384} if base_url
+                    else {"max_completion_tokens": 16384})
     # Explicit timeout + retries. The openai SDK's default timeout is 600s, so a
     # stalled connection sits silent for 10 minutes per attempt and looks exactly
     # like a dead-but-running process. max_retries drives the SDK's own backoff
@@ -501,7 +513,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
             tag = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
             print(f"\n{tag}\n{response.content}\n")
 
-        return {"messages": [response], "step_count": step}
+        um = getattr(response, "usage_metadata", None) or {}
+        out_total = state.get("output_tokens", 0) + int(um.get("output_tokens", 0))
+        if out_total > OUTPUT_TOKEN_CAP:
+            print(f"[RUNAWAY] {out_total:,} output tokens > cap {OUTPUT_TOKEN_CAP:,} "
+                  "— stopping this worker")
+        return {"messages": [response], "step_count": step,
+                "output_tokens": out_total}
 
     # ── Node: verify ───────────────────────────────────────────────────────────
     def verify_node(state: AgentState) -> dict:
@@ -598,6 +616,8 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         """Route agent output: to verify if tool calls present, else END."""
         if state.get("step_count", 0) > max_iter:
             return END
+        if state.get("output_tokens", 0) > OUTPUT_TOKEN_CAP:
+            return END          # runaway — _run turns this into status="runaway"
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
             return "verify"
@@ -643,6 +663,7 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
             "seen_errors":         [],
             "seen_empty":          [],
             "step_count":          0,
+            "output_tokens":       0,
             "verification_passed": False,
             "intention_retries":   0,
         },
@@ -685,6 +706,7 @@ def run_agent_traced(graph, question: str, thread_id: str = "default",
             "seen_errors":         [],
             "seen_empty":          [],
             "step_count":          0,
+            "output_tokens":       0,
             "verification_passed": False,
             "intention_retries":   0,
         },

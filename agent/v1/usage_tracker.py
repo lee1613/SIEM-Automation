@@ -49,6 +49,11 @@ PRICES_PER_1M: dict[str, dict] = {
     "GLM-5.2-fp8": {
         "short": {"input": 0.85,  "cached_input": None,   "output": 3.10},
     },
+    # Featherless. Verified against ten billed calls on the Featherless usage
+    # page: cost = (input - cached)*1.4 + cached*0.26 + output*4.4, per 1M.
+    "zai-org/GLM-5.3": {
+        "short": {"input": 1.40,  "cached_input": 0.26,   "output": 4.40},
+    },
     "meta/llama-3.3-70b-instruct": {
         "short": {"input": 0.23,  "cached_input": None,   "output": 0.40},
     },
@@ -57,6 +62,10 @@ PRICES_PER_1M: dict[str, dict] = {
     },
     "deepseek-ai/DeepSeek-V4-Flash": {
         "short": {"input": 0.30,  "cached_input": None,   "output": 1.00},
+    },
+    # Extractor (NIM). Priced at 0 by decision - see CLAUDE.md.
+    "nvidia/nemotron-3-super-120b-a12b": {
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
 }
 
@@ -143,8 +152,13 @@ class UsageTracker(BaseCallbackHandler):
 
         inp    = int(usage.get("prompt_tokens", 0))
         out    = int(usage.get("completion_tokens", 0))
+        # OpenAI nests the cache hit under prompt_tokens_details. Featherless
+        # omits that key entirely and puts `cached_tokens` at the top level of
+        # `usage`, so reading only the nested path scored every Featherless call
+        # as 0 cached and billed all of it at the full input rate.
         cached = int(
-            (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+            (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+            or usage.get("cached_tokens", 0)
         )
         model  = lo.get("model_name", "unknown")
 

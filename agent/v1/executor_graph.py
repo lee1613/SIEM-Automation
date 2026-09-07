@@ -32,6 +32,11 @@ from typing import Annotated, Any, Callable, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
+# Worker outcomes a human must decide on, rather than ordinary reasoning
+# failures SH can replan around. "api_failed" is a provider outage; "runaway" is
+# a worker past OUTPUT_TOKEN_CAP, which is stuck rather than thorough.
+INTERRUPT_STATUSES = frozenset({"api_failed", "runaway"})
+
 RETRY = "retry"
 SKIP  = "skip"
 ABORT = "abort"
@@ -143,9 +148,9 @@ def build_executor_graph(run_task: Callable[[dict], dict],
     def hitl(state: ExecState) -> dict:
         """Side-effect-free by design - this is the node that replays on resume."""
         failed = [r for r in state.get("wave_results") or []
-                  if r.get("status") == "api_failed"]
+                  if r.get("status") in INTERRUPT_STATUSES]
         decision = interrupt({
-            "reason":   "api_failed",
+            "reason":   (failed[0].get("status") if failed else "api_failed"),
             "qids":     [r.get("idx") for r in failed],
             "provider": (failed[0].get("provider") if failed else None),
             "error":    (failed[0].get("answer") if failed else None),
@@ -160,7 +165,8 @@ def build_executor_graph(run_task: Callable[[dict], dict],
         return {"decision": choice, "aborted": choice == ABORT}
 
     def route_after_collect(state: ExecState) -> str:
-        if any(r.get("status") == "api_failed" for r in state.get("wave_results") or []):
+        if any(r.get("status") in INTERRUPT_STATUSES
+               for r in state.get("wave_results") or []):
             return "hitl"
         return "dispatch" if ready_tasks(state.get("tasks") or [],
                                          state.get("task_results") or {}) else END

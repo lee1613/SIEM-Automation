@@ -236,7 +236,19 @@ class SplunkWorkerPool:
         # text ("ESCALATE: worker crashed - ...") classifies as "too_big" exactly
         # like an honest give-up, and SH responds to an outage by decomposing the
         # task and dispatching more workers at the same dead endpoint.
-        status = "api_failed" if api_failed else _classify(answer)
+        # A worker that blew the output-token guard is stuck, not thorough - its
+        # answer (if any) is untrustworthy. Flag it so the executor routes to the
+        # HITL interrupt rather than folding it into an ordinary reasoning failure.
+        runaway = (isinstance(state, dict)
+                   and state.get("output_tokens", 0) > agent_mod.OUTPUT_TOKEN_CAP)
+        if api_failed:
+            status = "api_failed"
+        elif runaway:
+            status = "runaway"
+            print(f"[WORKER RUNAWAY] {run_name}: "
+                  f"{state.get('output_tokens', 0):,} output tokens")
+        else:
+            status = _classify(answer)
 
         steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
         cap_hit = steps > max_iter

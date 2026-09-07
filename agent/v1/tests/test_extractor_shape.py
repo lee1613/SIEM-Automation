@@ -34,3 +34,26 @@ def test_extractor_fallback_uses_last_line_when_no_delegations():
 
     result = extractor_fallback_answer("line one\nFYODOR-L", [])
     assert result == "FYODOR-L"
+
+
+def test_permanent_status_is_not_retried():
+    """A 410 (model decommissioned) or 401 (bad key) cannot become true by
+    waiting. The ladder burned 10+20+40+80s per question re-asking NIM about
+    meta/llama-3.3-70b-instruct after it reached end of life."""
+    import openai, pytest, httpx
+    from extractor import Extractor
+
+    calls = {"n": 0}
+
+    def _boom(_prompt):
+        calls["n"] += 1
+        raise openai.APIStatusError(
+            "Gone",
+            response=httpx.Response(410, request=httpx.Request("POST", "http://x")),
+            body=None)
+
+    ex = Extractor("k", "http://nim.invalid")
+    ex._complete = _boom
+    with pytest.raises(openai.APIStatusError):
+        ex.extract("q", "", "verbose answer")
+    assert calls["n"] == 1, "a permanent status must not be retried"

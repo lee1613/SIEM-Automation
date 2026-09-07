@@ -20,7 +20,7 @@ import re
 import sqlite3
 import traceback
 from dataclasses import dataclass, field
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
@@ -390,6 +390,10 @@ class DelegationContext:
         self.q_delegations      = []
         self.q_handoffs         = []
         self.all_delegations    = []
+        # The LangSmith parent for the current wave of workers. It lives here,
+        # not in the Send payload, because a Send payload is checkpointed state
+        # and a live RunTree cannot be serialised - see _prepare_sends.
+        self.parent_run_tree: Any = None
 
     def reset_question(self, qid: str, points: int = 0, question: str = "",
                        guidance: str = "") -> None:
@@ -508,19 +512,25 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         # branches on its own threads and contextvars do not propagate, so the
         # LangSmith parent must be passed explicitly (same reason _run_senior
         # exists for the old ThreadPoolExecutor).
-        parent_run_tree = get_current_run_tree()
+        #
+        # It goes on ctx, NOT into the payload. A Send payload is checkpointed
+        # graph state, and a live RunTree carries a client and locks, so writing
+        # one crashed the whole question with "Type is not msgpack serializable:
+        # Send" - the error names the Send envelope, not the object inside it.
+        # ctx is plain process memory and is never checkpointed.
+        ctx.parent_run_tree = get_current_run_tree()
         payloads = []
         for _s in range(n):
             worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
             print(f"\n[SH -> SENIOR #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
             payloads.append({"task": task, "subq": subq, "worker_idx": worker_idx,
-                             "sample": n > 1, "parent_run_tree": parent_run_tree})
+                             "sample": n > 1})
         return payloads
 
     def _run_task(payload: dict) -> dict:
         task, subq  = payload["task"], payload["subq"]
         worker_idx  = payload["worker_idx"]
-        result = _run_senior(ctx, subq, worker_idx, payload.get("parent_run_tree"),
+        result = _run_senior(ctx, subq, worker_idx, ctx.parent_run_tree,
                              sample=payload.get("sample", False))
         # idx/worker_idx ride along so collect() can group samples and account.
         result = {**result, "idx": task["idx"], "worker_idx": worker_idx}

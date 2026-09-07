@@ -75,6 +75,12 @@ v1.1) with net-zero score gain — future runs must stay smoke-test scale.
   — **Q216, Q217, Q224, Q328, Q329, Q330, Q331**.
 - Escalating back to a full run against the scoreboard requires explicit user go-ahead.
 
+### New model or provider
+
+Whenever a new model or provider is added, ask the user for its price.
+Add the row to `PRICES_PER_1M` in `agent/v1/usage_tracker.py`; the extractor is
+priced at 0.
+
 ## Versioning & Logging (v1+ multi-agent)
 
 ### Every change must be recorded in the current in-progress version's doc

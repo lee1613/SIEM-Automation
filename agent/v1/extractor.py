@@ -24,10 +24,19 @@ except Exception:
         return _wrap if not (len(a) == 1 and callable(a[0])) else a[0]
 
 
-EXTRACT_MODEL = "meta/llama-3.3-70b-instruct"  # via NIM; was Qwen3.6-27B (Vultr), before that DeepSeek-V4-Flash
-EXTRACT_EXTRA_BODY = None  # Llama is not a hybrid-reasoning model — no thinking toggle needed
+# via NIM; was meta/llama-3.3-70b-instruct until it reached end of life on
+# 2026-08-26 and began returning HTTP 410, before that Qwen3.6-27B (Vultr) and
+# DeepSeek-V4-Flash. Nemotron IS a reasoning model: chain of thought arrives in a
+# separate `reasoning_content` field and the bare answer in `content`, so
+# max_tokens below must stay generous even though the answer is a few characters.
+EXTRACT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+EXTRACT_EXTRA_BODY = None  # no hybrid-reasoning thinking toggle needed
 EXTRACT_MAX_RETRIES = 5
 EXTRACT_RETRY_BACKOFF = 10.0  # seconds; doubles each retry (10+20+40+80 — rides out ~2.5 min gateway outage)
+# Statuses no amount of waiting will fix. The ladder above exists for gateway
+# blips; re-asking a decommissioned model (410) or a bad key (401) just burns
+# 150s per question before failing anyway.
+EXTRACT_FATAL_STATUS = frozenset({400, 401, 403, 404, 410, 422})
 
 
 def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
@@ -82,6 +91,8 @@ class Extractor:
                 resp = self._complete(prompt)
                 break
             except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as exc:
+                if getattr(exc, "status_code", None) in EXTRACT_FATAL_STATUS:
+                    raise            # permanent — waiting cannot make it true
                 if attempt == EXTRACT_MAX_RETRIES:
                     raise
                 print(

@@ -49,3 +49,41 @@ def test_totals_still_work():
     t.on_llm_end(_fake_llm_result("gpt-5.4", 1000, 100), tags=["SH", "Q200"])
     tot = t.totals()
     assert tot["__total__"]["input_tokens"] == 1000
+
+
+def test_top_level_cached_tokens_is_read():
+    # Featherless returns usage.cached_tokens at the top level and omits
+    # prompt_tokens_details entirely, unlike OpenAI. Reading only the nested
+    # path scored every Featherless call as 0 cached.
+    t = UsageTracker()
+    t.on_llm_end(SimpleNamespace(
+        llm_output={"model_name": "zai-org/GLM-5.3", "token_usage":
+                    {"prompt_tokens": 28745, "completion_tokens": 588,
+                     "cached_tokens": 28563}},
+        generations=[[]],
+    ), tags=["senior", "Q216"])
+    assert t.by_question()["Q216"]["senior"]["cached_tokens"] == 28563
+
+
+def test_openai_nested_cached_tokens_still_wins():
+    t = UsageTracker()
+    t.on_llm_end(SimpleNamespace(
+        llm_output={"model_name": "gpt-5.4", "token_usage":
+                    {"prompt_tokens": 1000, "completion_tokens": 50,
+                     "prompt_tokens_details": {"cached_tokens": 640}}},
+        generations=[[]],
+    ), tags=["SH", "Q216"])
+    assert t.by_question()["Q216"]["sh"]["cached_tokens"] == 640
+
+
+def test_glm_5_3_priced_from_featherless_billing():
+    # Reproduces a real billed Featherless call: 28,745 in / 28,563 cached /
+    # 588 out was invoiced at $0.010268.
+    t = UsageTracker()
+    t.on_llm_end(SimpleNamespace(
+        llm_output={"model_name": "zai-org/GLM-5.3", "token_usage":
+                    {"prompt_tokens": 28745, "completion_tokens": 588,
+                     "cached_tokens": 28563}},
+        generations=[[]],
+    ), tags=["senior", "Q216"])
+    assert abs(t.by_question()["Q216"]["senior"]["estimated_usd"] - 0.010268) < 5e-7
