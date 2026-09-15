@@ -146,7 +146,34 @@ Two traps follow from that, and both are general, not specific to this question:
    The closest is 1660, six seconds short. The only exact `1666` anywhere in the feed is
    `SearchUI.exe -> 204.79.197.254` — Bing, unrelated.
 
-**Trigger:** install `Splunk_TA_cisco-nvm` (or equivalent) and re-index, then re-check
-whether the parsed `duration` field yields 1666. Until then Q216 is not winnable on exact
-match, and it should not be read as an agent-reasoning failure. Consider dropping it from
-the default hard set for the same reason.
+**Update, same day — the add-on is now installed, and it changes nothing.**
+`TA-Cisco-NVM` and `CiscoNVM` are both in `etc/apps`. Two reasons they are inert here:
+
+- **The TA binds to a sourcetype, and sourcetype is set at index time.** Its stanza is
+  `[cisco:nvm:flowdata]`; these events were indexed as `sourcetype=syslog`. Verified live:
+  `flow_start_sec`, `flow_end_sec`, `src_ip` and `dest_hostname` all come back empty.
+- **The TA has no `duration` field.** Its `props.conf` is FIELDALIASes (`fss AS
+  flow_start_sec`, `fes AS flow_end_sec`) and CIM EVALs (`src`, `dest`, `bytes`,
+  `transport`, `action`, `direction`, `process`). Nothing computes a duration, so
+  re-indexing would not make 1666 fall out either — it stays `fes - fss`, by hand.
+  The earlier version of this item predicted otherwise and was wrong.
+
+Also ruled out: these are not interim reports of long-lived flows that need collapsing.
+All 78,459 records are `fv=nvzFlow_v3`, there is no `fsg` (flow_report_stage) field, and
+the 3,815 records in the mining conversation have 3,815 **distinct source ports** — they
+are 3,815 separate short connections, so per-flow deduplication changes nothing (the
+per-connection span sums to exactly the same 1660).
+
+**Trigger:** to make the TA live, re-type the feed — either re-index with
+`sourcetype=cisco:nvm:flowdata`, or add to `etc/apps/TA-Cisco-NVM/local/props.conf`:
+
+```
+[source::...cisconvmflowdata]
+sourcetype = cisco:nvm:flowdata
+```
+
+`agent/v1/tests/test_nvm_addon.py` asserts both states and names the remediation in its
+failure messages; run it with `SIEM_INTEGRATION=1`. Even after re-typing, 1666 needs a
+separate explanation — the gap to 1660 is 6 seconds and no grouping tested closes it.
+Until then Q216 is not winnable on exact match and should not be read as an
+agent-reasoning failure. Consider dropping it from the default hard set.
