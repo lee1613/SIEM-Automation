@@ -155,8 +155,14 @@ def extractor_fallback_answer(sh_answer: str, delegations: list) -> str:
     answer (best_candidate, same ranking the joiner's own ungrounded-fallback
     uses) over blindly taking the last line of sh_answer, which can be raw
     multi-line prose when sh_answer came from decide_joiner_answer's
-    best_candidate fallback rather than a single-line FINAL ANSWER tag."""
-    task_results = {i: {"answer": d.get("answer"), "status": d.get("status")}
+    best_candidate fallback rather than a single-line FINAL ANSWER tag.
+
+    Schema B's `value` is preferred over the prose `answer` for the same reason
+    the ledger prefers it: `value` is the bare answer the worker committed to,
+    while `answer` is its whole terminal message. Falling back to prose put
+    3,316 characters of narration on the scoreboard in test_20260907_132802."""
+    task_results = {i: {"answer": (d.get("value") or "").strip() or d.get("answer"),
+                        "status": d.get("status")}
                     for i, d in enumerate(delegations)}
     cand = best_candidate(task_results)
     if cand:
@@ -422,6 +428,14 @@ def main():
                 try:
                     clean = extractor.extract(qtext, guidance, sh_answer, qid=qid,
                                               expected_shape=guidance)
+                    if not clean:
+                        # The call succeeded but returned nothing answer-shaped
+                        # (see extractor.clean_completion). Same remedy as an
+                        # outage: a real worker's value beats model noise.
+                        clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                        print("[EXTRACTOR] output was not answer-shaped; "
+                              "falling back to best worker answer")
+                        logger.events.emit("extract_unshaped", qid=qid)
                 except Exception as exc:
                     # Extractor outage must not kill the run: fall back to the best
                     # worker answer (best_candidate) rather than blindly taking
@@ -460,6 +474,8 @@ def main():
                         clean = extractor.extract(qtext, guidance, sh_answer,
                                                   qid=qid, expected_shape=guidance)
                     except Exception:
+                        clean = ""
+                    if not clean:
                         clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
                     clean = finalize_answer(clean, ctx.q_delegations)
                     print(f"[HINT] post-hint clean={clean!r}")

@@ -10,6 +10,7 @@ reuses the v0 extract_clean_answer approach).
 Caller submits the extracted answer directly to the scoreboard.
 """
 
+import re
 import time
 
 import openai
@@ -37,6 +38,35 @@ EXTRACT_RETRY_BACKOFF = 10.0  # seconds; doubles each retry (10+20+40+80 — rid
 # blips; re-asking a decommissioned model (410) or a bad key (401) just burns
 # 150s per question before failing anyway.
 EXTRACT_FATAL_STATUS = frozenset({400, 401, 403, 404, 410, 422})
+
+# Longest of the 58 real BOTSv3 answers is 110 chars (a User-Agent string) and
+# none contains a newline. 200 leaves nearly 2x headroom.
+MAX_ANSWER_CHARS = 200
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.S | re.I)
+
+
+def clean_completion(text: str | None) -> str:
+    """The model's `content` reduced to a plausible scoreboard answer, or "".
+
+    A reasoning model sometimes emits its chain of thought into `content`
+    instead of the separate `reasoning_content` field, and when it does it
+    spends the whole completion budget there. Q329 of test_20260915_174228
+    submitted 4,487 characters of deliberation, truncated mid-sentence at the
+    token cap, because nothing between the model and `scoreboard.submit` ever
+    asked whether the string looked like an answer.
+
+    Across the 86 extractions on record, every multi-line output (3/3) and
+    every output longer than 110 chars (4/4) was that failure mode; none was a
+    real answer. So the shape test is the whole guard: single line, non-empty,
+    within MAX_ANSWER_CHARS. Returning "" rather than a best-effort salvage is
+    deliberate - the last line of a truncated CoT reads like a plausible answer
+    ("No", in Q329's case) while being pure noise, and the caller has a real
+    worker value to fall back on.
+    """
+    t = _THINK_BLOCK.sub("", text or "").strip()
+    if not t or "\n" in t or len(t) > MAX_ANSWER_CHARS:
+        return ""
+    return t
 
 
 def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
@@ -113,4 +143,9 @@ class Extractor:
                 qid=qid,
                 role="extractor",
             )
-        return (resp.choices[0].message.content or "").strip()
+        raw   = resp.choices[0].message.content or ""
+        clean = clean_completion(raw)
+        if not clean and raw.strip():
+            print(f"[EXTRACTOR] discarded a {len(raw)}-char completion that is "
+                  f"not answer-shaped: {raw.strip()[:120]!r}...")
+        return clean
