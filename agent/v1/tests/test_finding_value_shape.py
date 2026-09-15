@@ -94,6 +94,37 @@ def test_a_solved_finding_with_a_real_value_stays_solved():
                                                      "from cisconvmflowdata")
 
 
+# ── status must agree with confidence ─────────────────────────────────────────
+
+def test_solved_at_low_confidence_is_read_as_partial():
+    # Q216 of test_20260915_174228, verbatim. This worker never queried the
+    # Cisco NVM feed the question names - it computed max(_time)-min(_time)
+    # across Sysmon and stream - yet `solved` outranks `partial`, so it beat two
+    # workers that were on the right feed. Its own confidence said 38.
+    f = _parse(status="solved", value="FYODOR-L|1534759305|1534766376|7071",
+               confidence=38)
+    assert f["status"] == "partial"
+    assert f["value"] == "FYODOR-L|1534759305|1534766376|7071"  # value survives
+
+
+def test_solved_at_or_above_the_threshold_stays_solved():
+    assert _parse(status="solved", value="1666", confidence=50)["status"] == "solved"
+    assert _parse(status="solved", value="1666", confidence=67)["status"] == "solved"
+
+
+def test_an_unparseable_confidence_does_not_silently_demote():
+    # confidence=None means "not reported", not "not confident" - demoting on it
+    # would punish a worker for a malformed field it may not have sent at all.
+    f = _parse(status="solved", value="1666", confidence="high")
+    assert f["confidence"] is None
+    assert f["status"] == "solved"
+
+
+def test_low_confidence_does_not_promote_a_worse_status():
+    for st in ("partial", "failed", "too_big"):
+        assert _parse(status=st, value="", confidence=10)["status"] == st
+
+
 def test_an_empty_value_is_left_alone():
     # The documented way to report a partial with no clean candidate.
     f = _parse(status="partial", value="", notes="stream:dns carries the field")

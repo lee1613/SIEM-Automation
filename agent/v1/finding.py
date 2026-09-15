@@ -35,6 +35,12 @@ VALID_STATUS = ("failed", "too_big", "partial", "solved")
 # The longest of the 58 real BOTSv3 answers is 11 words (a User-Agent string).
 MAX_ANSWER_WORDS = 12
 
+# "solved" means "I am confident in `value`". Below this the worker has said
+# both things at once, and the status is the half the joiner ranks on. 50 is
+# the schema default and is already this project's line for "not confident" -
+# it is the threshold at which SH is told to decompose a task.
+SOLVED_MIN_CONFIDENCE = 50
+
 
 def answer_shaped(value: str) -> bool:
     """Could this string be submitted to the scoreboard as-is?
@@ -102,7 +108,11 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
     - evidence: the SPL that produced `value`, then what it returned, including
       the event count you saw.
     - confidence: 0-100, how sure you are of `value`. Be honest; a low number is
-      more useful than a wrong high one.
+      more useful than a wrong high one. It must agree with `status`: below 50
+      you are not confident, so the status is "partial", not "solved". Reporting
+      "solved" at low confidence is read as "partial" regardless.
+      If the question names a specific feed and you did not query that feed,
+      you are not solved - whatever you found somewhere else is corroboration.
     - sourcetypes_used / sources_used: comma-separated feeds you actually queried.
     - ruled_out: feeds or hypotheses you CHECKED and eliminated, with why - e.g.
       "cisco:asa - carries no flow-duration field". This is worth nearly as much
@@ -205,6 +215,16 @@ def parse_finding(messages: list, answer: str) -> dict:
         # that wrote a paragraph where the answer goes did not solve anything.
         if status == "solved":
             status = "partial"
+
+    # A worker cannot be both solved and unsure. Q216 of test_20260915_174228
+    # was lost to exactly this: a worker that never queried the Cisco NVM feed
+    # the question names returned `solved` at confidence 38, and `solved`
+    # outranks `partial` in _STATUS_RANK, so it beat two workers that were on
+    # the right feed. The confidence it reported on itself was already the
+    # warning; nothing was reading it.
+    if status == "solved" and confidence is not None \
+            and confidence < SOLVED_MIN_CONFIDENCE:
+        status = "partial"
 
     return {
         "status":     status,

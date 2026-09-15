@@ -107,3 +107,46 @@ threshold from the decile table rather than from 50 being a round number. Note a
 per-spawn confidences do not currently sum to 100 — decide whether they should mean
 "independent probability" or "share of belief" before gating on them, because `< 50` has a
 fixed point under the second reading and none under the first.
+
+---
+
+## 5. The Cisco NVM add-on is missing, so Q216's official answer is not reproducible here
+
+**Status:** verified against live Splunk, 2026-09-15. Not a code defect — an environment gap.
+
+Q216 asks *"According to the Cisco NVM flow logs, for how many seconds does the endpoint
+generate Monero cryptocurrency?"* Official answer: `1666`.
+
+There is **no `cisco:nvm:flowdata` sourcetype in this index**. The NVM data lands as
+`sourcetype=syslog, source=cisconvmflowdata` — raw, unparsed syslog, because the Cisco NVM
+add-on is not installed. The official answer was computed against the add-on's parsed
+fields; locally the agent must hand-derive everything from the payload.
+
+Two traps follow from that, and both are general, not specific to this question:
+
+1. **`fst` and `fet` are human-readable strings, not epochs.** A record reads
+   `fss="1534762025" fst="Mon Aug 20 10:47:05 2018" fes="1534762137" fet="Mon Aug 20
+   10:48:57 2018"`. The epoch pair is `fss`/`fes`. `| eval duration=fet-fst` returns
+   **null with no error** — Splunk drops the column silently, so a worker sees an empty
+   result and concludes the data is not there. Two v1.3 workers were on the correct feed
+   and both returned empty values this way.
+
+2. **`1666` is not reachable from the local data.** Using `fes-fss` correctly, brute-forced
+   across groupings by `sa`, `da`, `dp`, `pn`, `ppn`, `udid` and `liuidp`, with sum, span,
+   and interval-union:
+
+   | interpretation | value |
+   |---|---|
+   | sum(dur), `192.168.70.186 -> 45.77.53.176:443`, `ppn=powershell.exe` | **1660** |
+   | sum(dur), same host pair, all ports, `ppn=powershell.exe` | 1772 |
+   | interval union, same | 1527 |
+   | span `max(fes)-min(fss)` | 7065 |
+   | agent's v1.3 answer (`max(_time)-min(_time)`, Sysmon + stream) | 7071 |
+
+   The closest is 1660, six seconds short. The only exact `1666` anywhere in the feed is
+   `SearchUI.exe -> 204.79.197.254` — Bing, unrelated.
+
+**Trigger:** install `Splunk_TA_cisco-nvm` (or equivalent) and re-index, then re-check
+whether the parsed `duration` field yields 1666. Until then Q216 is not winnable on exact
+match, and it should not be read as an agent-reasoning failure. Consider dropping it from
+the default hard set for the same reason.
