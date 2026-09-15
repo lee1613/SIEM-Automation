@@ -22,21 +22,32 @@ _ANSWER_TAG = re.compile(r'(?:FINAL|PARTIAL)\s+ANSWER:\s*(.+)', re.IGNORECASE)
 
 def extract_candidate(delegation: dict) -> dict | None:
     """Verbatim candidate from one delegation record; None if it never committed
-    to a value (ESCALATE / empty / crashed)."""
-    text = delegation.get("answer") or ""
-    m = _ANSWER_TAG.search(text)
-    if not m:
-        return None
-    value = m.group(1).strip().splitlines()[0].strip()
+    to a value (ESCALATE / empty / crashed).
+
+    Schema B's `value` is preferred and needs no parsing - it arrives as its own
+    field from the worker's submit_finding call, so there is nothing to scrape
+    and no casing to restore. The regex below is the fallback for a worker that
+    skipped the tool and answered in prose (see finding.parse_finding).
+    """
+    text  = delegation.get("answer") or ""
+    value = (delegation.get("value") or "").strip()
+    if not value:
+        m = _ANSWER_TAG.search(text)
+        if not m:
+            return None
+        value = m.group(1).strip().splitlines()[0].strip()
     if not value:
         return None
     spl = delegation.get("spl_used") or []
+    # Schema B's `evidence` is the SPL and result the worker cited for this exact
+    # value; the prose tail is a fallback for workers that skipped the tool.
+    evidence = (delegation.get("evidence") or "").strip() or text
     return {
         "value":    value,                       # verbatim — the joiner copies this
         "status":   delegation.get("status", "?"),
         "worker":   delegation.get("worker", ""),
         "spl":      spl[-1:],                    # the query that produced it
-        "evidence": text[:400],
+        "evidence": evidence[:400],
     }
 
 
@@ -64,29 +75,20 @@ def snap_to_ledger(answer: str, ledger: list) -> str:
     return answer
 
 
-# 'UF = 2059' — short alnum label, '=', then the value. Deliberately narrow so
-# sentence-shaped answers are never touched.
-_LABEL_PREFIX = re.compile(r'^\s*[A-Za-z][A-Za-z0-9_ ]{0,30}=\s*(?=\S)')
-
-
 def finalize_answer(clean: str, delegations: list) -> str:
-    """Last normalization before scoreboard submit (both the normal and the
-    post-hint extract paths). Snap first — a verbatim ledger match is never
-    modified — then strip a leading '<label> = ' and snap again. Q331
-    regression: post-hint extractor emitted 'UF = 2059' and it was submitted
-    raw because snap_to_ledger only ran inside joiner_node."""
-    clean = (clean or "").strip()
-    ledger = build_ledger(delegations)
-    # Check if the answer matches any ledger value exactly (case-insensitive)
-    a_lower = clean.lower()
-    for c in ledger:
-        if c["value"].strip().lower() == a_lower:
-            return c["value"]  # Return the exact ledger form
-    # If no ledger match, try stripping the label prefix and snapping again
-    stripped = _LABEL_PREFIX.sub("", clean).strip()
-    if stripped and stripped != clean:
-        return snap_to_ledger(stripped, ledger)
-    return clean
+    """Last normalization before scoreboard submit, on BOTH the normal and the
+    post-hint extract paths.
+
+    Placement is the point: snap_to_ledger used to run only inside joiner_node,
+    so anything reaching the scoreboard via the post-hint path was never snapped
+    at all (the Q331 regression). Running it at the true submit choke point
+    covers every path.
+
+    The label-prefix strip that used to live here is gone. It existed to turn an
+    extractor's 'UF = 2059' back into '2059' - a patch on a symptom of the worker
+    returning prose. Schema B's `value` field cannot carry a label, so there is
+    nothing left for it to repair."""
+    return snap_to_ledger(clean, build_ledger(delegations))
 
 
 _LEDGER_MAX_CHARS = 4000

@@ -23,6 +23,9 @@ import splunk_agent as agent_mod
 from specialists import SPECIALISTS, parse_specialist_tag
 from llm_errors import describe_llm_error, provider_of, resilient_http_client
 from splunk_agent import MAX_ITER, iter_budget
+from exploration import (EXPLORATION_MODEL, build_exploration_agent,
+                         render_report, run_exploration)
+from finding import _classify_prose, empty_finding, parse_finding, submit_finding
 from web_tool import web_lookup
 
 # Points at/above this threshold get the higher-budget worker graph (see
@@ -86,36 +89,34 @@ def extract_spl_and_sourcetypes(state: dict) -> tuple[list, list]:
 
 
 def _classify(answer: str) -> str:
-    """Status from the worker's terminal message.
-
-    'solved' requires an explicit FINAL ANSWER commitment — a non-empty tail
-    with no tag means the worker never actually answered (e.g. ran out of
-    iterations mid-tool-call), which must read as 'failed', not 'solved'.
-    """
-    a = (answer or "").strip()
-    if not a:
-        return "failed"
-    upper = a.upper()
-    if "ESCALATE:" in upper or upper.startswith("ESCALATE"):
-        return "too_big"
-    if "FINAL ANSWER" in upper:
-        return "solved"
-    if "PARTIAL ANSWER" in upper:
-        return "partial"
-    return "failed"
+    """Status from a worker's terminal text. Lives in finding.py now, next to the
+    structured path it is the fallback for; re-exported here for existing callers."""
+    return _classify_prose(answer)
 
 
 class SplunkWorkerPool:
     """Builds worker graphs once per role and runs fresh-session tasks on demand."""
 
     def __init__(self, splunk, *, senior_api_key: str, senior_model: str = "gpt-5.4",
-                 senior_base_url: str | None = None, tracker=None):
+                 senior_base_url: str | None = None, tracker=None,
+                 exploration_api_key: str | None = None,
+                 exploration_base_url: str | None = None):
         self.splunk  = splunk
         self.tracker = tracker
         self.senior_model = senior_model
         self.senior_base_url = senior_base_url
         # One pooled, thread-safe client shared by every worker graph.
         self._http = resilient_http_client()
+
+        # Exploration runs on a cheap NIM model and only when SH cannot name a
+        # search space at all. Built lazily-by-config: no NIM key, no agent, and
+        # an exploration spawn then degrades to an ordinary Senior rather than
+        # failing the question.
+        self.exploration_graph = None
+        self.exploration_budget = {"content_scans": 0}
+        if exploration_api_key and exploration_base_url:
+            self.exploration_graph, self.exploration_budget = build_exploration_agent(
+                exploration_api_key, exploration_base_url, splunk)
 
         # Six worker graphs built once at init: 3 specialist roles (hunter/
         # content/metrics, see specialists.py) x 2 budgets each — the base
@@ -132,7 +133,7 @@ class SplunkWorkerPool:
                     senior_api_key, splunk,
                     model=senior_model, base_url=senior_base_url, http_client=self._http,
                     extra_instructions=instructions,
-                    extra_tools=[web_lookup],
+                    extra_tools=[web_lookup, submit_finding],
                     max_iter=cap,
                 )
 
@@ -146,6 +147,35 @@ class SplunkWorkerPool:
         graph  = self._graphs[(role, budget > MAX_ITER)]
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)
+
+    def run_exploration(self, question: str, parent_qid: str, idx: int) -> dict:
+        """Find which feeds could hold the answer. Returns a delegation-shaped
+        dict so the executor and the ledger handle it like any other worker -
+        `answer` carries the rendered report, and `value` stays empty because an
+        exploration worker never produces a scoreboard answer."""
+        if self.exploration_graph is None:
+            return {**empty_finding("failed"), "role": "exploration",
+                    "answer": "exploration agent not configured",
+                    "spl_used": [], "sourcetypes": [], "full_state": [],
+                    "iterations": 0, "cap_hit": False,
+                    "model": "", "provider": "nim"}
+        report = run_exploration(self.exploration_graph, self.exploration_budget,
+                                 question, qid=parent_qid, idx=idx,
+                                 tracker=self.tracker)
+        found = bool(report["source_types"] or report["sources"])
+        status = ("api_failed" if report.get("api_failed")
+                  else "partial" if found else "failed")
+        finding = empty_finding(status)
+        finding["structured"] = report["structured"]
+        finding["search_space_used"] = {"sourcetypes": report["source_types"],
+                                        "sources": report["sources"]}
+        finding["notes"] = report["insights"]
+        return {**finding,
+                "role": "exploration", "idx": idx, "parent_qid": parent_qid,
+                "subquestion": question, "model": EXPLORATION_MODEL,
+                "provider": "nim", "answer": render_report(report),
+                "spl_used": [], "sourcetypes": report["source_types"],
+                "full_state": [], "iterations": 0, "cap_hit": False}
 
     def _run(self, role: str, graph, model: str,
              subquestion: str, parent_qid: str, idx: int,
@@ -184,14 +214,21 @@ class SplunkWorkerPool:
         # HITL interrupt rather than folding it into an ordinary reasoning failure.
         runaway = (isinstance(state, dict)
                    and state.get("output_tokens", 0) > agent_mod.OUTPUT_TOKEN_CAP)
-        if api_failed:
-            status = "api_failed"
-        elif runaway:
-            status = "runaway"
+        # Schema B: the finding comes from the worker's terminal submit_finding
+        # call, with a prose fallback when it skipped the tool (see finding.py).
+        # api_failed and runaway are transport outcomes, not findings - they keep
+        # their own status and carry an empty finding rather than whatever text
+        # the crash handler synthesised.
+        if runaway:
             print(f"[WORKER RUNAWAY] {run_name}: "
                   f"{state.get('output_tokens', 0):,} output tokens")
+        if api_failed or runaway:
+            status  = "api_failed" if api_failed else "runaway"
+            finding = empty_finding(status)
         else:
-            status = _classify(answer)
+            msgs    = state.get("messages") if isinstance(state, dict) else []
+            finding = parse_finding(msgs, answer)
+            status  = finding["status"]
 
         steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
         cap_hit = steps > max_iter
@@ -210,4 +247,13 @@ class SplunkWorkerPool:
             "full_state":  serialize_messages(state),
             "iterations":  steps,
             "cap_hit":     cap_hit,
+            # Schema B fields - see finding.py.
+            "value":             finding["value"],
+            "value_kind":        finding["value_kind"],
+            "evidence":          finding["evidence"],
+            "confidence":        finding["confidence"],
+            "search_space_used": finding["search_space_used"],
+            "negative_findings": finding["negative_findings"],
+            "notes":             finding["notes"],
+            "structured":        finding["structured"],
         }

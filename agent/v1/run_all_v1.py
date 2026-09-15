@@ -292,6 +292,11 @@ def main():
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
                                  senior_model=senior_model,
                                  senior_base_url=senior_base_url,
+                                 # Exploration runs on NIM, same key as the
+                                 # extractor. Without it an exploration spawn
+                                 # degrades to an ordinary Senior.
+                                 exploration_api_key=nim_api_key,
+                                 exploration_base_url=NIM_BASE_URL,
                                  tracker=tracker,
                                  )
     ctx       = DelegationContext(pool, logger, case_file=case_file)

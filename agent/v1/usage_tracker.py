@@ -54,16 +54,21 @@ PRICES_PER_1M: dict[str, dict] = {
     "zai-org/GLM-5.3": {
         "short": {"input": 1.40,  "cached_input": 0.26,   "output": 4.40},
     },
+    # ── NIM (build.nvidia.com) ────────────────────────────────────────────────
+    # Every NIM model is priced at 0 by decision - see CLAUDE.md. NIM carries the
+    # roles that are deliberately cheap and low-reasoning (extractor, exploration),
+    # so run totals understate true spend by whatever NIM would bill. That is a
+    # known, accepted gap for benchmarking; docs/future_work.md records why it has
+    # to be closed before this automation is scaled.
     "meta/llama-3.3-70b-instruct": {
-        "short": {"input": 0.23,  "cached_input": None,   "output": 0.40},
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
     "Nemotron-Cascade-2-30B-A3B": {
-        "short": {"input": 0.15,  "cached_input": None,   "output": 0.60},
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
     "deepseek-ai/DeepSeek-V4-Flash": {
-        "short": {"input": 0.30,  "cached_input": None,   "output": 1.00},
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
-    # Extractor (NIM). Priced at 0 by decision - see CLAUDE.md.
     "nvidia/nemotron-3-super-120b-a12b": {
         "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
@@ -178,8 +183,9 @@ class UsageTracker(BaseCallbackHandler):
             # still-active context, so LangChain's ambient tags=["SH", qid]
             # leak onto it alongside its own explicit "senior" tag. Without
             # this precedence check every Senior LLM call gets billed to SH.
-            is_senior = "senior" in tags
-            is_sh     = "SH" in tags and not is_senior
+            is_senior  = "senior" in tags
+            is_explore = "exploration" in tags and not is_senior
+            is_sh      = "SH" in tags and not (is_senior or is_explore)
 
             if is_sh:
                 self._sh_cum["input_tokens"]  += inp
@@ -187,7 +193,13 @@ class UsageTracker(BaseCallbackHandler):
                 self._sh_cum["output_tokens"] += out
                 self._sh_cum["estimated_usd"] += usd
 
-            role = "senior" if is_senior else ("sh" if is_sh else "other")
+            # Exploration is checked before SH for the same reason senior is: its
+            # graph runs nested inside the SH run's still-active context, so
+            # LangChain's ambient tags=["SH", qid] leak onto every one of its
+            # calls and would otherwise bill the whole agent to SH.
+            role = ("senior" if is_senior else
+                    "exploration" if is_explore else
+                    "sh" if is_sh else "other")
             qid  = next((tg for tg in tags if isinstance(tg, str) and tg.startswith("Q")), "")
             self._add_by_q(qid, role, inp, cached, out, usd)
 

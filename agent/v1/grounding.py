@@ -30,7 +30,12 @@ def is_grounded(answer: str, task_results: dict, question_text: str = "") -> boo
     if not a:
         return False
     haystacks = [(question_text or "").lower()]
-    haystacks += [(r.get("answer") or "").lower() for r in task_results.values()]
+    # Schema B's `value` is checked alongside the prose. A worker that called
+    # submit_finding has the bare value as its own field, so grounding it is an
+    # exact match rather than a substring hunt through a sentence.
+    for r in task_results.values():
+        haystacks.append((r.get("answer") or "").lower())
+        haystacks.append((r.get("value") or "").lower())
     if any(a in h for h in haystacks):
         return True
     parts = [p.strip() for p in a.split(",") if p.strip()]

@@ -26,6 +26,8 @@ from typing import Annotated, Any, TypedDict
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from executor_graph import build_executor_graph
 from grounding import best_candidate, is_grounded
+from plan_schema import (Plan, load_manifest, render_briefing, render_plan_text,
+                         render_scope, to_tasks)
 from hitl import RunPaused, resolve_interrupt
 from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -54,58 +56,58 @@ def _window(messages):
 
 
 # ── Planner prompt ─────────────────────────────────────────────────────────────
-PLANNER_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 \
-security investigation (August 2018 APT attack against Frothly, all data in Splunk index=botsv3).
+PLANNER_SYSTEM_PROMPT = """You are the SH agent - the mastermind orchestrator for a BOTSv3 security investigation (August 2018 APT attack against Frothly, all data in Splunk index=botsv3).
 
 YOUR ROLE
 - You PLAN and DELEGATE. You do NOT query Splunk yourself.
-- Produce a numbered task list for Senior Splunk workers (Splunk experts with multi-step
-  reasoning and 6 Splunk tools). Workers run IN PARALLEL where possible.
+- A DATASET block below lists every sourcetype and the busiest sources in the index.
+  Your first job on any question is to decide WHERE the answer lives, then hand each
+  worker a scope narrow enough to be tractable.
+- Workers run IN PARALLEL unless you make one depend on another.
+
+TWO AXES - THIS IS THE MOST COMMON WAY TO GET A QUESTION WRONG
+Data is addressed by `sourcetype` AND by `source`, and they are not interchangeable.
+A single sourcetype can hide many unrelated feeds: `sourcetype=syslog` contains the
+Cisco NVM flow data, which is reachable only as `source="cisconvmflowdata"` and is the
+13th busiest feed in the index. If no sourcetype name matches what the question
+describes, that is NOT evidence the data is absent - check the source list. Scoping a
+worker by `sources` alone is valid and is sometimes the only thing that works.
+
+CHOOSING A SCOPE - in this order
+1. A sourcetype whose name matches what the question is about.
+2. Failing that, a source from the briefing whose name matches.
+3. Failing both, spawn an `exploration` worker. It searches for which feeds even
+   mention the question's key terms and reports back - use it when you genuinely
+   cannot name a scope, not as a substitute for reading the briefing.
 
 CROSS-QUESTION MEMORY
-- You remember everything from earlier questions in this run. Carry forward key entities
-  (hosts, IPs, users, bucket names, time windows, sourcetypes) and restate them explicitly
-  inside every task. Never say "the host from before" — name it explicitly every time.
+You remember every earlier question in this run. Carry entities forward (hosts, IPs,
+users, bucket names, time windows, feeds) and restate them explicitly inside every
+subquestion and in `prior_info`. Never write "the host from before" - workers share no
+memory with you or with each other.
 
-OUTPUT FORMAT — produce EXACTLY this structure:
+WRITING SPAWNS
+- 1-6 spawns. Exactly ONE if the question is a single atomic lookup.
+- Each `subquestion` must stand alone: every entity, time range and feed spelled out.
+- `deps` only where a task genuinely cannot start until another finishes. Everything
+  else runs in parallel - prefer that.
+- Use $N inside a subquestion to reference task N's result inline.
+- `confidence` is your honest estimate that the answer lies in the scope you named.
+  It is recorded and calibrated, never used to judge you - a low number on a genuinely
+  uncertain scope is more useful than a confident guess.
+- `prior_info` is what you already know that narrows the hunt, including feeds a
+  previous round ruled out.
 
-PLAN:
-- Goal: [what the question is asking for; what type of value is expected]
-- Prior knowledge: [entities from your memory relevant to THIS question]
-- Approach: [which sourcetypes or investigation path to try first]
+DIRECT ANSWER
+Fill `direct_answer` only when you already know the value from cross-question memory or
+general knowledge, and leave `spawns` empty. Never use it for a value that came from a
+CASE FILE finding - delegate a task to re-verify that instead.
 
-TASKS:
-1. <fully self-contained subquestion — no $N references>
-2. <fully self-contained subquestion — no $N references>
-3. Given $1 and $2: <subquestion using results from tasks 1 and 2>
+`expected_shape` is the exact form the scoreboard wants (e.g. "bare MAC address
+lowercase", "integer only", "comma-separated lowercase list no spaces"). Derive it from
+the answer guidance.
 
-RULES:
-- Use $N (e.g. $1, $2) to reference a previous task's result inline in the subquestion text.
-  Only reference tasks whose results you actually need before this task can proceed.
-- Tasks without any $N references will run IN PARALLEL — maximise parallelism.
-- Each task MUST be fully self-contained: include all known entities, time ranges, sourcetype
-  hints. Workers have NO shared memory across tasks.
-- 1–6 tasks maximum. If the question is a single atomic lookup, write exactly ONE task.
-- If you already know the answer from your cross-question memory (not from the Splunk dataset
-  itself — general knowledge is fine), write instead:
-    DIRECT ANSWER: <the precise value>
-  Do NOT write TASKS in that case.
-- Also output one line:  EXPECTED SHAPE: <the exact form the scoreboard wants —
-  e.g. "bare MAC address lowercase", "integer only", "comma-separated lowercase
-  list no spaces", "filename with extension". Derive it from the answer guidance.>
-- Prefix every task with a specialist tag: [HUNTER] for entity hunts across
-  hosts/users/IPs, [CONTENT] when the answer is inside raw event text (emails,
-  scripts, logs to READ), [METRICS] for any computed number (averages,
-  percentiles, durations, counts with arithmetic). Untagged tasks default to
-  [HUNTER].
-- If the question message contains a DUAL-TRACK instruction: your TASKS must
-  form two clearly orthogonal approaches (different sourcetype families or
-  methods), 2-3 tasks each within the 6-task cap, and at least one task must
-  enumerate the whole population unfiltered before narrowing.
-- Never use DIRECT ANSWER for a value that comes from the CASE FILE block; delegate a task to re-verify it instead.
-
-A CASE FILE block may precede this conversation — treat `[?]`/`[X]` findings as unproven; \
-re-verify before building a plan on them."""
+A CASE FILE block may precede this conversation - treat `[?]`/`[X]` findings as unproven and re-verify before building a plan on them."""
 
 
 # ── Joiner prompt ──────────────────────────────────────────────────────────────
@@ -283,6 +285,26 @@ def _delegation_record(worker_idx, qid, subq: str, result: dict) -> dict:
         "iterations":  result.get("iterations", 0),
         "cap_hit":     result.get("cap_hit", False),
         "duration_s":  result.get("duration_s", 0.0),
+        # Schema B (finding.py): `value` is the bare answer as its own field, so
+        # the ledger reads it instead of scraping prose. negative_findings is
+        # what this worker ruled OUT - 73% of delegations end partial or failed,
+        # and until now everything they eliminated was discarded, which is why
+        # replan rounds re-tread ground round 1 already covered.
+        "value":             result.get("value", ""),
+        "value_kind":        result.get("value_kind", ""),
+        "evidence":          result.get("evidence", ""),
+        "worker_confidence": result.get("confidence"),
+        "search_space_used": result.get("search_space_used") or
+                             {"sourcetypes": [], "sources": []},
+        "negative_findings": result.get("negative_findings") or [],
+        "notes":             result.get("notes", ""),
+        "structured":        result.get("structured", False),
+        # Set by the planner when it spawned this worker (spawn_report.py reads
+        # these against status to calibrate SH's self-reported confidence).
+        "spawn_type":  result.get("spawn_type", "senior"),
+        "search_space": result.get("search_space") or {},
+        "prior_info":  result.get("prior_info", ""),
+        "confidence":  result.get("sh_confidence"),
     }
 
 
@@ -344,8 +366,22 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                              max_completion_tokens=4096, temperature=0,
                              timeout=SH_TIMEOUT_S, max_retries=SH_MAX_RETRIES,
                              http_client=resilient_http_client())
+    # strict json_schema: a malformed plan fails the call instead of silently
+    # degrading to the old "no structured tasks parsed" single-task fallback,
+    # which hid a planning failure as one broad delegation.
+    planner_llm = llm.with_structured_output(Plan, method="json_schema", strict=True)
     sys_planner = SystemMessage(content=PLANNER_SYSTEM_PROMPT)
     sys_joiner  = SystemMessage(content=JOINER_SYSTEM_PROMPT)
+
+    # Read once per process, not per question: BOTSv3 is static, so re-reading
+    # 93KB of JSON 56 times would buy nothing (docs/future_work.md #1).
+    try:
+        sys_dataset = [SystemMessage(content=render_briefing(load_manifest()))]
+    except (OSError, ValueError) as exc:
+        # A missing or corrupt manifest must not take the run down - SH can
+        # still plan, just blind to the source axis, which is v1.2 behaviour.
+        print(f"[SH PLANNER] dataset briefing unavailable ({exc}) - planning without it")
+        sys_dataset = []
 
     # ── Planner ───────────────────────────────────────────────────────────────
     def planner_node(state: SHState) -> dict:
@@ -360,15 +396,16 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                     "CASE FILE (known incident state — verified [OK], "
                     "hypothesis [?], refuted [X]; re-verify [?]/[X] findings "
                     "before relying on them):\n" + digest))]
-        msgs      = [sys_planner] + extra + _window(state["messages"])
-        response  = llm.invoke(msgs)
-        plan_text = (response.content or "").strip()
+        msgs = [sys_planner] + sys_dataset + extra + _window(state["messages"])
+        plan = planner_llm.invoke(msgs)
+        plan_text = render_plan_text(plan)
+        # The plan re-enters the persistent thread as text: cross-question
+        # memory is a message history, and a pydantic object is not a message.
+        response = AIMessage(content=plan_text)
         print(f"\n[SH PLAN]\n{plan_text}\n")
 
-        # DIRECT ANSWER — SH already knows from cross-question memory
-        dm = re.search(r'DIRECT ANSWER:\s*(.+)', plan_text, re.IGNORECASE)
-        if dm:
-            answer = dm.group(1).strip().split('\n')[0].strip()
+        if plan.direct_answer:
+            answer = plan.direct_answer.strip()
             print(f"[SH PLANNER] direct answer from memory: {answer!r}")
             return {
                 "messages":     [response],
@@ -381,24 +418,26 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 "needs_replan": False,
             }
 
-        tasks = parse_plan(plan_text)
+        tasks = to_tasks(plan)
         if not tasks:
-            # Fallback: treat the last human message as a single senior task
-            last_q = next(
-                (m.content for m in reversed(state["messages"])
-                 if isinstance(m, HumanMessage)), ""
-            )
-            tasks = [Task(idx=1, subquestion=last_q, deps=[])]
-            print("[SH PLANNER] no structured tasks parsed — falling back to single task")
+            # Neither a direct answer nor a spawn. Delegate the question whole
+            # rather than stalling it - v1.2 did this on every unparsed plan;
+            # here it is the genuinely rare case.
+            last_q = next((m.content for m in reversed(state["messages"])
+                           if isinstance(m, HumanMessage)), "")
+            tasks = [{"idx": 1, "subquestion": last_q, "deps": [],
+                      "spawn_type": "senior", "prior_info": "", "confidence": 0,
+                      "search_space": {"sourcetypes": [], "sources": []}}]
+            print("[SH PLANNER] plan carried no spawns - delegating whole question")
 
         print(f"[SH PLANNER] {len(tasks)} task(s), "
-              f"{sum(1 for t in tasks if not t.deps)} parallel-eligible")
+              f"{sum(1 for t in tasks if not t['deps'])} parallel-eligible, "
+              f"mean confidence {sum(t['confidence'] for t in tasks) / len(tasks):.0f}")
 
         return {
             "messages":     [response],
             "plan_text":    plan_text,
-            "tasks":        [{"idx": t.idx, "subquestion": t.subquestion, "deps": t.deps}
-                             for t in tasks],
+            "tasks":        tasks,
             "task_results": {},
             "plan_round":   round_n,
             "final_answer": "",
@@ -421,6 +460,12 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         here, once per worker, exactly as the old executor did before submitting.
         """
         subq = substitute_deps(task["subquestion"], completed)
+        # The search space SH chose, and what it already knows, ride into the
+        # subquestion itself - workers share no state with the planner, so a
+        # scope that is not written into the task text does not exist.
+        scope = render_scope(task)
+        if scope:
+            subq += "\n\n" + scope
         if ctx.q_handoffs:
             subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
                      "(resume the hunt, do not restart it):\n"
@@ -436,16 +481,33 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         # Send" - the error names the Send envelope, not the object inside it.
         # ctx is plain process memory and is never checkpointed.
         ctx.parent_run_tree = get_current_run_tree()
+        kind = "EXPLORE" if task.get("spawn_type") == "exploration" else "SENIOR"
         worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
-        print(f"\n[SH -> SENIOR #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
+        print(f"\n[SH -> {kind} #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
         return [{"task": task, "subq": subq, "worker_idx": worker_idx}]
 
     def _run_task(payload: dict) -> dict:
         task, subq  = payload["task"], payload["subq"]
         worker_idx  = payload["worker_idx"]
-        result = _run_senior(ctx, subq, worker_idx, ctx.parent_run_tree)
+        # An exploration spawn answers "which feeds could hold this", not the
+        # question itself, so it runs a different agent on a cheap model. It is
+        # still a worker: same record shape, same ledger, same accounting.
+        if task.get("spawn_type") == "exploration":
+            t0 = time.perf_counter()
+            with tracing_context(parent=ctx.parent_run_tree):
+                result = ctx.pool.run_exploration(subq, ctx.current_qid, worker_idx)
+            result["duration_s"] = round(time.perf_counter() - t0, 1)
+        else:
+            result = _run_senior(ctx, subq, worker_idx, ctx.parent_run_tree)
         # idx/worker_idx ride along so collect() can account per task.
-        result = {**result, "idx": task["idx"], "worker_idx": worker_idx}
+        # SH-side spawn metadata travels with the result so the delegation
+        # record carries both what SH intended and what came back - that pairing
+        # is what spawn_report.py calibrates confidence against.
+        result = {**result, "idx": task["idx"], "worker_idx": worker_idx,
+                  "spawn_type":    task.get("spawn_type", "senior"),
+                  "search_space":  task.get("search_space") or {},
+                  "prior_info":    task.get("prior_info", ""),
+                  "sh_confidence": task.get("confidence")}
 
         record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
         ctx.q_delegations.append(record)
@@ -492,16 +554,19 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         if state.get("done"):
             return {}
 
-        tasks        = [Task(**t) for t in state["tasks"]]
+        # Read the task dicts directly. Task() is the joiner-replan shape and
+        # would reject the planner's extra spawn keys (spawn_type, search_space,
+        # prior_info, confidence) with a TypeError.
+        tasks        = list(state["tasks"] or [])
         task_results = state.get("task_results") or {}
         plan_round   = state.get("plan_round", 1)
 
         parts = []
         for t in tasks:
-            r = task_results.get(t.idx, {})
+            r = task_results.get(t["idx"], {})
             parts.append(
-                f"Task {t.idx} [{r.get('status', '?')}]:\n"
-                f"  Question: {t.subquestion[:300]}\n"
+                f"Task {t['idx']} [{r.get('status', '?')}]:\n"
+                f"  Question: {t['subquestion'][:300]}\n"
                 f"  Result: {(r.get('answer') or '(no result)').strip()[:600]}"
             )
         findings = "\n\n".join(parts)
@@ -592,8 +657,13 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 return {
                     "messages":     [joiner_hm, response],
                     "plan_text":    jtext,
+                    # Replan tasks carry the full spawn shape so _prepare_sends
+                    # and the delegation record see the same keys either way.
                     "tasks":        [{"idx": t.idx, "subquestion": t.subquestion,
-                                      "deps": t.deps} for t in replan_tasks],
+                                      "deps": t.deps, "spawn_type": "senior",
+                                      "search_space": {"sourcetypes": [], "sources": []},
+                                      "prior_info": "", "confidence": 0}
+                                     for t in replan_tasks],
                     "task_results": {},
                     "plan_round":   plan_round + 1,
                     "done":         False,
