@@ -125,6 +125,8 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
     statuses = [d.get("status", "?") for d in delegations]
     cap_hits = sum(1 for d in delegations if d.get("cap_hit"))
     total_ms = sum(stage_ms.values())
+    worker_s = {d.get("worker") or f"senior#?{i}": round(d.get("duration_s", 0.0), 1)
+                for i, d in enumerate(delegations)}
     return {
         "qid": qid,
         "points": points,
@@ -139,6 +141,10 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
         "latency_s": {
             "total": round(total_ms / 1000, 1),
             **{k: round(v / 1000, 1) for k, v in stage_ms.items()},
+            # Per-worker wall time, and its sum. worker_total > sh means the
+            # fan-out really overlapped; worker_total ~= sh means it did not.
+            "worker_total": round(sum(worker_s.values()), 1),
+            "workers": worker_s,
         },
         "cost_by_role": {r: round(v.get("estimated_usd", 0.0), 6)
                          for r, v in usage_by_role.items()},

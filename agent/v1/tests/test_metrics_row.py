@@ -94,3 +94,23 @@ def test_seed_resume_new_schema_skips_missing_question_files(tmp_path):
     qdir.mkdir()
     prior = {"index": [{"id": "Q999", "verdict": "wrong", "earned": 0}]}
     assert seed_resume_results(prior, str(qdir)) == []
+
+
+def test_worker_latency_is_broken_out_per_worker_and_summed():
+    """worker_total exceeding the sh stage is the readout that the fan-out
+    actually overlapped — so both the per-worker map and its sum must survive."""
+    row = build_metrics_row(
+        qid="Q216", points=1000, verdict="wrong", earned=0, clean_answer="7070",
+        delegations=[
+            {"worker": "senior#1", "status": "failed", "answer": "", "duration_s": 300.0},
+            {"worker": "senior#2", "status": "solved", "answer": "7070", "duration_s": 250.5},
+            {"worker": "senior#3", "status": "failed", "answer": "", "duration_s": 120.0},
+        ],
+        stage_ms={"sh": 400_000, "extract": 1000},
+        usage_by_role={"senior": {"estimated_usd": 1.9}},
+    )
+    assert row["latency_s"]["workers"] == {
+        "senior#1": 300.0, "senior#2": 250.5, "senior#3": 120.0}
+    assert row["latency_s"]["worker_total"] == 670.5
+    # 670.5s of worker time inside a 400s SH stage -> the fan-out overlapped.
+    assert row["latency_s"]["worker_total"] > row["latency_s"]["sh"]

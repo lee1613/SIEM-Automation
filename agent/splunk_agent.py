@@ -162,9 +162,27 @@ def make_tools(splunk: SplunkClient) -> list:
     @tool
     def get_source_types() -> str:
         """Return the full list of all known sourcetypes from the local manifest.
-        Call this FIRST — it is the entry point for all investigations.
+        One of the two entry points for an investigation — get_sources is the
+        other, and covers feeds this list cannot name.
         No Splunk call, instant response."""
         return _manifest_get_source_types()
+
+    @tool
+    def get_sources(sourcetype: str = "", keyword: str = "", top_n: int = 100) -> str:
+        """List `source` values with their sourcetype and event count, busiest first.
+
+        The SECOND discovery axis. A sourcetype can hide many distinct feeds:
+        in BOTSv3, sourcetype=syslog contains Cisco NVM flow data that is only
+        addressable as source="cisconvmflowdata". Whenever a sourcetype is too
+        coarse to answer the question, call this to see what is inside it.
+
+        - no arguments      -> the top sources across the whole index
+        - sourcetype="..."  -> the distinct feeds hiding under that sourcetype
+        - keyword="cisco"   -> sources whose events mention that keyword
+        """
+        result = splunk.get_sources(sourcetype=sourcetype, keyword=keyword,
+                                    top_n=int(top_n))
+        return _format_result(result)
 
     @tool
     def search_keyword(keyword: str) -> str:
@@ -196,43 +214,51 @@ def make_tools(splunk: SplunkClient) -> list:
         return _format_result(result)
 
     @tool
-    def get_sourcetype_fields(sourcetype: str, index: str = "botsv3",
-                               min_count: int = 1) -> str:
-        """Run Splunk fieldsummary on a sourcetype: every field with coverage %,
-        distinct value count, and sample values. Use when search_keyword returns
-        no match for a sourcetype you want to explore."""
+    def get_sourcetype_fields(sourcetype: str = "", index: str = "botsv3",
+                               min_count: int = 1, source: str = "") -> str:
+        """Run Splunk fieldsummary: every field with coverage %, distinct value
+        count, and sample values. Scope it by `sourcetype`, by `source`, or both.
+        Use when search_keyword returns no match for a feed you want to explore —
+        including a `source` you found via get_sources."""
         result = splunk.get_sourcetype_fields(
-            sourcetype=sourcetype, index=index, min_count=min_count
+            sourcetype=sourcetype, index=index, min_count=min_count, source=source
         )
         return _format_result(result)
 
     @tool
     def get_field_values(field: str, index: str = "botsv3",
-                         sourcetype: str = "", top_n: int = 20) -> str:
-        """Get the top distinct values for a field, optionally scoped to a sourcetype.
+                         sourcetype: str = "", top_n: int = 20,
+                         source: str = "") -> str:
+        """Get the top distinct values for a field, optionally scoped to a
+        sourcetype and/or a source.
         Use to enumerate the range of values a field contains before filtering on it."""
         result = splunk.get_field_values(
-            field=field, index=index, top_n=int(top_n), sourcetype=sourcetype
+            field=field, index=index, top_n=int(top_n), sourcetype=sourcetype,
+            source=source
         )
         return _format_result(result)
 
     @tool
-    def sample_events(sourcetype: str, index: str = "botsv3",
-                      keyword: str = "", count: int = 3) -> str:
-        """Return raw event content from a sourcetype to discover embedded field names and log structure.
-        `sourcetype` MUST be a value returned by get_source_types.
-        `keyword` is an optional free-text filter within that sourcetype — it narrows which events are
-        returned but does NOT select the sourcetype. Omit or leave blank to sample any events."""
+    def sample_events(sourcetype: str = "", index: str = "botsv3",
+                      keyword: str = "", count: int = 3, source: str = "") -> str:
+        """Return raw event content to discover embedded field names and log structure.
+        Scope by `sourcetype` (a value from get_source_types), by `source` (a value
+        from get_sources), or both — give at least one.
+        `keyword` is an optional free-text filter within that scope — it narrows which events are
+        returned but does NOT select the feed. Omit or leave blank to sample any events."""
         result = splunk.sample_events(
-            sourcetype=sourcetype, index=index, keyword=keyword, count=min(count, 5)
+            sourcetype=sourcetype, index=index, keyword=keyword,
+            count=min(count, 5), source=source
         )
         return _format_result(result, keep_raw=True)
 
     @tool
     def run_splunk_search(query: str, max_results: int = 50) -> str:
         """Execute an SPL search against Splunk.
-        Only call this when you are certain the sourcetype exists — verified via get_source_types.
-        Always include a sourcetype filter. Must aggregate with | stats, | top, or | rare.
+        Scope every search to a feed you have confirmed exists — a `sourcetype=`
+        from get_source_types, a `source=` from get_sources, or both. A source
+        filter alone is valid and is sometimes the only way to reach the data.
+        Must aggregate with | stats, | top, or | rare.
         No leading wildcards. Max 50 results."""
         result = splunk.search(
             query=query, earliest="0", latest="now", max_results=int(max_results)
@@ -240,19 +266,20 @@ def make_tools(splunk: SplunkClient) -> list:
         return _format_result(result)
 
     @tool
-    def get_raw_events(sourcetype: str, keyword: str = "", index: str = "botsv3",
-                       limit: int = 10) -> str:
+    def get_raw_events(sourcetype: str = "", keyword: str = "", index: str = "botsv3",
+                       limit: int = 10, source: str = "") -> str:
         """Return RAW event content (not aggregated) from a sourcetype, to read
         the actual text of emails, scripts, bash history, HTTP payloads, etc.
         Use when the answer is INSIDE the event content rather than a field value.
         `limit` is capped at 20 to protect context. Prefer a specific `keyword`."""
         n = max(1, min(int(limit), 20))
         result = splunk.sample_events(sourcetype=sourcetype, index=index,
-                                      keyword=keyword, count=n)
+                                      keyword=keyword, count=n, source=source)
         return _format_result(result, keep_raw=True)
 
     return [
         get_source_types,
+        get_sources,
         search_keyword,
         get_sourcetype_fields,
         get_field_values,
@@ -280,11 +307,18 @@ SPL rules:
 - Never use leading wildcards (=*value) — always trailing wildcards (value*)
 - Match exact tokens over substring wildcards
 
-run_splunk_search rules — only invoke when you are certain the sourcetype exists.
-To be certain: call get_source_types first to confirm the sourcetype is present, then run the search.
-Never run a search without a sourcetype filter.
+DATA IS ADDRESSED ON TWO AXES: `sourcetype` and `source`. A sourcetype can hide
+many distinct feeds — in this dataset sourcetype=syslog contains Cisco NVM flow
+data reachable only as source="cisconvmflowdata". If a sourcetype looks too
+coarse, or no sourcetype name matches what the question describes, that does NOT
+mean the data is absent: call get_sources to look along the other axis.
 
-Use sample_events to inspect the raw structure of events inside a sourcetype before searching. This reveals actual field names, value formats, and keywords that can lead you to the answer. Call this whenever you are unsure what a sourcetype contains or what fields to search on.
+run_splunk_search rules — only invoke when you are certain the feed you are
+filtering on exists. To be certain: confirm it first with get_source_types (for a
+sourcetype) or get_sources (for a source), then run the search. Every search must
+be scoped to at least one confirmed feed; a `source=` filter alone is valid.
+
+Use sample_events to inspect the raw structure of events inside a sourcetype or source before searching. This reveals actual field names, value formats, and keywords that can lead you to the answer. Call this whenever you are unsure what a feed contains or what fields to search on.
 
 ALWAYS state your reasoning before acting. The format is:
   Intention: <why you are making this call and what you expect to learn or confirm>
@@ -305,6 +339,18 @@ Example investigation flow:
 
   Intention: Field confirmed. Run aggregation to find the top destination IP in stream:ip traffic.
   → call run_splunk_search(query="index=botsv3 sourcetype=stream:ip | top limit=20 dest")
+
+When no sourcetype matches what the question names, pivot to the source axis
+instead of concluding the data is missing:
+
+  Intention: No sourcetype mentions Cisco NVM; check whether it exists as a source instead.
+  → call get_sources(keyword="cisco")
+
+  Intention: cisconvmflowdata exists under sourcetype=syslog; list its fields before querying.
+  → call get_sourcetype_fields(source="cisconvmflowdata")
+
+  Intention: Fields confirmed. Compute the flow duration from that source.
+  → call run_splunk_search(query="index=botsv3 source=cisconvmflowdata | stats min(fss), max(fes)")
 
 Reading content: when the answer is text inside an event (an email body, a
 command line, a script, an uploaded file's content), use get_raw_events to read

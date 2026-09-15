@@ -18,6 +18,7 @@ plan + task-results summary + final answer across all 58 questions.
 import os
 import re
 import sqlite3
+import time
 import traceback
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypedDict
@@ -344,6 +345,7 @@ def _delegation_record(worker_idx, qid, subq: str, result: dict) -> dict:
         "full_state":  result.get("full_state", []),
         "iterations":  result.get("iterations", 0),
         "cap_hit":     result.get("cap_hit", False),
+        "duration_s":  result.get("duration_s", 0.0),
     }
 
 
@@ -980,10 +982,18 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
     SH's trace. `parent_run_tree` is captured in the main thread (where the
     contextvar is still populated) and re-applied here.
     """
+    t0 = time.perf_counter()
     with tracing_context(parent=parent_run_tree):
-        return ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
-                                   points=ctx.current_points, max_iter=max_iter,
-                                   sample=sample, escalate=escalate)
+        result = ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
+                                     points=ctx.current_points, max_iter=max_iter,
+                                     sample=sample, escalate=escalate)
+    # Every worker - executor, verifier and adjudicator alike - reaches Splunk
+    # through here, so one timer covers all of them. Summed worker time exceeds
+    # the SH stage's wall clock whenever the fan-out actually ran in parallel;
+    # that ratio is the only readout of whether parallelism is paying off.
+    if isinstance(result, dict):
+        result["duration_s"] = round(time.perf_counter() - t0, 1)
+    return result
 
 
 def run_sh(graph, message: str, thread_id: str,
