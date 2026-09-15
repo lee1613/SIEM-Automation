@@ -130,41 +130,38 @@ class SplunkConnectionPool:
         finally:
             self._pool.put(client)
 
-    # ── Public API (mirrors SplunkClient exactly) ─────────────────────────────
-    def search(
-        self,
-        query: str,
-        earliest: str = "0",
-        latest: str = "now",
-        max_results: int = 100,
-    ) -> dict:
-        return self._call("search", query, earliest, latest, max_results)
+    # -- Public API: delegated, never mirrored ---------------------------------
+    def __getattr__(self, name: str):
+        """Forward any public SplunkClient method through the pool.
 
-    def get_field_values(
-        self,
-        field: str,
-        index: str = "botsv3",
-        top_n: int = 20,
-        sourcetype: str = "",
-    ) -> dict:
-        return self._call("get_field_values", field, index, top_n, sourcetype)
+        This used to be four hand-written mirrors, each re-declaring its
+        wrapped method's signature and forwarding positionally. The mirror
+        drifted silently: widening SplunkClient to the `source` axis left the
+        pool rejecting `source=` and missing `get_sources` entirely, so every
+        source-scoped discovery call a worker made failed at runtime - while the
+        unit tests stayed green, because they exercised SplunkClient directly
+        and never went through the pool that workers actually hold.
 
-    def get_sourcetype_fields(
-        self,
-        sourcetype: str,
-        index: str = "botsv3",
-        min_count: int = 1,
-    ) -> dict:
-        return self._call("get_sourcetype_fields", sourcetype, index, min_count)
+        Delegating by name removes the duplication that made that possible: the
+        pool now cannot have a different signature from the client, because it
+        no longer declares one. __getattr__ only fires when normal lookup fails,
+        so `checkout`, `available` and `in_use` still resolve as themselves.
+        """
+        if name.startswith("_"):
+            raise AttributeError(name)
+        attr = getattr(SplunkClient, name, None)
+        if not callable(attr):
+            raise AttributeError(
+                f"{type(self).__name__!r} has no attribute {name!r} "
+                f"(SplunkClient does not define it either)")
 
-    def sample_events(
-        self,
-        sourcetype: str,
-        index: str = "botsv3",
-        keyword: str = "",
-        count: int = 3,
-    ) -> dict:
-        return self._call("sample_events", sourcetype, index, keyword, count)
+        def _proxy(*args, **kwargs):
+            return self._call(name, *args, **kwargs)
+
+        _proxy.__name__ = name
+        _proxy.__doc__ = attr.__doc__
+        return _proxy
+
 
     # ── Pool introspection ────────────────────────────────────────────────────
     @property
