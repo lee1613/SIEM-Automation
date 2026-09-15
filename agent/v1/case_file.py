@@ -17,6 +17,8 @@ import os
 import re
 import threading
 
+from finding import answer_shaped
+
 _ANSWER_TAG = re.compile(r'(?:FINAL|PARTIAL)\s+ANSWER:\s*(.+)', re.IGNORECASE)
 
 
@@ -36,7 +38,12 @@ def extract_candidate(delegation: dict) -> dict | None:
         if not m:
             return None
         value = m.group(1).strip().splitlines()[0].strip()
-    if not value:
+    # The ledger tells the joiner to copy a value character-for-character, so an
+    # entry that could never be submitted is worse than no entry - it invites
+    # the joiner to copy prose. parse_finding already screens the schema-B
+    # `value`; this covers the regex fallback above, which takes whatever
+    # followed a FINAL/PARTIAL ANSWER tag, however long that turned out to be.
+    if not answer_shaped(value):
         return None
     spl = delegation.get("spl_used") or []
     # Schema B's `evidence` is the SPL and result the worker cited for this exact

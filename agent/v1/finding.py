@@ -27,8 +27,48 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
+from extractor import MAX_ANSWER_CHARS
+
 # Ordered worst-to-best; mirrors grounding._STATUS_RANK.
 VALID_STATUS = ("failed", "too_big", "partial", "solved")
+
+# The longest of the 58 real BOTSv3 answers is 11 words (a User-Agent string).
+MAX_ANSWER_WORDS = 12
+
+
+def answer_shaped(value: str) -> bool:
+    """Could this string be submitted to the scoreboard as-is?
+
+    Not "is it correct" - only "is it an answer at all". Measured against the
+    58 real BOTSv3 answers: none contains a newline, none exceeds 110 chars or
+    11 words, none contains a question mark, and every one has alphanumeric
+    characters. The word cap is what separates an answer from a sentence -
+    length alone does not, because the longest real answer (a 110-char User-
+    Agent string) is longer than most of the prose that needed rejecting.
+
+    The caps are tight on purpose. Being too tight costs a demotion to `notes`,
+    where the joiner still reads the text; being too loose puts a paragraph on
+    the scoreboard. If this is ever pointed at a dataset with longer answers,
+    these two numbers are what to re-measure.
+
+    This exists because the prompt alone did not hold. In
+    test_20260915_174228, 16 of 21 `partial` findings carried a `value`, and
+    about ten of those were prose: "High-volume Linux privilege-escalation
+    evidence is concentrated on hoth...", "stream:dns exposes query/queries,
+    answer, dest/dest_ip...", "tomcat-users.xml not yet confirmed", "buser?",
+    and one that was the single character "?". A `value` field holding a
+    sentence defeats the entire reason schema B exists, and it flows straight
+    into the ledger and the extractor fallback as though it were an answer.
+
+    A hedge is rejected rather than repaired - "buser?" does NOT become
+    "buser". Stripping the hedge would manufacture a confident answer out of
+    an admission of doubt, which is the class of compensating hack schema B
+    was built to delete.
+    """
+    v = (value or "").strip()
+    return (bool(v) and "\n" not in v and len(v) <= MAX_ANSWER_CHARS
+            and len(v.split()) <= MAX_ANSWER_WORDS
+            and "?" not in v and any(c.isalnum() for c in v))
 
 
 @tool
@@ -42,15 +82,23 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
     answer instead - a value typed into a sentence gets mangled on the way to the
     scoreboard, which is scored on an exact string match.
 
-    - status: "solved" if you are confident in `value`; "partial" if you found a
-      credible candidate but could not confirm it; "too_big" if the task needs
+    - status: "solved" if you are confident in `value`; "partial" if you have
+      something useful but not a confirmed answer; "too_big" if the task needs
       narrowing; "failed" if you found nothing usable.
-    - value: THE ANSWER ALONE, exactly as it should be submitted. No label, no
-      units unless the question asks for them, no sentence around it. Write
-      "1367.875", never "duration = 1367.875 seconds". Leave empty for status
-      "failed" or "too_big".
+    - value: THE ANSWER ALONE, or EMPTY. Nothing downstream edits it - it is
+      submitted for exact-match scoring exactly as you write it. So it carries
+      no label, no units unless the question asks for them, no sentence around
+      it and no hedge. Write "1367.875"; never "duration = 1367.875 seconds",
+      never "1367.875 (not yet confirmed)", never "1367.875?". A value with a
+      question mark or a caveat in it cannot be submitted and is discarded.
+      IF YOU CANNOT STATE THE ANSWER ALONE, LEAVE `value` EMPTY and put what
+      you found in `notes`. An empty `value` with strong `notes` is a useful
+      result that shapes the next round; a paragraph in `value` is a wasted
+      one. Always empty for status "failed" or "too_big".
     - value_kind: what `value` is - e.g. "count", "duration_seconds", "hostname",
-      "username", "ip", "filename", "hash", "cve", "list".
+      "username", "ip", "filename", "hash", "cve", "list". If the only honest
+      kind you could write is "summary", "finding" or "analysis", then it is
+      not an answer: empty `value` and move the text to `notes`.
     - evidence: the SPL that produced `value`, then what it returned, including
       the event count you saw.
     - confidence: 0-100, how sure you are of `value`. Be honest; a low number is
@@ -59,7 +107,10 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
     - ruled_out: feeds or hypotheses you CHECKED and eliminated, with why - e.g.
       "cisco:asa - carries no flow-duration field". This is worth nearly as much
       as an answer: it is what stops the next round re-treading your dead ends.
-    - notes: anything the orchestrator needs that does not fit above.
+    - notes: what you learned that is NOT the answer - a field you discovered, a
+      time window you narrowed, a host worth pivoting on, why a candidate could
+      not be confirmed. A "partial" with no clean value belongs here, and the
+      orchestrator reads it to plan the next round.
     """
     return "Finding recorded. Stop here - do not call any further tools."
 
@@ -140,9 +191,24 @@ def parse_finding(messages: list, answer: str) -> dict:
     except (TypeError, ValueError):
         confidence = None
 
+    # `value` is submitted verbatim, so anything that is not submittable is not
+    # a value. Move it to `notes` rather than dropping it - the text is usually
+    # a real finding written into the wrong field, and the joiner can still use
+    # it there. Blanking without preserving would lose work; leaving it in
+    # place would put a paragraph on the scoreboard (see answer_shaped).
+    value = str(args.get("value", "")).strip()
+    notes = str(args.get("notes", "")).strip()
+    if value and not answer_shaped(value):
+        notes = "\n".join(filter(None, [f"[not answer-shaped] {value}", notes]))
+        value = ""
+        # "solved" asserts confidence in a value that no longer exists. A worker
+        # that wrote a paragraph where the answer goes did not solve anything.
+        if status == "solved":
+            status = "partial"
+
     return {
         "status":     status,
-        "value":      str(args.get("value", "")).strip(),
+        "value":      value,
         "value_kind": str(args.get("value_kind", "")).strip(),
         "evidence":   str(args.get("evidence", "")).strip(),
         "confidence": confidence,
@@ -151,6 +217,6 @@ def parse_finding(messages: list, answer: str) -> dict:
             "sources":     _split(args.get("sources_used", "")),
         },
         "negative_findings": _split(args.get("ruled_out", "")),
-        "notes":      str(args.get("notes", "")).strip(),
+        "notes":      notes,
         "structured": True,
     }
