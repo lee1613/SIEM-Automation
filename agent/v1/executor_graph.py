@@ -72,8 +72,7 @@ def ready_tasks(tasks: list[dict], completed: dict) -> list[dict]:
 
 
 def build_executor_graph(run_task: Callable[[dict], dict],
-                         *, reduce_samples: Callable[[list], dict] | None = None,
-                         prepare_sends: Callable[[dict, dict], list] | None = None,
+                         *, prepare_sends: Callable[[dict, dict], list] | None = None,
                          on_wave: Callable[[list], None] | None = None,
                          max_parallel: int | None = None,
                          checkpointer=None):
@@ -100,7 +99,6 @@ def build_executor_graph(run_task: Callable[[dict], dict],
     parent's checkpointer then owns the subgraph's state, which is what makes an
     interrupt inside here resumable from the parent.
     """
-    pick    = reduce_samples or (lambda rs: rs[0])
     prep    = prepare_sends  or (lambda task, completed: [{"task": task}])
     account = on_wave        or (lambda results: None)
 
@@ -117,8 +115,6 @@ def build_executor_graph(run_task: Callable[[dict], dict],
         sends = []
         for i in state.get("wave") or []:
             payloads = prep(by_idx[i], completed)
-            # Keep a task's samples together - splitting them across waves would
-            # break the majority vote, which reduces per task per wave.
             if max_parallel and sends and len(sends) + len(payloads) > max_parallel:
                 break
             for payload in payloads:
@@ -132,17 +128,11 @@ def build_executor_graph(run_task: Callable[[dict], dict],
 
     def collect(state: ExecState) -> dict:
         completed = dict(state.get("task_results") or {})
-        # Accounting first, once per wave - a sampled task that failed must be
-        # counted once per task per round, not once per failing sample.
+        # Accounting first, once per wave - a failed task counts once per task
+        # per round, not once per worker that reported it.
         account(list(state.get("wave_results") or []))
-        by_task: dict[Any, list] = {}
         for r in state.get("wave_results") or []:
-            by_task.setdefault(r.get("idx"), []).append(r)
-        for idx, results in by_task.items():
-            # majority_answer returns None when there is no majority - the old
-            # executor guarded this with `winner or res_list[0]`; keep that.
-            winner = pick(results) if len(results) > 1 else None
-            completed[idx] = winner or results[0]
+            completed.setdefault(r.get("idx"), r)
         return {"task_results": completed}
 
     def hitl(state: ExecState) -> dict:

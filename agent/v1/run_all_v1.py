@@ -56,7 +56,6 @@ from usage_tracker import UsageTracker
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL         = "gpt-5.4"
 SENIOR_MODEL     = "gpt-5.4-mini"
-ESCALATION_MODEL = "gpt-5.4"   # C3: adjudicator's strong-model track B
 DUAL_TRACK_MIN_POINTS = 1000   # C2: 1000-pt questions get two orthogonal plan tracks
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
@@ -294,8 +293,7 @@ def main():
                                  senior_model=senior_model,
                                  senior_base_url=senior_base_url,
                                  tracker=tracker,
-                                 escalation_api_key=OPENAI_API_KEY,
-                                 escalation_model=ESCALATION_MODEL)
+                                 )
     ctx       = DelegationContext(pool, logger, case_file=case_file)
     # SQLite-backed so cross-question memory survives a killed/resumed process
     # (same --run-name -> same run_dir -> same checkpoint file picked back up).
@@ -309,7 +307,7 @@ def main():
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
     print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  "
-          f"Escalation={ESCALATION_MODEL}  Extractor={extractor.model}(NIM)")
+          f"Extractor={extractor.model}(NIM)")
     print(f"  Questions: {len(selected)}   Log dir: {logger.run_dir}")
     print(f"  LangSmith project: {ls_project}")
     print("=" * 80)

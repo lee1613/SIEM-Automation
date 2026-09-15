@@ -95,20 +95,16 @@ def test_run_sh_resolves_an_interrupt_instead_of_returning_an_empty_answer(tmp_p
         run_sh(_Interrupting(), "solve Q216", "sh", qid="Q216", run_dir=str(tmp_path))
 
 
-def test_every_sh_llm_node_can_reach_the_graph_interrupt():
-    # All four SH nodes that call an LLM (planner/joiner via the executor
-    # subgraph, verifier, adjudicator) now mark api_error in state and route to
-    # one side-effect-free sh_hitl node, instead of the verifier/adjudicator
-    # raising RunPaused. None of them may interrupt in place: interrupt()
-    # replays its own node, which would re-issue that node's LLM call.
+def test_worker_outage_reaches_the_graph_interrupt():
+    # Worker API outages pause inside the executor subgraph's own side-effect-free
+    # hitl node, never in a node that makes an LLM call - interrupt() replays its
+    # own node, which would re-issue that call each time a human answers.
+    # v1.3 removed the SH-level sh_hitl node with the verifier and adjudicator
+    # that were its only callers; the executor's hitl is now the single pause point.
     from orchestrator import DelegationContext, build_sh_agent_compiler
 
     ctx = DelegationContext(pool=None, logger=None)
     graph, _ = build_sh_agent_compiler("sk-fake-key", "gpt-5.4", ctx)
-    g = graph.get_graph()
-    assert "sh_hitl" in g.nodes
-    reaches_hitl = {e.source for e in g.edges if e.target == "sh_hitl"}
-    assert {"verifier", "adjudicator"} <= reaches_hitl, reaches_hitl
-    # and sh_hitl can send control back for a retry
-    from_hitl = {e.target for e in g.edges if e.source == "sh_hitl"}
-    assert {"verifier", "adjudicator"} <= from_hitl, from_hitl
+    g = graph.get_graph(xray=True)
+    hitl_nodes = [n for n in g.nodes if "hitl" in n]
+    assert hitl_nodes, sorted(g.nodes)

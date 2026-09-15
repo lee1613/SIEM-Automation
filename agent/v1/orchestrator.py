@@ -23,7 +23,6 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypedDict
 
-from adjudicator import ADJUDICATOR_SYSTEM_PROMPT, adjudicate_once, fallback_choice, majority_answer, resolve_choice
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from executor_graph import build_executor_graph
 from grounding import best_candidate, is_grounded
@@ -37,8 +36,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command, interrupt
 from langsmith.run_helpers import get_current_run_tree, tracing_context
-from specialists import parse_specialist_tag
-from splunk_subagent import VERIFIER_MAX_ITER
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
@@ -47,10 +44,6 @@ SH_TIMEOUT_S     = 90.0  # SH turns are plan/join text only - shorter than a wor
 SH_MAX_RETRIES   = 3
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_1.2's Q202 alone.
-ADJUDICATE_MIN_CANDIDATES = 2     # adjudication only when selection is a real choice
-ESCALATE_MIN_POINTS       = 1000  # C3: low-confidence 1000-pt questions escalate to gpt-5.4
-METRICS_SAMPLES   = 3     # C4: samples per metrics task (majority vote)
-SAMPLE_MIN_POINTS = 500   # only high-value questions pay the 3x metrics cost
 
 
 def _window(messages):
@@ -171,28 +164,6 @@ Only include facts a future question could reuse. Mark [verified] only if a
 worker proved it with a query this round."""
 
 
-# ── Verifier prompt (prove-or-refute pass for >=500pt questions) ───────────────
-VERIFIER_SYSTEM_PROMPT = """You are a Senior Splunk verification worker. You are NOT \
-answering a fresh question — you are checking whether a candidate answer someone else \
-already produced is actually correct.
-
-You will be given the original question and a CANDIDATE ANSWER. Run AT MOST 3 targeted \
-Splunk queries to prove or refute the candidate — e.g. re-check the exact field value, \
-re-check event ordering/timestamps if "first"/"earliest"/"last" is involved, or re-check \
-that the entity type matches what was asked (do not accept a plausible-but-wrong category,
-e.g. a connection event mistaken for a mining event).
-
-Do NOT re-investigate from scratch. Do NOT explore unrelated leads. Your only job is to
-confirm or refute the ONE candidate value with hard evidence.
-
-End your response with EXACTLY ONE of:
-CONFIRMED: <the value you confirmed>
-REFUTED. CORRECTION: <the corrected value, if your evidence supports one>
-
-If you cannot find evidence either way after your 3 queries, treat it as CONFIRMED
-(never block the pipeline on an inconclusive check)."""
-
-
 @dataclass
 class Task:
     idx: int
@@ -239,40 +210,6 @@ def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
                            f"DOES appear in the evidence.")}
     cand = best_candidate(task_results)
     return {"action": "final", "answer": cand if cand else answer}
-
-
-def _should_verify(ctx: "DelegationContext") -> bool:
-    """Points-gated: only >=500pt questions get a Verifier pass."""
-    return ctx.current_points >= 500
-
-
-def parse_verifier_verdict(text: str) -> dict:
-    """Parse a Verifier worker's prove-or-refute output.
-    Inconclusive defaults to 'confirmed' so verification never blocks a pipeline
-    that already has a grounded answer."""
-    t = text or ""
-    if re.search(r'\bREFUTED\b', t, re.IGNORECASE):
-        cm = re.search(r'CORRECTION:\s*(.+)', t, re.IGNORECASE)
-        return {"verdict": "refuted",
-                "correction": (cm.group(1).strip().split('\n')[0].strip() if cm else "")}
-    return {"verdict": "confirmed", "correction": ""}
-
-
-def promote_from_verdict(case_file, answer: str, verdict: dict) -> None:
-    """Reflect a Verifier verdict into the case file: findings whose claim
-    contains the checked answer flip to verified/refuted accordingly."""
-    a = (answer or "").strip().lower()
-    if not a:
-        return
-    for f in case_file.iter_findings():
-        if len(a) < 4 or f.get("source_qid") == "RECON":
-            continue
-        if not re.search(rf'(?<!\w){re.escape(a)}(?!\w)', f["claim"].lower()):
-            continue
-        if verdict["verdict"] == "confirmed":
-            case_file.set_status(f["id"], "verified")
-        elif verdict["verdict"] == "refuted":
-            case_file.set_status(f["id"], "refuted")
 
 
 def apply_case_updates(case_file, joiner_text: str, *, source_qid: str) -> int:
@@ -332,8 +269,8 @@ def substitute_deps(subquestion: str, completed: dict) -> str:
 
 
 def _delegation_record(worker_idx, qid, subq: str, result: dict) -> dict:
-    """The delegation-record dict shape shared by executor/verifier/adjudicator
-    nodes — same 10 keys, same values, every call site."""
+    """The delegation-record dict shape used at every worker call site —
+    same 10 keys, same values."""
     return {
         "worker":      f"senior#{worker_idx}",
         "qid":         qid,
@@ -349,17 +286,6 @@ def _delegation_record(worker_idx, qid, subq: str, result: dict) -> dict:
     }
 
 
-def plan_samples(subquestion: str, points: int) -> int:
-    """C4 self-consistency: [METRICS] tasks on high-value questions run 3x
-    (temperature 0.3) and the majority extracted value wins. Everything else
-    runs once. Gated at >=500pt as a cost guard — the spec samples all metrics
-    questions, but low-value ones can't recoup the 3x spend."""
-    if (parse_specialist_tag(subquestion) == "metrics"
-            and (points or 0) >= SAMPLE_MIN_POINTS):
-        return METRICS_SAMPLES
-    return 1
-
-
 class SHState(TypedDict):
     messages:     Annotated[list, add_messages]  # persistent across all questions
     plan_text:    str                            # last plan/replan text (debug)
@@ -369,11 +295,6 @@ class SHState(TypedDict):
     final_answer: str                            # populated when done
     done:         bool
     needs_replan: bool                           # True -> route joiner back to planner
-    verified:     bool                           # True once the verifier pass has run
-    adjudicated:  bool                           # True once the adjudicator pass has run
-    api_error:    dict                           # set by a node whose worker hit a provider outage
-    sh_decision:  str                            # retry | skip | abort, from sh_hitl
-    sh_origin:    str                            # which node the outage came from
 
 
 class DelegationContext:
@@ -458,7 +379,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 "final_answer": answer,
                 "done":         True,
                 "needs_replan": False,
-                "verified":     False,
             }
 
         tasks = parse_plan(plan_text)
@@ -484,7 +404,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             "final_answer": "",
             "done":         False,
             "needs_replan": False,
-            "verified":     False,
         }
 
     # ── Executor ──────────────────────────────────────────────────────────────
@@ -506,10 +425,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             subq += ("\n\nCONTEXT FROM PRIOR ATTEMPTS ON THIS QUESTION "
                      "(resume the hunt, do not restart it):\n"
                      + "\n\n".join(ctx.q_handoffs[-HANDOFF_KEEP:]))
-        n = plan_samples(task["subquestion"], ctx.current_points)
-        if n > 1:
-            print(f"[SH EXECUTOR] metrics task {task['idx']}: sampling {n}x "
-                  f"(temperature 0.3, majority vote)")
         # Captured here rather than inside the worker: LangGraph runs fan-out
         # branches on its own threads and contextvars do not propagate, so the
         # LangSmith parent must be passed explicitly (same reason _run_senior
@@ -521,20 +436,15 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         # Send" - the error names the Send envelope, not the object inside it.
         # ctx is plain process memory and is never checkpointed.
         ctx.parent_run_tree = get_current_run_tree()
-        payloads = []
-        for _s in range(n):
-            worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
-            print(f"\n[SH -> SENIOR #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
-            payloads.append({"task": task, "subq": subq, "worker_idx": worker_idx,
-                             "sample": n > 1})
-        return payloads
+        worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
+        print(f"\n[SH -> SENIOR #{worker_idx}  task={task['idx']}]\n{subq[:300]}")
+        return [{"task": task, "subq": subq, "worker_idx": worker_idx}]
 
     def _run_task(payload: dict) -> dict:
         task, subq  = payload["task"], payload["subq"]
         worker_idx  = payload["worker_idx"]
-        result = _run_senior(ctx, subq, worker_idx, ctx.parent_run_tree,
-                             sample=payload.get("sample", False))
-        # idx/worker_idx ride along so collect() can group samples and account.
+        result = _run_senior(ctx, subq, worker_idx, ctx.parent_run_tree)
+        # idx/worker_idx ride along so collect() can account per task.
         result = {**result, "idx": task["idx"], "worker_idx": worker_idx}
 
         record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
@@ -549,9 +459,8 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         return result
 
     def _on_wave(results: list) -> None:
-        """Per-wave accounting. A sampled task dispatches up to 3 workers for the
-        SAME idx, so its failure must count once per task per round - not once
-        per failing sample."""
+        """Per-wave accounting. Counts a task's failure once per task per round,
+        keyed on idx rather than on the worker that reported it."""
         counted: set = set()
         for r in results:
             if not (r.get("status") in ("too_big", "failed") or r.get("cap_hit")):
@@ -570,7 +479,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     # the parent with Command(resume=...).
     executor_subgraph = build_executor_graph(
         _run_task,
-        reduce_samples=majority_answer,
         prepare_sends=_prepare_sends,
         on_wave=_on_wave,
         # The old ThreadPoolExecutor bounded concurrency at MAX_WORKERS, and
@@ -633,7 +541,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             # ctx.current_question, NOT a scan of state["messages"]: the persistent
             # cross-question thread's first HumanMessage is always the run's first
             # question, and later HumanMessages are joiner/replan scaffolding.
-            # run_1.2 ground-checked (and verifier-refuted) answers against Q200's
+            # run_1.2 ground-checked answers against Q200's
             # question text because of this.
             qtext = ctx.current_question
             # task_results resets to {} on every REPLAN, but a value proven in
@@ -712,197 +620,6 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
             "done":         True,
         }
 
-    # ── Verifier (>=500pt prove-or-refute pass, runs at most once per question) ─
-    def verifier_node(state: SHState) -> dict:
-        answer = state.get("final_answer", "")
-        # ctx.current_question, NOT state["messages"] (see joiner grounding note).
-        qtext  = ctx.current_question
-
-        verify_subq = (
-            f"{VERIFIER_SYSTEM_PROMPT}\n\n"
-            f"Original question: {qtext}\n"
-            f"Candidate answer to verify: {answer}"
-        )
-
-        worker_idx      = ctx.logger.next_worker("senior", ctx.current_qid)
-        parent_run_tree = get_current_run_tree()
-        print(f"\n[SH -> VERIFIER #{worker_idx}]  candidate={answer!r}")
-        try:
-            result = _run_senior(ctx, verify_subq, worker_idx, parent_run_tree,
-                                 max_iter=VERIFIER_MAX_ITER)
-        except Exception as exc:
-            print(f"[SH VERIFIER] VERIFIER FAILED (crashed: {exc}) — keeping original answer")
-            _emit = getattr(ctx.logger, "events", None)
-            if _emit:
-                _emit.emit("verifier_failed", qid=ctx.current_qid, error=str(exc)[:200])
-            return {"verified": True, "done": True}
-
-        # Outside the try above on purpose: this raises RunPaused, and that
-        # `except Exception` would swallow it (the bug fixed in run_sh).
-        if result.get("status") == "api_failed":
-            # A provider outage is not a verification outcome. Mark it and let the
-            # graph route to sh_hitl. Interrupting *here* would replay this node
-            # and re-issue the verifier worker's LLM call on every resume.
-            return {"verified": True,
-                    "api_error": {"origin": "verifier", "qid": ctx.current_qid,
-                                  "provider": result.get("provider"),
-                                  "error": (result.get("answer") or "")[:600]}}
-
-        if result.get("status") in ("failed", "too_big") or result.get("cap_hit"):
-            # Verifier couldn't do its <=3-query job — do NOT let it override
-            # anything; keep the answer, flag loudly for post-run review.
-            print(f"[SH VERIFIER] VERIFIER FAILED (status={result.get('status')}, "
-                  f"cap_hit={result.get('cap_hit')}) — keeping original answer")
-            _emit = getattr(ctx.logger, "events", None)
-            if _emit:
-                _emit.emit("verifier_failed", qid=ctx.current_qid,
-                           status=result.get("status"), cap_hit=result.get("cap_hit"))
-            return {"verified": True, "done": True}
-
-        verdict = parse_verifier_verdict(result.get("answer", ""))
-        print(f"[SH VERIFIER OUTPUT] verdict={verdict['verdict']} "
-              f"correction={verdict.get('correction')!r}")
-
-        if ctx.case_file and ctx.use_case_file:
-            promote_from_verdict(ctx.case_file, answer, verdict)
-
-        record = _delegation_record(worker_idx, ctx.current_qid, verify_subq, result)
-        ctx.q_delegations.append(record)
-        ctx.all_delegations.append(record)
-        ctx.logger.timeline(
-            f"- **Verifier #{worker_idx}**  _[{verdict['verdict']}]_\n"
-            f"    - candidate: {answer}\n"
-            f"    - result: {(result.get('answer') or '').strip()[:400]}"
-        )
-
-        if verdict["verdict"] == "refuted" and verdict.get("correction"):
-            task_results = dict(state.get("task_results") or {})
-            combined = dict(task_results)
-            combined["verifier"] = result
-            if is_grounded(verdict["correction"], combined, qtext):
-                print(f"[SH VERIFIER] REFUTED — replacing answer "
-                      f"{answer!r} -> {verdict['correction']!r}")
-                return {"final_answer": verdict["correction"], "verified": True,
-                        "done": True}
-            print("[SH VERIFIER] REFUTED but correction not grounded — "
-                  "keeping original answer")
-            return {"verified": True, "done": True}
-
-        # confirmed, or refuted with no usable correction — keep original answer.
-        # No replan branch here: verification runs at most once per question so
-        # the joiner<->verifier loop always terminates.
-        return {"verified": True, "done": True}
-
-    # ── Adjudicator (Plan C: rule-ranked selection over the candidate ledger) ─
-    def adjudicator_node(state: SHState) -> dict:
-        api_err: dict | None = None   # set if a track's worker hit a provider outage
-        answer = state.get("final_answer", "")
-        ledger = build_ledger(ctx.q_delegations)
-        if len(ledger) < ADJUDICATE_MIN_CANDIDATES:
-            return {"adjudicated": True}   # nothing to select between
-
-        def _invoke(prompt_text: str) -> str:
-            resp = llm.invoke([SystemMessage(content=ADJUDICATOR_SYSTEM_PROMPT),
-                               HumanMessage(content=prompt_text)])
-            return (resp.content or "").strip()
-
-        print(f"\n[SH ADJUDICATOR]  {len(ledger)} candidate(s), joiner pick={answer!r}")
-        verdict = adjudicate_once(_invoke, ctx.current_question,
-                                  ctx.current_guidance, ledger)
-
-        # One bounded follow-up per question: a targeted tiebreak query, or —
-        # on low-confidence 1000-pt questions — a strong-model escalation run.
-        escalate = ctx.current_points >= ESCALATE_MIN_POINTS
-        needs_followup = bool(verdict["tiebreak"]) or (
-            verdict["confidence"] == "low" and escalate)
-        if needs_followup:
-            subq = verdict["tiebreak"] or (
-                f"{ctx.current_question}\n\nPrior workers produced conflicting "
-                f"candidates (below). Independently determine the answer using "
-                f"a DIFFERENT approach or sourcetype family — do not just "
-                f"re-run their queries.\n\n{render_ledger(ledger)}")
-            worker_idx = ctx.logger.next_worker("senior", ctx.current_qid)
-            label = "ESCALATION" if escalate else "TIEBREAK"
-            print(f"[SH ADJUDICATOR] {label} -> senior#{worker_idx}: {subq[:200]}")
-            try:
-                result = _run_senior(ctx, subq, worker_idx,
-                                     get_current_run_tree(), escalate=escalate)
-            except Exception as exc:
-                result = None
-                print(f"[SH ADJUDICATOR] {label} worker crashed: {exc} — "
-                      f"adjudicating on the existing ledger")
-            if result is not None:
-                # Outside the try above on purpose - that `except Exception`
-                # would swallow RunPaused (the bug fixed in run_sh).
-                if result.get("status") == "api_failed":
-                    api_err = {"origin": "adjudicator", "qid": ctx.current_qid,
-                               "provider": result.get("provider"),
-                               "error": (result.get("answer") or "")[:600]}
-                record = _delegation_record(worker_idx, ctx.current_qid, subq, result)
-                ctx.q_delegations.append(record)
-                ctx.all_delegations.append(record)
-                ctx.logger.timeline(
-                    f"- **Adjudicator {label.lower()} #{worker_idx}**  "
-                    f"_[{record['status']}]_\n"
-                    f"    - answer: {(record['answer'] or '').strip()[:400]}")
-                ledger = build_ledger(ctx.q_delegations)
-                verdict = adjudicate_once(_invoke, ctx.current_question,
-                                          ctx.current_guidance, ledger)
-
-        chosen = verdict["answer"]
-        if not chosen:
-            # UNKNOWN / synthesized choice. Q321 hard rule: keep the joiner's
-            # answer if it is itself an honest ledger/question value, else take
-            # the best honest candidate — never a value from nowhere.
-            if resolve_choice(answer, ledger, ctx.current_question):
-                chosen = answer
-            else:
-                chosen = fallback_choice(ledger) or answer
-        changed = (chosen != answer)
-        print(f"[SH ADJUDICATOR] choice={chosen!r} "
-              f"confidence={verdict['confidence']} changed={changed}")
-        _emit = getattr(ctx.logger, "events", None)
-        if _emit:
-            _emit.emit("adjudication", qid=ctx.current_qid, chosen=chosen,
-                       confidence=verdict["confidence"], changed=changed,
-                       candidates=len(ledger))
-        ctx.logger.timeline(
-            f"- **Adjudicator**  confidence={verdict['confidence']} "
-            f"candidates={len(ledger)}\n"
-            f"    - joiner pick: {answer!r}\n"
-            f"    - adjudicated: {chosen!r}{'  (CHANGED)' if changed else ''}")
-        out: dict = {"adjudicated": True}
-        if changed:
-            out["final_answer"] = chosen
-        if api_err:
-            # Returned alongside the adjudication so the work already paid for is
-            # checkpointed; routing sends us to sh_hitl next.
-            out["api_error"] = api_err
-        return out
-
-    def sh_hitl_node(state: SHState) -> dict:
-        """Side-effect-free by design - this is the node that replays on resume.
-
-        Every other SH node makes an LLM call, so none of them may interrupt in
-        place: interrupt() restarts its own node, which would re-issue that call
-        each time a human answers. They mark `api_error` in state instead and the
-        graph routes here.
-        """
-        err = state.get("api_error") or {}
-        decision = interrupt({
-            "reason":   "api_failed",
-            "origin":   err.get("origin"),
-            "qid":      err.get("qid"),
-            "provider": err.get("provider"),
-            "error":    err.get("error"),
-            "options":  ["retry", "skip", "abort"],
-        })
-        choice = decision if decision in ("retry", "skip", "abort") else "skip"
-        print(f"[SH HITL] {err.get('origin')} outage on {err.get('qid')} "
-              f"-> operator chose: {choice}")
-        return {"api_error": None, "sh_decision": choice,
-                "sh_origin": err.get("origin") or ""}
-
     # ── Graph wiring ──────────────────────────────────────────────────────────
     def route_planner(state: SHState) -> str:
         return END if state.get("done") else "executor"
@@ -911,57 +628,23 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         if state.get("needs_replan"):
             return "planner"
         if state.get("done"):
-            return "adjudicator"
+            return END
         if state.get("plan_round", 0) >= MAX_PLAN_ROUNDS:
             return END
         if state.get("tasks"):      # replan set new tasks
             return "executor"
         return END
 
-    def route_adjudicator(state: SHState) -> str:
-        if state.get("api_error"):
-            return "sh_hitl"
-        if _should_verify(ctx) and not state.get("verified"):
-            return "verifier"
-        return END
-
-    def route_verifier(state: SHState) -> str:
-        return "sh_hitl" if state.get("api_error") else END
-
-    def route_sh_hitl(state: SHState) -> str:
-        decision, origin = state.get("sh_decision"), state.get("sh_origin")
-        if decision == "abort":
-            return END
-        if decision == "retry":
-            # Re-enter the node that failed. Re-running its worker IS the point
-            # of retry, and only that node replays - nothing else is re-paid.
-            return origin or END
-        # skip: carry on down the origin's normal path without re-entering it.
-        if origin == "adjudicator" and _should_verify(ctx) and not state.get("verified"):
-            return "verifier"
-        return END
-
     g = StateGraph(SHState)
     g.add_node("planner",     planner_node)
     g.add_node("executor",    executor_subgraph)
     g.add_node("joiner",      joiner_node)
-    g.add_node("adjudicator", adjudicator_node)
-    g.add_node("verifier",    verifier_node)
-    g.add_node("sh_hitl",     sh_hitl_node)
     g.set_entry_point("planner")
     g.add_conditional_edges("planner",  route_planner,
                             {"executor": "executor", END: END})
     g.add_edge("executor", "joiner")
     g.add_conditional_edges("joiner",   route_joiner,
-                            {"executor": "executor", "planner": "planner",
-                             "adjudicator": "adjudicator", END: END})
-    g.add_conditional_edges("adjudicator", route_adjudicator,
-                            {"verifier": "verifier", "sh_hitl": "sh_hitl", END: END})
-    g.add_conditional_edges("sh_hitl", route_sh_hitl,
-                            {"verifier": "verifier", "adjudicator": "adjudicator",
-                             END: END})
-    g.add_conditional_edges("verifier", route_verifier,
-                            {"sh_hitl": "sh_hitl", END: END})
+                            {"executor": "executor", "planner": "planner", END: END})
 
     if checkpoint_db_path:
         conn = sqlite3.connect(checkpoint_db_path, check_same_thread=False)
@@ -972,8 +655,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
 
 
 def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_tree,
-                max_iter: int | None = None, sample: bool = False,
-                escalate: bool = False) -> dict:
+                max_iter: int | None = None) -> dict:
     """Submit one Senior worker task (called from ThreadPoolExecutor thread).
 
     contextvars (which LangSmith's tracing relies on) don't propagate into a
@@ -985,12 +667,11 @@ def _run_senior(ctx: DelegationContext, subquestion: str, idx: int, parent_run_t
     t0 = time.perf_counter()
     with tracing_context(parent=parent_run_tree):
         result = ctx.pool.run_senior(subquestion, ctx.current_qid, idx,
-                                     points=ctx.current_points, max_iter=max_iter,
-                                     sample=sample, escalate=escalate)
-    # Every worker - executor, verifier and adjudicator alike - reaches Splunk
-    # through here, so one timer covers all of them. Summed worker time exceeds
-    # the SH stage's wall clock whenever the fan-out actually ran in parallel;
-    # that ratio is the only readout of whether parallelism is paying off.
+                                     points=ctx.current_points, max_iter=max_iter)
+    # Every worker reaches Splunk through here, so one timer covers all of them.
+    # Summed worker time exceeds the SH stage's wall clock whenever the fan-out
+    # actually ran in parallel; that ratio is the only readout of whether
+    # parallelism is paying off.
     if isinstance(result, dict):
         result["duration_s"] = round(time.perf_counter() - t0, 1)
     return result
@@ -1033,8 +714,6 @@ def run_sh(graph, message: str, thread_id: str,
                 "final_answer": "",
                 "done":         False,
                 "needs_replan": False,
-                "verified":     False,
-                "adjudicated":  False,
             },
             config=config,
         )

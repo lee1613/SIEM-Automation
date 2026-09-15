@@ -31,17 +31,6 @@ from web_tool import web_lookup
 # the actual iteration count.
 HIGH_VALUE_THRESHOLD = 500
 
-VERIFIER_MAX_ITER = 8  # verifier runs <=3 targeted queries; no 25-iter wandering
-
-SAMPLE_TEMPERATURE = 0.3   # C4 self-consistency sampling for metrics tasks
-
-
-def graph_key(role: str, high: bool, sample: bool) -> tuple:
-    """Pure graph-selection key: sampled (temperature 0.3) graphs exist only
-    for the metrics role; the sample flag is a no-op for hunter/content."""
-    if sample and role == "metrics":
-        return ("metrics_sampled", high)
-    return (role, high)
 
 
 ESCALATE_INSTRUCTIONS = (
@@ -120,9 +109,7 @@ class SplunkWorkerPool:
     """Builds worker graphs once per role and runs fresh-session tasks on demand."""
 
     def __init__(self, splunk, *, senior_api_key: str, senior_model: str = "gpt-5.4",
-                 senior_base_url: str | None = None, tracker=None,
-                 escalation_api_key: str | None = None,
-                 escalation_model: str | None = None):
+                 senior_base_url: str | None = None, tracker=None):
         self.splunk  = splunk
         self.tracker = tracker
         self.senior_model = senior_model
@@ -148,59 +135,15 @@ class SplunkWorkerPool:
                     extra_tools=[web_lookup],
                     max_iter=cap,
                 )
-        self.verifier_graph, _ = agent_mod.create_agent(
-            senior_api_key, splunk,
-            model=senior_model, base_url=senior_base_url, http_client=self._http,
-            extra_instructions=ESCALATE_INSTRUCTIONS,
-            extra_tools=[web_lookup],
-            max_iter=VERIFIER_MAX_ITER,
-        )
-        # C4: metrics graphs at temperature 0.3, both budgets — used only when
-        # the executor samples a [METRICS] task 3x for a majority vote.
-        metrics_instr = ESCALATE_INSTRUCTIONS + "\n\n" + SPECIALISTS["metrics"]
-        for hi, cap in ((False, MAX_ITER),
-                        (True, iter_budget(HIGH_VALUE_THRESHOLD))):
-            self._graphs[("metrics_sampled", hi)], _ = agent_mod.create_agent(
-                senior_api_key, splunk,
-                model=senior_model, base_url=senior_base_url, http_client=self._http,
-                extra_instructions=metrics_instr,
-                extra_tools=[web_lookup],
-                max_iter=cap,
-                temperature=SAMPLE_TEMPERATURE,
-            )
-        # C3: escalation graph — the strong model (gpt-5.4) at the high budget,
-        # dispatched by the adjudicator on low-confidence 1000-pt questions.
-        self.escalation_graph = None
-        self.escalation_model = escalation_model
-        if escalation_model:
-            self.escalation_graph, _ = agent_mod.create_agent(
-                escalation_api_key or senior_api_key, splunk,
-                model=escalation_model,
-                extra_instructions=ESCALATE_INSTRUCTIONS,
-                extra_tools=[web_lookup],
-                max_iter=iter_budget(HIGH_VALUE_THRESHOLD),
-            )
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int,
-                   points: int = 0, max_iter: int | None = None,
-                   sample: bool = False, escalate: bool = False) -> dict:
-        """`max_iter` overrides the points-based budget for the one caller that
-        needs a different real graph cap (the Verifier's <=3-query pass) —
-        routed to a dedicated pre-built graph so the override actually reaches
-        the LangGraph step-cap check baked in at create_agent() build time.
-        `escalate` routes to the strong-model escalation graph (C3); `sample`
-        routes metrics tasks to the temperature-0.3 graph (C4)."""
-        if max_iter is not None:
-            return self._run("senior", self.verifier_graph, self.senior_model,
-                             subquestion, parent_qid, idx, max_iter=max_iter)
-        if escalate and self.escalation_graph is not None:
-            cap = iter_budget(HIGH_VALUE_THRESHOLD)
-            return self._run("senior", self.escalation_graph,
-                             self.escalation_model,
-                             subquestion, parent_qid, idx, max_iter=cap)
-        budget = iter_budget(points)
+                   points: int = 0, max_iter: int | None = None) -> dict:
+        """Route to the pre-built graph for this task's specialist role and
+        points budget. `max_iter` is accepted for callers that want to cap a
+        single run below its role budget."""
+        budget = max_iter if max_iter is not None else iter_budget(points)
         role   = parse_specialist_tag(subquestion)
-        graph  = self._graphs[graph_key(role, budget > MAX_ITER, sample)]
+        graph  = self._graphs[(role, budget > MAX_ITER)]
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)
 

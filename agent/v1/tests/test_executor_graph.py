@@ -93,12 +93,15 @@ def test_abort_stops_the_run():
     assert out["aborted"] is True
 
 
-def test_samples_are_reduced_by_majority_vote():
+def test_one_result_per_task_lands_in_task_results():
+    # v1.3 removed 3x self-consistency sampling (it reached a majority 0 times in
+    # 14 attempts, always falling through to results[0]), so a task dispatches
+    # exactly one worker and collect() stores that worker's result directly.
     app = build_executor_graph(
-        lambda p: {"idx": p["task"]["idx"], "status": "solved", "answer": "x"},
-        reduce_samples=lambda rs: {**rs[0], "answer": "majority"})
-    out = app.invoke({"tasks": _tasks((1, [])), "task_results": {}})
-    assert out["task_results"][1]["answer"] == "x"   # single sample -> untouched
+        lambda p: {"idx": p["task"]["idx"], "status": "solved", "answer": "x"})
+    out = app.invoke({"tasks": _tasks((1, []), (2, [])), "task_results": {}})
+    assert out["task_results"][1]["answer"] == "x"
+    assert out["task_results"][2]["answer"] == "x"
 
 
 def test_a_live_object_in_a_send_payload_breaks_checkpointing():
