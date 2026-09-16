@@ -73,7 +73,7 @@ populate the four rows above, and cross-check one run against the NVIDIA dashboa
 **Status:** open question, 2026-09-15.
 
 v1.3 cut the verifier, the adjudicator, and 3× self-consistency sampling on evidence (see
-`docs/version_architecture/v1/v1.3.md`). The **joiner** survived that cut, but its LLM half
+`docs/version_architecture/v1/v1.3.0.md`). The **joiner** survived that cut, but its LLM half
 has never been isolated either.
 
 What has receipts is the *deterministic* guard wrapped around it: on run_1.2,

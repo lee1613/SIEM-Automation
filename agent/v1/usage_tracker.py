@@ -60,15 +60,20 @@ PRICES_PER_1M: dict[str, dict] = {
     # so run totals understate true spend by whatever NIM would bill. That is a
     # known, accepted gap for benchmarking; docs/future_work.md records why it has
     # to be closed before this automation is scaled.
-    "meta/llama-3.3-70b-instruct": {
-        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
-    },
-    "Nemotron-Cascade-2-30B-A3B": {
-        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
-    },
-    "deepseek-ai/DeepSeek-V4-Flash": {
-        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
-    },
+    #
+    # Only models CONFIRMED SERVABLE stay here. An unknown model already costs
+    # 0.0 in _call_cost and lands in totals()' `missing` list, so a row for a
+    # retired model buys nothing and quietly hides that the name is dead.
+    #
+    # Probed 2026-09-16 against the live catalogue: of 82 models listed, only 8
+    # actually answer. NIM lists far more than it will serve, and a dead name
+    # returns a bare 404 rather than any deprecation signal - so "it is in
+    # models.list()" is not evidence that it works. Removed, all three now
+    # absent from the catalogue entirely:
+    #   meta/llama-3.3-70b-instruct    EOL 2026-08-26, had been returning 410
+    #   Nemotron-Cascade-2-30B-A3B     gone; never used
+    #   deepseek-ai/DeepSeek-V4-Flash  renamed to deepseek-v4-flash-0731, which
+    #                                  is listed but times out (25s, no reply)
     "nvidia/nemotron-3-super-120b-a12b": {
         "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
