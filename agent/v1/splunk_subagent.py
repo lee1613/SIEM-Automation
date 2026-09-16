@@ -5,8 +5,8 @@ Splunk worker pool for the v1 multi-agent system.
 A worker is the v0 LangGraph agent reused verbatim (verify -> execute gate, 6 Splunk
 tools, Intention protocol) with two additions:
   - the model is selectable (Senior = gpt-5.4 via OpenAI; Junior = Llama via NIM in v1.1)
-  - the ESCALATE protocol: if the data isn't there / the task is too broad, the worker
-    replies with a single `ESCALATE:` line instead of guessing
+  - the submit_finding contract: the worker reports via a terminal tool call whose
+    arguments are the schema, never as prose (see finding.py)
 
 Each delegated task runs in a FRESH session (new thread_id, no cross-task memory). The
 worker's full state is returned for the run summary JSON and for LangSmith tracing.
@@ -36,22 +36,23 @@ HIGH_VALUE_THRESHOLD = 500
 
 
 
-ESCALATE_INSTRUCTIONS = (
-    "RESPONSE PROTOCOL — end every response with exactly ONE of these three modes:\n\n"
-    "1. CONFIDENT ANSWER — you found the exact value and verified it:\n"
-    "   FINAL ANSWER: <the precise value>\n"
-    "   SPL: <the query or sourcetype that produced it>\n\n"
-    "2. PARTIAL ANSWER — you found useful evidence but are NOT fully certain:\n"
-    "   PARTIAL ANSWER: <your best candidate value or key finding>\n"
-    "   UNCERTAINTY: <why you cannot be 100% sure>\n"
-    "   NEXT STEP: <what specific check would confirm it>\n"
-    "   Use this when you found something concrete but couldn't fully verify it. "
-    "The orchestrator will use your finding to issue a targeted follow-up if needed. "
-    "Include the actual evidence (field values, event counts, SPL used).\n\n"
-    "3. ESCALATE — you found nothing useful after thorough investigation:\n"
-    "   ESCALATE: <exactly what you searched, what was missing, how to narrow the task>\n"
-    "   Only use this as a last resort — first try alternative sourcetypes and keywords.\n\n"
-    "NEVER guess a FINAL ANSWER you are not confident in. If in doubt, use PARTIAL ANSWER.\n\n"
+FINISH_INSTRUCTIONS = (
+    "HOW TO FINISH — call `submit_finding` exactly once, as your final action.\n\n"
+    "It is the ONLY way to report. Do not write your answer as prose instead, and "
+    "do not write it as prose as well as calling the tool: a value typed into a "
+    "sentence has to be scraped back out, and that scraping is where correct "
+    "answers get mangled on the way to a scoreboard that scores exact matches.\n\n"
+    "`status` says which of the four outcomes you reached:\n"
+    "  solved   — you found the exact value and verified it. Put it in `value`.\n"
+    "  partial  — you have something useful but not a confirmed answer. If you "
+    "have a clean candidate put it in `value`; if you do not, leave `value` EMPTY "
+    "and put what you learned in `notes`.\n"
+    "  too_big  — the task needs narrowing before it can be answered.\n"
+    "  failed   — you found nothing usable after a thorough search.\n\n"
+    "Never claim `solved` for a value you are not confident in — that is what "
+    "`partial` is for, and an honest low `confidence` is more useful than a wrong "
+    "high one. Whatever you checked and eliminated goes in `ruled_out`; it is what "
+    "stops the next worker re-treading your dead ends.\n\n"
     "A `web_lookup` tool is available for facts NOT in the Splunk dataset (e.g. a "
     "vendor's published threat severity/date, or which CVE matches a technique) — "
     "use it only for external knowledge, not for anything answerable from BOTSv3 data."
@@ -122,11 +123,11 @@ class SplunkWorkerPool:
         # content/metrics, see specialists.py) x 2 budgets each — the base
         # budget (MAX_ITER) for ordinary questions, and a higher budget
         # (iter_budget(>=500)) for high-value questions. All share the same
-        # tools (ESCALATE protocol + web_lookup) — only the specialist's extra
+        # tools (submit_finding + web_lookup) — only the specialist's extra
         # prompt emphasis and max_iter differ.
         self._graphs = {}
         for name, extra in SPECIALISTS.items():
-            instructions = ESCALATE_INSTRUCTIONS + ("\n\n" + extra if extra else "")
+            instructions = FINISH_INSTRUCTIONS + ("\n\n" + extra if extra else "")
             for hi, cap in ((False, MAX_ITER),
                             (True, iter_budget(HIGH_VALUE_THRESHOLD))):
                 self._graphs[(name, hi)], _ = agent_mod.create_agent(
@@ -198,7 +199,7 @@ class SplunkWorkerPool:
             # and a 500 read identically. Name the type/status/provider.
             detail = describe_llm_error(exc, run_name, self.senior_base_url)
             print(detail)
-            answer = f"ESCALATE: worker crashed — {detail}"
+            answer = f"worker crashed — {detail}"
             state  = {"messages": [], "step_count": 0}
             api_failed = True
 
@@ -206,7 +207,7 @@ class SplunkWorkerPool:
 
         spl_used, sourcetypes = extract_spl_and_sourcetypes(state)
         # A provider outage is not a reasoning outcome. Without this the crash
-        # text ("ESCALATE: worker crashed - ...") classifies as "too_big" exactly
+        # text ("worker crashed - ...") would classify as an ordinary give-up
         # like an honest give-up, and SH responds to an outage by decomposing the
         # task and dispatching more workers at the same dead endpoint.
         # A worker that blew the output-token guard is stuck, not thorough - its

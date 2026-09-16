@@ -4,8 +4,8 @@ Token and cost tracker for v1 multi-agent runs.
 
 UsageTracker is a LangChain callback registered on every graph.invoke() call.
 It accumulates token counts from the LLM API responses (exact — these are the
-numbers OpenAI / NVIDIA bills you for). The Extractor uses the raw OpenAI SDK
-so it calls add_nim_usage() directly.
+numbers OpenAI / NVIDIA bills you for). A caller that bypasses LangChain and
+uses the raw OpenAI SDK records its usage via add_nim_usage() instead.
 
 Cost calculation uses PRICES_PER_1M. Verify prices before each full run at:
   OpenAI  → platform.openai.com/pricing
@@ -56,7 +56,7 @@ PRICES_PER_1M: dict[str, dict] = {
     },
     # ── NIM (build.nvidia.com) ────────────────────────────────────────────────
     # Every NIM model is priced at 0 by decision - see CLAUDE.md. NIM carries the
-    # roles that are deliberately cheap and low-reasoning (extractor, exploration),
+    # roles that are deliberately cheap and low-reasoning (the exploration worker),
     # so run totals understate true spend by whatever NIM would bill. That is a
     # known, accepted gap for benchmarking; docs/future_work.md records why it has
     # to be closed before this automation is scaled.
@@ -119,7 +119,7 @@ class UsageTracker(BaseCallbackHandler):
     def __init__(self) -> None:
         self._lock    = threading.Lock()         # guards all mutable counters
         self._models: dict[str, dict] = {}      # per-model totals (all agents)
-        self._nim:    dict[str, dict] = {}      # NIM raw-SDK totals (Extractor)
+        self._nim:    dict[str, dict] = {}      # NIM totals from raw-SDK callers
         self._sh_cum  = _empty_bucket()         # cumulative SH totals for the whole run
         self._sh_snap = _empty_bucket()         # snapshot at start of current question
         self._by_q: dict[tuple[str, str], dict] = {}   # (qid, role) -> bucket
@@ -210,8 +210,13 @@ class UsageTracker(BaseCallbackHandler):
 
     # ── NIM / raw-SDK helper ──────────────────────────────────────────────────
     def add_nim_usage(self, model: str, inp: int, cached: int, out: int,
-                      qid: str = "", role: str = "extractor") -> None:
-        """Called by Extractor after each NIM completion."""
+                      qid: str = "", role: str = "nim") -> None:
+        """Record a NIM completion made with the raw OpenAI SDK.
+
+        LangChain callers are counted automatically by on_llm_end; this is
+        for anything that bypasses LangChain. The Extractor was the only
+        such caller until that tier was deleted.
+        """
         if not (inp or out):
             return
         usd = _call_cost(model, inp, cached, out)

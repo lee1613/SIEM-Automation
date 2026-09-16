@@ -6,7 +6,7 @@
 > been exercised only on a 5-question smoke test. Nothing here extrapolates a measurement
 > from one version to another; where a claim has no measurement, it says so.
 
-## Three tiers
+## Two tiers
 
 ### SH orchestrator — `agent/v1/orchestrator.py`
 
@@ -53,19 +53,6 @@ six workers, so a 40s scan holds a slot for its whole duration.
 > In the v1.3.0 smoke test SH chose exploration **zero times** out of 25 spawns. This tier
 > is currently unexercised code.
 
-### Extractor — `agent/v1/extractor.py`
-
-Reduces the SH's prose to one bare, exact-match scoreboard value. Currently
-`nvidia/nemotron-3-super-120b-a12b` via NIM at temperature 0.
-
-This tier exists because investigation and output normalization are different jobs — but the
-model choice is a known weak point. It has drifted DeepSeek-V4-Flash → Qwen3.6-27B →
-`llama-3.3-70b-instruct` (EOL 2026-08-26) → nemotron, and the current model is a **reasoning
-model**, which the original choice deliberately was not. Its chain-of-thought normally lands
-in a separate `reasoning_content` field, but when it never reaches a final answer it spills
-into `content`: Q329 of the smoke test submitted 4,487 characters of deliberation. See
-`clean_completion` below, and `v1.3.0.md` §4.4 for the replacement search.
-
 ## Data and control flow
 
 ```mermaid
@@ -79,12 +66,11 @@ flowchart TD
     P --> J[Joiner<br/>picks from candidate ledger]
     J --> G{Grounding gate}
     G -->|ungrounded, rounds remain| SH
-    G -->|grounded, or budget spent| F[finalize_answer<br/>snap_to_ledger]
-    F --> X[Extractor<br/>prose to bare answer]
-    X --> C{clean_completion<br/>answer-shaped?}
-    C -->|no| FB[Fallback to best worker value]
-    C -->|yes| S[Scoreboard submit — exact match]
-    FB --> S
+    G -->|grounded, or budget spent| C{answer_shaped?}
+    C -->|no| FB[fallback_answer<br/>best worker value]
+    C -->|yes| F[finalize_answer<br/>snap_to_ledger]
+    FB --> F
+    F --> S[Scoreboard submit — exact match]
 ```
 
 ## Control mechanisms
@@ -133,20 +119,26 @@ confident fabrication into visible failure.
 Every delegation's committed value is captured **verbatim** at delegation time with its
 evidence and SPL. The joiner chooses *from* the ledger and copies rather than retyping;
 `finalize_answer` runs `snap_to_ledger` at the true submit choke point, so every path —
-normal, post-hint, extractor outage — is covered. `extract_candidate` applies
+normal, post-hint, and post-fallback — is covered. `extract_candidate` applies
 `answer_shaped` to its prose fallback too: the ledger instructs the joiner to copy
 character-for-character, so an unsubmittable entry is worse than no entry.
 
-### Extractor output guard — `clean_completion`
+### Submit guard — `answer_shaped`
 
-The model's `content` reduced to a plausible answer, or `""`. Strips `<think>` blocks, then
-requires a non-empty single line within 200 chars. Calibrated on the 86 recorded
-extractions: every multi-line output (3/3) and every output over 110 chars (4/4) was a
-chain-of-thought leak, and no real answer has a newline.
+The last thing between SH and the scoreboard. An answer must be a single non-empty line,
+≤200 chars, ≤12 words, containing alphanumerics and no `?`. Anything else routes to
+`fallback_answer`, which takes the highest-status worker's schema-B `value`.
 
-It returns `""` rather than salvaging a tail — Q329's last line was `"No"`, which is short,
-single-line, and pure noise. Both call sites treat `""` as a failed extraction and fall back
-to the best worker `value`.
+This guard used to sit on the extractor's output. **There is no extractor any more**: over
+84 recorded extractions the tier changed nothing 57 times, saved one wrong answer, and
+destroyed one correct one (`'1368'` → `'2085'`). Net zero — and it produced both
+catastrophic submissions on record, Q329's 4,487-char chain-of-thought dump and the Q331
+corruption above. It was a no-op so often because SH already emits a bare value:
+`orchestrator.py` strips the `FINAL ANSWER:` tag and keeps line one, so real `sh_answer`
+values are `'7071'`, `'bar chart'`, `'6.80'`.
+
+The one case the extractor genuinely rescued — SH emitting an Option B `REPLAN:` block as
+its final answer — is now caught here deterministically, with no model.
 
 ### Dual-track planning
 

@@ -2,7 +2,7 @@
 """
 One-line, source-naming descriptions of LLM API failures.
 
-Every LLM call in the pipeline (SH, Senior, Extractor) reaches a different
+Every LLM call in the pipeline (SH, Senior, exploration) reaches a different
 provider, and `str(exc)` on an openai exception prints only the response body —
 it never names the exception *type*, so a 429 and a 500 read identically in the
 logs. These helpers put the type, the HTTP status, the component and the
@@ -11,8 +11,7 @@ provider host into a single greppable line.
 The openai SDK ships the typed exception hierarchy (RateLimitError,
 APITimeoutError, InternalServerError, ...) but no classifier, so this is ours.
 It is deliberately description-only: retry/backoff is the SDK's job
-(`max_retries=` / `timeout=`), except in extractor.py where the SDK's hard
-8s MAX_RETRY_DELAY cap can't ride out a multi-minute NIM outage.
+(`max_retries=` / `timeout=`).
 """
 
 import json
@@ -30,7 +29,7 @@ def describe_llm_error(exc: BaseException, component: str,
                        base_url: str | None = None) -> str:
     """'[LLM ERROR] Senior via api.vultrinference.com: RateLimitError (HTTP 429) - ...'
 
-    component is the caller's role (SH / Senior / Extractor) so a failure line
+    component is the caller's role (SH / Senior / Exploration) so a failure line
     says which part of the pipeline died, not just that something did.
     """
     status = getattr(exc, "status_code", None)

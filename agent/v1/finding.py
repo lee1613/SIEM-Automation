@@ -27,12 +27,15 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from extractor import MAX_ANSWER_CHARS
-
 # Ordered worst-to-best; mirrors grounding._STATUS_RANK.
 VALID_STATUS = ("failed", "too_big", "partial", "solved")
 
-# The longest of the 58 real BOTSv3 answers is 11 words (a User-Agent string).
+# Shape of a submittable answer, measured against all 58 real BOTSv3 answers:
+# the longest is 110 chars and 11 words (a User-Agent string), none contains a
+# newline or a question mark, and every one has alphanumerics. These lived in
+# extractor.py until that tier was deleted; they describe the SCOREBOARD's
+# contract rather than any one model's, so they belong next to the schema.
+MAX_ANSWER_CHARS = 200
 MAX_ANSWER_WORDS = 12
 
 # "solved" means "I am confident in `value`". Below this the worker has said

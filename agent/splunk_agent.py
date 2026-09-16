@@ -462,7 +462,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         base_url:           OpenAI-compatible endpoint. None → OpenAI; pass the NIM
                             base URL to run a Llama worker through the same code path.
         extra_instructions: appended to SYSTEM_PROMPT — used by the v1 worker pool to
-                            inject the ESCALATE protocol without altering v0 behaviour.
+                            inject the submit_finding contract without altering v0 behaviour.
         extra_tools:        additional LangChain tools appended after the Splunk tool
                             set — used by the v1 worker pool to give workers the
                             keyless `web_lookup` tool without changing v0's tool list.
@@ -508,7 +508,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         **token_kwargs,
     )
     model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-    model_bare       = llm  # no tools — used when iteration cap is hit
+    # Used when the iteration cap is hit. Search tools are withdrawn so the
+    # worker cannot start another hunt, but any TERMINAL tool the caller
+    # supplied stays bound - otherwise a capped worker has no way to report
+    # except prose, and prose is exactly what the structured contract exists to
+    # avoid. v0 passes no extra_tools, so for it this is still a bare model.
+    _terminal  = [t for t in (extra_tools or []) if getattr(t, "name", "") == "submit_finding"]
+    model_bare = llm.bind_tools(_terminal, parallel_tool_calls=False) if _terminal else llm
 
     prompt_text = SYSTEM_PROMPT
     if extra_instructions:
@@ -546,10 +552,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         if step > max_iter:
             print("[Max iterations reached — forcing final answer]")
             msgs = msgs + [HumanMessage(
-                "You have reached the maximum number of tool calls. Do NOT invent a "
-                "value. Reply with PARTIAL ANSWER: <your best evidence-backed "
-                "candidate>, UNCERTAINTY: <what is unconfirmed>, and the SPL you ran. "
-                "If you have nothing concrete, reply ESCALATE with what you searched."
+                "You have reached the maximum number of tool calls and the search "
+                "tools are now withdrawn. Do NOT invent a value. Report what you "
+                "actually have: if you have a credible candidate use status "
+                "'partial' and put it in `value`; if you do not, leave `value` "
+                "empty, use status 'partial' or 'failed', and put what you learned "
+                "and what you eliminated in `notes` and `ruled_out`. Use status "
+                "'too_big' if the task needs narrowing to be answerable at all."
             )]
             response = model_bare.invoke(msgs)
         else:

@@ -4,8 +4,10 @@ v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
     -> parallel Senior Splunk workers (gpt-5.4-mini via OpenAI)
-    -> Extractor (Llama-3.3-70B via NIM, prose-strip only)
     -> scoreboard (1x)
+
+There is no extractor tier: the joiner's FINAL ANSWER is already the bare
+value, and over 84 recorded extractions the tier's net score effect was zero.
 
 The SH plans a DAG of tasks and dispatches independent tasks concurrently via
 ThreadPoolExecutor (up to 6 parallel Senior workers, backed by SplunkConnectionPool).
@@ -42,11 +44,10 @@ for p in (AGENT_DIR, SCRIPT_DIR):
 from agent_logger import RunLogger
 from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
 from dotenv import load_dotenv
-from extractor import Extractor
+from finding import answer_shaped
 from grounding import best_candidate, is_grounded
 from hint_client import HintBook
 from hitl import RunPaused
-from llm_errors import describe_llm_error
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
 from splunk_pool import SplunkConnectionPool
@@ -150,8 +151,8 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
     }
 
 
-def extractor_fallback_answer(sh_answer: str, delegations: list) -> str:
-    """Used when the extractor fails all retries — prefer a real worker's
+def fallback_answer(sh_answer: str, delegations: list) -> str:
+    """Used when SH produced nothing submittable — prefer a real worker's
     answer (best_candidate, same ranking the joiner's own ungrounded-fallback
     uses) over blindly taking the last line of sh_answer, which can be raw
     multi-line prose when sh_answer came from decide_joiner_answer's
@@ -239,7 +240,7 @@ def main():
         sys.exit(f"{args.senior_api_key_env} not set — check .env  "
                  f"(Senior model={senior_model}, base_url={senior_base_url})")
     if not nim_api_key:
-        sys.exit("NIM_API_KEY not set — check .env (Extractor runs on NIM)")
+        sys.exit("NIM_API_KEY not set — check .env (exploration runs on NIM)")
     if not SPLUNK_PASS:
         sys.exit("SPLUNK_PASS not set — check .env")
 
@@ -298,9 +299,9 @@ def main():
     pool      = SplunkWorkerPool(splunk, senior_api_key=senior_api_key,
                                  senior_model=senior_model,
                                  senior_base_url=senior_base_url,
-                                 # Exploration runs on NIM, same key as the
-                                 # extractor. Without it an exploration spawn
-                                 # degrades to an ordinary Senior.
+                                 # Exploration runs on NIM. Without a key an
+                                 # exploration spawn degrades to an ordinary
+                                 # Senior rather than failing the question.
                                  exploration_api_key=nim_api_key,
                                  exploration_base_url=NIM_BASE_URL,
                                  tracker=tracker,
@@ -311,14 +312,12 @@ def main():
     checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
     sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx,
                                           checkpoint_db_path=checkpoint_db_path)
-    extractor = Extractor(nim_api_key, NIM_BASE_URL, tracker=tracker)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
     senior_provider = senior_base_url or "OpenAI"
     print(f"\n{run_label}  [{logger.run_name}]")
-    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})  "
-          f"Extractor={extractor.model}(NIM)")
+    print(f"  SH={SH_MODEL}  Senior={senior_model} ({senior_provider})")
     print(f"  Questions: {len(selected)}   Log dir: {logger.run_dir}")
     print(f"  LangSmith project: {ls_project}")
     print("=" * 80)
@@ -362,7 +361,7 @@ def main():
         git_sha = "unknown"
     logger.events.emit(
         "run_start", git_sha=git_sha, full_run=full_run,
-        models={"sh": SH_MODEL, "senior": senior_model, "extractor": extractor.model},
+        models={"sh": SH_MODEL, "senior": senior_model},
         langsmith_project=ls_project, questions=len(selected), resumed=resumed,
     )
 
@@ -415,41 +414,31 @@ def main():
             )
         stage_ms["sh"] = t_sh.ms
 
-        # ── Extractor: strip prose down to the bare answer ────────────────────────
-        with logger.events.timer() as t_ext:
-            if not sh_answer:
-                # run_sh returned its failure sentinel (it logged the reason).
-                # No prose to strip - fall back to the best worker answer this
-                # question produced before SH died, same as an extractor outage.
-                clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
-                print("[SH] FAILED for this question; falling back to best worker answer")
-                logger.events.emit("sh_failed", qid=qid)
-            else:
-                try:
-                    clean = extractor.extract(qtext, guidance, sh_answer, qid=qid,
-                                              expected_shape=guidance)
-                    if not clean:
-                        # The call succeeded but returned nothing answer-shaped
-                        # (see extractor.clean_completion). Same remedy as an
-                        # outage: a real worker's value beats model noise.
-                        clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
-                        print("[EXTRACTOR] output was not answer-shaped; "
-                              "falling back to best worker answer")
-                        logger.events.emit("extract_unshaped", qid=qid)
-                except Exception as exc:
-                    # Extractor outage must not kill the run: fall back to the best
-                    # worker answer (best_candidate) rather than blindly taking
-                    # sh_answer's raw last line, which can be unrelated prose when
-                    # sh_answer came from the joiner's own best_candidate fallback.
-                    clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
-                    print(f"[EXTRACTOR] FAILED after retries "
-                          f"({describe_llm_error(exc, 'Extractor', NIM_BASE_URL)}); "
-                          f"falling back to best worker answer")
-                    logger.events.emit("extract_failed", qid=qid,
-                                       error=f"{type(exc).__name__}: {str(exc)[:200]}")
-        stage_ms["extract"] = t_ext.ms
+        # ── The answer SH already produced ───────────────────────────────────────
+        # There is no extractor tier any more. The joiner's FINAL ANSWER line is
+        # already the bare value - orchestrator.py strips the tag and keeps line
+        # one - so there was nothing left to normalise. Measured over the 84
+        # recorded extractions, the tier saved one answer, destroyed one
+        # ('1368' -> '2085', where 1368 was correct), and changed nothing in 57.
+        # Net zero, for a model dependency that twice put catastrophic text on
+        # the scoreboard.
+        clean = sh_answer
+        if not sh_answer:
+            # run_sh returned its failure sentinel (it logged the reason).
+            clean = fallback_answer(sh_answer, ctx.q_delegations)
+            print("[SH] FAILED for this question; falling back to best worker answer")
+            logger.events.emit("sh_failed", qid=qid)
+        elif not answer_shaped(sh_answer):
+            # SH emitted something unsubmittable - a REPLAN block, a paragraph,
+            # a bare "?". A real worker's value beats it. This is the one case
+            # the extractor ever genuinely rescued (Q332, a REPLAN block that
+            # still contained the CVE), now handled without a model.
+            clean = fallback_answer(sh_answer, ctx.q_delegations)
+            print(f"[SH] answer not submittable ({sh_answer[:60]!r}); "
+                  "falling back to best worker answer")
+            logger.events.emit("sh_answer_unshaped", qid=qid)
         clean = finalize_answer(clean, ctx.q_delegations)
-        print(f"[EXTRACTOR] clean={clean!r}")
+        print(f"[SH FINAL] clean={clean!r}")
 
         # ── Hint economy: ungrounded >=500pt answer buys official hint 1 ─────────
         hint_cost = 0
@@ -470,13 +459,9 @@ def main():
                             run_thread, qid=qid, run_name=f"SH-{qid}-hint",
                             tracker=tracker, run_dir=logger.run_dir)
                     stage_ms["hint"] = t_hint.ms
-                    try:
-                        clean = extractor.extract(qtext, guidance, sh_answer,
-                                                  qid=qid, expected_shape=guidance)
-                    except Exception:
-                        clean = ""
-                    if not clean:
-                        clean = extractor_fallback_answer(sh_answer, ctx.q_delegations)
+                    clean = sh_answer
+                    if not answer_shaped(clean):
+                        clean = fallback_answer(sh_answer, ctx.q_delegations)
                     clean = finalize_answer(clean, ctx.q_delegations)
                     print(f"[HINT] post-hint clean={clean!r}")
 
@@ -509,7 +494,7 @@ def main():
         print(sh_tok_line)
 
         logger.timeline(
-            f"\n**SH FINAL → extractor:** `{clean}`  {verdict}  "
+            f"\n**SH FINAL:** `{clean}`  {verdict}  "
             f"(delegations: {len(ctx.q_delegations)}, "
             f"cumulative failed delegations: {ctx.failed_delegations})\n"
             f"\n{sh_tok_line}\n"
@@ -556,8 +541,7 @@ def main():
                 "full_run":             full_run,
                 "langsmith_project":    ls_project,
                 "models":               {"sh": SH_MODEL, "senior": senior_model,
-                                          "senior_base_url": senior_base_url or "openai",
-                                          "extractor": extractor.model},
+                                          "senior_base_url": senior_base_url or "openai"},
                 "score":                earned_pts,
                 "total":                total_points,
                 "correct":              sum(1 for r in results if r["sb_correct"]),
