@@ -2,12 +2,17 @@
 """
 Extractor agent for v1.
 
-Strips the orchestrator's prose down to the bare scoreboard answer
-(DeepSeek-V4-Flash via Vultr — a plain non-reasoning model, chosen so hidden
-chain-of-thought can't eat the completion-token budget on this fixed-format task;
-reuses the v0 extract_clean_answer approach).
+Strips the orchestrator's prose down to the bare scoreboard answer, which the
+caller submits directly.
 
-Caller submits the extracted answer directly to the scoreboard.
+The task is fixed-format and needs no reasoning, so the model runs with thinking
+disabled. That was always the intent - the original choice was a plain
+non-reasoning model precisely so hidden chain-of-thought could not eat the
+completion budget - but the choice drifted through four models as each was
+retired, and the drift was never re-checked against that requirement. Q329
+submitted 4,487 characters of a reasoning model's deliberation to the
+scoreboard. See EXTRACT_EXTRA_BODY below for how it is switched off and what it
+costs, and clean_completion for the guard that catches it regardless of model.
 """
 
 import re
@@ -27,11 +32,42 @@ except Exception:
 
 # via NIM; was meta/llama-3.3-70b-instruct until it reached end of life on
 # 2026-08-26 and began returning HTTP 410, before that Qwen3.6-27B (Vultr) and
-# DeepSeek-V4-Flash. Nemotron IS a reasoning model: chain of thought arrives in a
-# separate `reasoning_content` field and the bare answer in `content`, so
-# max_tokens below must stay generous even though the answer is a few characters.
+# DeepSeek-V4-Flash.
+#
+# Nemotron is a reasoning model, and that is what leaked Q329: its chain of
+# thought normally arrives in a separate `reasoning_content` field, but when it
+# never reaches a final answer the thinking spills into `content` instead, and
+# 4,487 characters of deliberation went to the scoreboard.
+#
+# So the reasoning is switched OFF at the API rather than the model swapped out.
+# Probing the live NIM catalogue found only 8 of 82 listed models answer at all,
+# and no servable non-reasoning one is usable here: ising-calibration-1.5-31b
+# ignores the prompt and echoes "FINAL ANSWER:" labels (2/4), mistral-nemotron
+# times out on 7 of 8 calls, and gemma-4-31b-it times out on every real prompt
+# at any token cap (it answers only toy ones).
+#
+# Of the toggles NIM accepts, only chat_template_kwargs works. `/no_think` and
+# "detailed thinking off" as system messages leave reasoning fully on, and
+# min_thinking_tokens is rejected as an unsupported parameter.
 EXTRACT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
-EXTRACT_EXTRA_BODY = None  # no hybrid-reasoning thinking toggle needed
+EXTRACT_EXTRA_BODY = {"chat_template_kwargs": {"thinking": False}}
+
+# With thinking off there is no hidden chain of thought to fund, so the budget
+# only has to cover the answer. Measured: the longest real extraction spends 31
+# output tokens (a 40-char hash); the same calls with reasoning on spent 40-687.
+# A low cap also bounds the damage if a future model leaks again.
+EXTRACT_MAX_TOKENS = 256
+
+# KNOWN REGRESSION, accepted deliberately. Thinking off scores 5/6 on the
+# extraction cases against 6/6 with it on. The one failure is
+# "PARTIAL ANSWER: nullweb_admin" -> "web_admin" - the exact transcription that
+# cost run_1.2 points. Two fixes were tried and both failed: a prompt line
+# demanding character-for-character fidelity (still "web_admin"), and stripping
+# the FINAL/PARTIAL ANSWER tag before the model sees it (made it worse -
+# "admin"). The same value inside ordinary prose extracts correctly, so the
+# model simply cannot hold it without reasoning. What still guards it: schema B
+# has workers return `value` as its own field rather than behind a label, and
+# case_file.snap_to_ledger restores a ledger value on an exact-match hit.
 EXTRACT_MAX_RETRIES = 5
 EXTRACT_RETRY_BACKOFF = 10.0  # seconds; doubles each retry (10+20+40+80 — rides out ~2.5 min gateway outage)
 # Statuses no amount of waiting will fix. The ladder above exists for gateway
@@ -106,7 +142,7 @@ class Extractor:
         return self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,  # reasoning models spend budget on hidden chain-of-thought before the answer
+            max_tokens=EXTRACT_MAX_TOKENS,
             temperature=0,
             extra_body=EXTRACT_EXTRA_BODY if self.model == EXTRACT_MODEL else None,
         )

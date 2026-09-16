@@ -10,7 +10,8 @@ were this failure; 4 exceeded 110 chars and all 4 were this failure; none of
 the 58 real BOTSv3 answers contains a newline and the longest is 110 chars.
 """
 
-from extractor import MAX_ANSWER_CHARS, clean_completion
+from extractor import (EXTRACT_EXTRA_BODY, EXTRACT_MAX_TOKENS, EXTRACT_MODEL,
+                       MAX_ANSWER_CHARS, clean_completion)
 
 # test_20260915_174228/Q329 - 4,487 chars of chain-of-thought, truncated at the
 # token cap. Its LAST LINE was "No", which is why this guard rejects outright
@@ -73,6 +74,38 @@ def test_empty_is_empty_not_a_crash():
     assert clean_completion("") == ""
     assert clean_completion(None) == ""
     assert clean_completion("   \n  ") == ""
+
+
+# ── reasoning is switched off at the API ──────────────────────────────────────
+
+def test_thinking_is_disabled_in_the_request_body():
+    """The leak's cause, not just its symptom. Nemotron is a reasoning model and
+    its chain of thought spills into `content` when it never reaches an answer.
+
+    Only this toggle works on NIM: `/no_think` and "detailed thinking off" as
+    system messages leave reasoning fully on, and min_thinking_tokens is
+    rejected as an unsupported parameter.
+    """
+    assert EXTRACT_EXTRA_BODY == {"chat_template_kwargs": {"thinking": False}}
+
+
+def test_the_token_budget_is_small_now_that_nothing_hidden_is_funded():
+    # 1024 existed to pay for hidden chain-of-thought. With thinking off the
+    # longest real extraction spends 31 output tokens, and a low cap bounds the
+    # damage if a future model leaks anyway.
+    assert EXTRACT_MAX_TOKENS <= 256
+
+
+def test_the_toggle_is_sent_only_for_the_model_it_was_verified_on():
+    """extra_body is model-specific: a provider that does not know
+    chat_template_kwargs can reject the whole request (min_thinking_tokens
+    already returns HTTP 400 on this one)."""
+    import inspect
+
+    from extractor import Extractor
+    src = inspect.getsource(Extractor._complete)
+    assert "EXTRACT_EXTRA_BODY if self.model == EXTRACT_MODEL else None" in src
+    assert EXTRACT_MODEL == "nvidia/nemotron-3-super-120b-a12b"
 
 
 # ── the fallback the guard hands off to ────────────────────────────────────────
