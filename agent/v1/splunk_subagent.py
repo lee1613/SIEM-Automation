@@ -20,12 +20,13 @@ import re
 import uuid
 
 import splunk_agent as agent_mod
-from specialists import SPECIALISTS, parse_specialist_tag
-from llm_errors import describe_llm_error, provider_of, resilient_http_client
-from splunk_agent import MAX_ITER, iter_budget
-from exploration import (EXPLORATION_MODEL, build_exploration_agent,
-                         render_report, run_exploration)
+from exploration import EXPLORATION_MODEL, build_exploration_agent, render_report, run_exploration
 from finding import _classify_prose, empty_finding, parse_finding, submit_finding
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from llm_errors import describe_llm_error, provider_of, resilient_http_client
+from specialists import SPECIALISTS, parse_specialist_tag
+from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
 
 # Points at/above this threshold get the higher-budget worker graph (see
@@ -106,6 +107,7 @@ class SplunkWorkerPool:
         self.tracker = tracker
         self.senior_model = senior_model
         self.senior_base_url = senior_base_url
+        self._senior_api_key = senior_api_key
         # One pooled, thread-safe client shared by every worker graph.
         self._http = resilient_http_client()
 
@@ -119,33 +121,43 @@ class SplunkWorkerPool:
             self.exploration_graph, self.exploration_budget = build_exploration_agent(
                 exploration_api_key, exploration_base_url, splunk)
 
-        # Six worker graphs built once at init: 3 specialist roles (hunter/
-        # content/metrics, see specialists.py) x 2 budgets each — the base
-        # budget (MAX_ITER) for ordinary questions, and a higher budget
-        # (iter_budget(>=500)) for high-value questions. All share the same
-        # tools (submit_finding + web_lookup) — only the specialist's extra
-        # prompt emphasis and max_iter differ.
-        self._graphs = {}
-        for name, extra in SPECIALISTS.items():
+        # Worker graphs are built on demand and cached by (role, iteration cap).
+        # v1.3.0 pre-built six (3 roles x 2 budgets); v1.3.1 adds a third cap —
+        # one round (8 iterations) — and building nine eagerly would pay for
+        # graphs a given run never uses.
+        self._graphs: dict = {}
+
+        # A CLARIFY reply is answered from what the senior already holds: no
+        # tools, no Splunk, no round consumed (§3.3). So it is a bare model call
+        # over the thread's history, not a graph invocation.
+        self._clarify_llm = ChatOpenAI(
+            api_key=senior_api_key, model=senior_model, base_url=senior_base_url,
+            temperature=0, max_completion_tokens=1024, http_client=self._http)
+
+    def _graph_for(self, role: str, cap: int):
+        """The worker graph for this specialist role at this iteration cap."""
+        key = (role, cap)
+        if key not in self._graphs:
+            extra = SPECIALISTS.get(role, "")
             instructions = FINISH_INSTRUCTIONS + ("\n\n" + extra if extra else "")
-            for hi, cap in ((False, MAX_ITER),
-                            (True, iter_budget(HIGH_VALUE_THRESHOLD))):
-                self._graphs[(name, hi)], _ = agent_mod.create_agent(
-                    senior_api_key, splunk,
-                    model=senior_model, base_url=senior_base_url, http_client=self._http,
-                    extra_instructions=instructions,
-                    extra_tools=[web_lookup, submit_finding],
-                    max_iter=cap,
-                )
+            self._graphs[key], _ = agent_mod.create_agent(
+                self._senior_api_key, self.splunk,
+                model=self.senior_model, base_url=self.senior_base_url,
+                http_client=self._http,
+                extra_instructions=instructions,
+                extra_tools=[web_lookup, submit_finding],
+                max_iter=cap,
+            )
+        return self._graphs[key]
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int,
                    points: int = 0, max_iter: int | None = None) -> dict:
-        """Route to the pre-built graph for this task's specialist role and
-        points budget. `max_iter` is accepted for callers that want to cap a
-        single run below its role budget."""
+        """Route to the graph for this task's specialist role and points
+        budget. `max_iter` is accepted for callers that want to cap a single
+        run below its role budget."""
         budget = max_iter if max_iter is not None else iter_budget(points)
         role   = parse_specialist_tag(subquestion)
-        graph  = self._graphs[(role, budget > MAX_ITER)]
+        graph  = self._graph_for(role, budget)
         return self._run("senior", graph, self.senior_model,
                          subquestion, parent_qid, idx, max_iter=budget)
 
@@ -178,10 +190,53 @@ class SplunkWorkerPool:
                 "spl_used": [], "sourcetypes": report["source_types"],
                 "full_state": [], "iterations": 0, "cap_hit": False}
 
+    def run_round(self, *, thread_id: str, message: str, qid: str, idx: int,
+                  technique: str = "hunter", max_iter: int = 8) -> dict:
+        """One round of a LIVE senior: resume `thread_id` with a new directive.
+
+        The thread is the whole point. `run_agent_traced` seeds `step_count: 0`
+        on every invoke while `messages` uses the add_messages reducer, so this
+        appends the directive to the senior's existing transcript and hands it a
+        fresh iteration budget — no re-briefing, which is the cost v1.3.0 paid on
+        every replan round.
+        """
+        graph = self._graph_for(technique, max_iter)
+        return self._run("senior", graph, self.senior_model, message, qid, idx,
+                         max_iter=max_iter, thread_id=thread_id)
+
+    def clarify(self, *, thread_id: str, qid: str, idx: int, questions: list,
+                technique: str = "hunter", max_iter: int = 8) -> str:
+        """Answer SH's clarifying questions from the senior's existing context.
+
+        No tools and no round consumed (§3.3): if the senior would have to touch
+        Splunk to answer, the route was a COMMAND, not a CLARIFY. The exchange is
+        written back into the thread so the next round sees it.
+        """
+        graph   = self._graph_for(technique, max_iter)
+        config  = {"configurable": {"thread_id": thread_id}}
+        history = list((graph.get_state(config).values or {}).get("messages", []))
+        ask = HumanMessage(content=(
+            "Your orchestrator has questions about the report you just filed. "
+            "Answer them from what you ALREADY know — do not search, do not call "
+            "any tool. If you genuinely cannot answer without a new query, say so "
+            "in one line and name the query that would settle it.\n\n"
+            + "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))))
+        reply = self._clarify_llm.invoke(
+            [SystemMessage(content="You are the Senior Splunk analyst answering your "
+                                   "orchestrator. Be brief and concrete.")]
+            + history + [ask],
+            config={"callbacks": [self.tracker] if self.tracker else [],
+                    "tags": ["senior", qid],
+                    "metadata": {"role": "senior", "qid": qid, "idx": idx}},
+        )
+        text = (reply.content or "").strip()
+        graph.update_state(config, {"messages": [ask, reply]})
+        return text
+
     def _run(self, role: str, graph, model: str,
              subquestion: str, parent_qid: str, idx: int,
-             max_iter: int = MAX_ITER) -> dict:
-        thread_id  = f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
+             max_iter: int = MAX_ITER, thread_id: str | None = None) -> dict:
+        thread_id  = thread_id or f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
         run_name   = f"{role.capitalize()}-{idx}-{parent_qid}"
         api_failed = False
 
@@ -248,6 +303,8 @@ class SplunkWorkerPool:
             "full_state":  serialize_messages(state),
             "iterations":  steps,
             "cap_hit":     cap_hit,
+            "last_prompt_tokens": (int(state.get("last_prompt_tokens", 0))
+                                   if isinstance(state, dict) else 0),
             # Schema B fields - see finding.py.
             "value":             finding["value"],
             "value_kind":        finding["value_kind"],
