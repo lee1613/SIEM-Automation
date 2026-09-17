@@ -91,6 +91,43 @@ def _normalize_model_name(name: str) -> str:
 
 _NORMALIZED_PRICES = {_normalize_model_name(k): v for k, v in PRICES_PER_1M.items()}
 
+# ── Served context windows ────────────────────────────────────────────────────
+# Same file, same keying, same "verify before each full run" discipline as
+# PRICES_PER_1M — one table to check, not two places to forget.
+#
+# THE RULE: record the window the PROVIDER SERVES, not the one the model card
+# declares. Featherless serves zai-org/GLM-5.3 at 256K against a checkpoint that
+# declares 1 048 576; tools that read the checkpoint value instead of the served
+# one are a known class of bug.
+#
+# ROUND DOWN when unsure. The failure is asymmetric: a window set too low
+# compacts earlier than necessary and wastes a little; a window set too high
+# overflows mid-round, which is a hard failure that costs the whole round.
+#
+# Adding a model? Look its served window up from the provider's own docs at the
+# same moment CLAUDE.md already requires asking for its price. One lookup, two
+# numbers, one table.
+CONTEXT_WINDOW_PER_MODEL: dict[str, int] = {
+    "zai-org/GLM-5.3": 256_000,   # Featherless; checkpoint declares 1 048 576
+    "gpt-5.4":         272_000,   # OpenAI-served input window, per the user (2026-09-17)
+}
+
+DEFAULT_CONTEXT_WINDOW = 128_000   # deliberately conservative — see "round down"
+
+_NORMALIZED_WINDOWS = {_normalize_model_name(k): v
+                       for k, v in CONTEXT_WINDOW_PER_MODEL.items()}
+
+
+def context_window(model: str) -> int:
+    """Served context window for `model`, or the conservative default."""
+    win = (CONTEXT_WINDOW_PER_MODEL.get(model)
+           or _NORMALIZED_WINDOWS.get(_normalize_model_name(model)))
+    if win:
+        return win
+    print(f"[usage] no served context window recorded for {model!r} — assuming "
+          f"{DEFAULT_CONTEXT_WINDOW:,} (round down; see spec §6.1)")
+    return DEFAULT_CONTEXT_WINDOW
+
 
 def _call_cost(model: str, inp: int, cached: int, out: int) -> float:
     """Cost in USD for a single LLM call, accounting for context tier + cache."""
