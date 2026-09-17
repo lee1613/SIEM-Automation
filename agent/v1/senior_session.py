@@ -92,8 +92,8 @@ class SeniorSession:
         self.rounds_used += 1
         round_iterations = int(result.get("iterations", 0))
         self.iterations += round_iterations
-        self.thread_iterations += round_iterations
         self.status = result.get("status", "?")
+        failed = self.status in ("api_failed", "runaway")
 
         # Track original SPL spelling
         for spl in (result.get("spl_used") or []):
@@ -103,39 +103,30 @@ class SeniorSession:
 
         count, self.prior_spl = novel_spl(self.prior_spl, result.get("spl_used") or [])
 
-        # Failed rounds: do not overwrite state but return stamped fallback report
-        if self.status in ("api_failed", "runaway"):
-            body, truncated = truncate_words(self._fallback_report(result))
-            report = stamp_header(body, senior_id=self.sid, qid=self.qid,
-                                  round_n=self.rounds_used,
-                                  rounds_remaining=rounds_remaining,
-                                  novel_spl_count=count)
-            # Don't update last_prompt_tokens or last_report for failed rounds
-            problems = report_violations(report)
-            if truncated:
-                problems.append("report truncated at the word cap")
-            if problems:
-                print(f"[{self.sid}] report template: {'; '.join(problems)}")
-            return {**result, "report": report, "novel_spl_count": count,
-                    "senior_id": self.sid, "round": self.rounds_used}
+        # Only update context and thread iterations on successful rounds
+        if not failed:
+            self.last_prompt_tokens = int(result.get("last_prompt_tokens", 0))
+            self.thread_iterations += round_iterations
 
-        # Successful round: update state
-        self.last_prompt_tokens = int(result.get("last_prompt_tokens", 0))
+        # Single stamping path for both failed and successful rounds
         body, truncated = truncate_words(result.get("report") or self._fallback_report(result))
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,
                               round_n=self.rounds_used,
                               rounds_remaining=rounds_remaining,
                               novel_spl_count=count)
-        self.last_report = report
 
         problems = report_violations(report)
         if truncated:
             problems.append("report truncated at the word cap")
         if problems:
             print(f"[{self.sid}] report template: {'; '.join(problems)}")
-        if should_alert(self.last_prompt_tokens, self.window):
-            print(f"[{self.sid}] context {self.last_prompt_tokens:,} is past "
-                  f"{int(ALERT_AT * 100)}% of {self.window:,}")
+
+        # Only update last_report and alert on successful rounds
+        if not failed:
+            self.last_report = report
+            if should_alert(self.last_prompt_tokens, self.window):
+                print(f"[{self.sid}] context {self.last_prompt_tokens:,} is past "
+                      f"{int(ALERT_AT * 100)}% of {self.window:,}")
 
         return {**result, "report": report, "novel_spl_count": count,
                 "senior_id": self.sid, "round": self.rounds_used}
@@ -157,11 +148,12 @@ class SeniorSession:
         if should_compact(self.last_prompt_tokens,
                           mean_per_iter=self.mean_tokens_per_iteration,
                           window=self.window, iters=self.iters):
+            mean = self.mean_tokens_per_iteration
             self.thread_id = self._new_thread()
             self.thread_iterations = 0
             self.compactions += 1
             print(f"[{self.sid}] compacting: context {self.last_prompt_tokens:,} + "
-                  f"{self.iters}x{self.mean_tokens_per_iteration:,} projected past "
+                  f"{self.iters}x{mean:,} projected past "
                   f"{int(COMPACT_AT * 100)}% of {self.window:,}")
             spl_section = f"## SPL you already ran — do not repeat, go one step further\n{self._render_spl_list()}\n\n"
             return (f"{self.brief}\n\n## Your task\n{self.subquestion}\n\n"

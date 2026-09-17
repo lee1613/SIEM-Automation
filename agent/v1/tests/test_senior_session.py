@@ -167,13 +167,16 @@ def test_failed_round_does_not_overwrite_state():
     first_report = s.last_report
     first_tokens = s.last_prompt_tokens
     assert first_tokens == 1_000
+    first_thread_iters = s.thread_iterations
 
-    # Round 2 fails: api_failed, report empty, tokens 0
-    pool.result.update(status="api_failed", report="", last_prompt_tokens=0, spl_used=[])
+    # Round 2 fails: api_failed, report empty, tokens 0, but has many iterations
+    pool.result.update(status="api_failed", report="", last_prompt_tokens=0, spl_used=[], iterations=8)
     out2 = s.work("b", rounds_remaining=6)
     # State must not change
     assert s.last_report == first_report, "last_report must not be overwritten on api_failed"
     assert s.last_prompt_tokens == first_tokens, "last_prompt_tokens must not be overwritten on api_failed"
+    assert s.thread_iterations == first_thread_iters, "thread_iterations must not increase on failed round"
+    assert s.iterations == first_thread_iters + 8, "cumulative iterations still increases"
     assert s.status == "api_failed"  # but status does update
     assert s.rounds_used == 2  # and round count increases
     # But the returned dict has the stamped fallback
