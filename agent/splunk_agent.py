@@ -151,6 +151,7 @@ class AgentState(TypedDict):
     seen_empty:           list   # [[name, args_str], ...] calls that returned 0 results — reset per question
     step_count:           int    # agent-node calls — reset per question
     output_tokens:        int    # cumulative completion tokens — runaway guard
+    last_prompt_tokens:   int    # prompt size of the most recent call — context-window tracking
     verification_passed:  bool   # set by verify_node, read by after_verify router
     intention_retries:    int    # tracks retries for missing Intention — reset per question
 
@@ -570,11 +571,15 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
 
         um = getattr(response, "usage_metadata", None) or {}
         out_total = state.get("output_tokens", 0) + int(um.get("output_tokens", 0))
+        # The prompt size of the call just made IS this thread's current context
+        # size. v1.3.1 projects a round's growth off it to decide whether to
+        # compact before working (spec §6); nothing else reads it.
+        prompt_tokens = int(um.get("input_tokens", 0))
         if out_total > OUTPUT_TOKEN_CAP:
             print(f"[RUNAWAY] {out_total:,} output tokens > cap {OUTPUT_TOKEN_CAP:,} "
                   "— stopping this worker")
         return {"messages": [response], "step_count": step,
-                "output_tokens": out_total}
+                "output_tokens": out_total, "last_prompt_tokens": prompt_tokens}
 
     # ── Node: verify ───────────────────────────────────────────────────────────
     def verify_node(state: AgentState) -> dict:
@@ -719,6 +724,7 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
             "seen_empty":          [],
             "step_count":          0,
             "output_tokens":       0,
+            "last_prompt_tokens":  0,
             "verification_passed": False,
             "intention_retries":   0,
         },
@@ -762,6 +768,7 @@ def run_agent_traced(graph, question: str, thread_id: str = "default",
             "seen_empty":          [],
             "step_count":          0,
             "output_tokens":       0,
+            "last_prompt_tokens":  0,
             "verification_passed": False,
             "intention_retries":   0,
         },
