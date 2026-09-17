@@ -110,6 +110,11 @@ class SeniorSession:
 
         # Single stamping path for both failed and successful rounds
         body, truncated = truncate_words(result.get("report") or self._fallback_report(result))
+        if round_iterations >= self.iters:
+            # Appended by the runner, after truncation, so SH always sees it: a
+            # capped round's report is where the budget ran out, not a conclusion.
+            body = (body.rstrip() + f"\n\n_Iteration cap reached: {self.iters}/{self.iters} "
+                    "iterations used this round — cut off, not finished._\n")
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,
                               round_n=self.rounds_used,
                               rounds_remaining=rounds_remaining,

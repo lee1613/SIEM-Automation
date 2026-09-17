@@ -215,3 +215,23 @@ def test_fallback_report_renders_with_stamped_header():
         "stamped header must be present even in fallback"
     assert "**Insight:** NOT_FOUND" in out["report"]
     assert "**Candidate:** candidate123" in out["report"]
+
+
+def test_a_round_that_used_every_iteration_says_so_at_the_end_of_its_report():
+    # Q216 smoke test: s1 spent all 8 iterations and SH read a blank report with
+    # no hint that the round was cut off rather than finished.
+    pool = _Pool(iterations=9, cap_hit=True)          # forced-submit path: step 9 > 8
+    out = _session(pool).work("a", rounds_remaining=7)
+    assert out["report"].rstrip().endswith("_Iteration cap reached: 8/8 iterations used "
+                                           "this round — cut off, not finished._")
+
+
+def test_the_cap_note_survives_the_fallback_report():
+    pool = _Pool(report="", iterations=8)
+    out = _session(pool).work("a", rounds_remaining=7)
+    assert "Iteration cap reached: 8/8" in out["report"].splitlines()[-1]
+
+
+def test_a_round_under_the_cap_carries_no_note():
+    out = _session(_Pool(iterations=5)).work("a", rounds_remaining=7)
+    assert "Iteration cap reached" not in out["report"]
