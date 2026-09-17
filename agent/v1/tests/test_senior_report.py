@@ -106,7 +106,7 @@ def test_truncate_words_preserves_newlines_in_multiline_report():
     multiline = "line one\nline two\nline three\n" + " ".join(["word"] * (REPORT_WORD_CAP + 50))
     out, cut = truncate_words(multiline)
     assert cut is True
-    assert "\n" in out  # Newlines are preserved
+    assert out.startswith("line one\nline two\nline three\n")  # Original lines with newlines preserved
     assert "[truncated" in out
 
 
@@ -176,10 +176,37 @@ result
     assert any("Prior rounds" in v for v in violations)
 
 
-def test_prior_rounds_section_with_modified_heading_is_not_checked():
-    """Current implementation misses 'Prior rounds (compressed)' etc; regex fix will catch it."""
-    # This is documenting current behavior; the fix will make violations detected.
-    pass
+def test_prior_rounds_cap_applies_to_a_modified_heading():
+    """Modified headings like '## Prior rounds (compressed)' should still be cap-checked."""
+    report = """# Senior #1 - Q216 - Round 1
+**Scope:** sourcetype=test
+**Insight:** NOT_FOUND
+**Candidate:** none **Confidence:** 20
+
+## This round
+### What I ran
+- query
+### What it means
+result
+
+## Ruled out
+- feed
+
+## Open questions for SH
+- question
+
+## Prior rounds (compressed)
+- Round 1: a.
+- Round 2: b.
+- Round 3: c.
+- Round 4: d.
+- Round 5: e.
+- Round 6: f.
+- Round 7: g.
+- Round 8: h.
+"""
+    violations = report_violations(report)
+    assert any("Prior rounds" in v for v in violations)
 
 
 def test_novel_spl_normalizes_prior_set():
@@ -188,3 +215,37 @@ def test_novel_spl_normalizes_prior_set():
     n, updated = novel_spl(prior, ["index=botsv3 | stats count"])
     assert n == 0  # Same query, even though prior had different case/spacing
     assert updated == {"index=botsv3 | stats count"}  # Normalized
+
+
+def test_prior_rounds_with_h1_line_inside_does_not_end_early():
+    """A # line inside Prior rounds (e.g. in a code fence) should not end the section."""
+    report = """# Senior #1 - Q216 - Round 1
+**Scope:** sourcetype=test
+**Insight:** NOT_FOUND
+**Candidate:** none **Confidence:** 20
+
+## This round
+### What I ran
+- query
+### What it means
+result
+
+## Ruled out
+- feed
+
+## Open questions for SH
+- question
+
+## Prior rounds
+- Round 1: a.
+# note
+- Round 2: b.
+- Round 3: c.
+- Round 4: d.
+- Round 5: e.
+- Round 6: f.
+- Round 7: g.
+- Round 8: h.
+"""
+    violations = report_violations(report)
+    assert any("Prior rounds" in v for v in violations)

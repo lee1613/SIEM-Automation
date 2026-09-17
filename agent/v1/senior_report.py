@@ -59,7 +59,7 @@ def report_violations(md: str) -> list[str]:
     """Template problems worth logging. Advisory: a malformed report is still
     read by SH — the rubric is what judges it."""
     out = [f"missing section {s!r}" for s in REQUIRED_SECTIONS if s not in (md or "")]
-    body = re.search(r"^## Prior rounds[^\n]*$(.*?)(?=^#{1,2} |\Z)", md or "",
+    body = re.search(r"^## Prior rounds[^\n]*$(.*?)(?=^## |\Z)", md or "",
                      re.MULTILINE | re.DOTALL)
     if body:
         lines = [ln for ln in body.group(1).splitlines() if ln.strip()]
