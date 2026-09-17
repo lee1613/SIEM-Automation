@@ -3,7 +3,7 @@
 v1.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
 
   SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
-    -> parallel Senior Splunk workers (gpt-5.4-mini via OpenAI)
+    -> parallel Senior Splunk workers (zai-org/GLM-5.3 via Featherless)
     -> scoreboard (1x)
 
 There is no extractor tier: the joiner's FINAL ANSWER is already the bare
@@ -56,7 +56,11 @@ from usage_tracker import UsageTracker
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL         = "gpt-5.4"
-SENIOR_MODEL     = "gpt-5.4-mini"
+# The Senior default is GLM-5.3 on Featherless. The three values move together:
+# changing the model alone would send `zai-org/GLM-5.3` to OpenAI.
+SENIOR_MODEL       = "zai-org/GLM-5.3"
+SENIOR_BASE_URL    = "https://api.featherless.ai/v1"
+SENIOR_API_KEY_ENV = "FEATHERLESS_API_KEY"
 DUAL_TRACK_MIN_POINTS = 1000   # C2: 1000-pt questions get two orthogonal plan tracks
 
 load_dotenv(os.path.join(AGENT_DIR, ".env"))
@@ -215,12 +219,12 @@ def main():
     parser.add_argument("--start", default=None, help="Resume a full run from this question id.")
     parser.add_argument("--senior-model", default=None,
                         help="Override the Senior worker model (e.g. openai/gpt-oss-120b).")
-    parser.add_argument("--senior-base-url", default=None,
-                        help="Base URL for Senior's API (NIM: https://integrate.api.nvidia.com/v1, "
-                             "Vultr: https://api.vultrinference.com/v1). Omit to use OpenAI.")
-    parser.add_argument("--senior-api-key-env", default="OPENAI_API_KEY",
+    parser.add_argument("--senior-base-url", default=SENIOR_BASE_URL,
+                        help=f"Base URL for Senior's API (default: {SENIOR_BASE_URL}). "
+                             "Pass an empty string to use OpenAI.")
+    parser.add_argument("--senior-api-key-env", default=SENIOR_API_KEY_ENV,
                         help="Name of the env var holding the Senior API key "
-                             "(default: OPENAI_API_KEY for gpt-5.4-mini).")
+                             f"(default: {SENIOR_API_KEY_ENV}; use OPENAI_API_KEY for an OpenAI Senior).")
     parser.add_argument("--run-name", default=None,
                         help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
     parser.add_argument("--recon", action="store_true",
@@ -230,7 +234,7 @@ def main():
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
-    senior_base_url = args.senior_base_url          # None -> OpenAI
+    senior_base_url = args.senior_base_url or None  # "" or None -> OpenAI
     senior_api_key  = os.getenv(args.senior_api_key_env, "")
     nim_api_key     = os.getenv("NIM_API_KEY", "")
 

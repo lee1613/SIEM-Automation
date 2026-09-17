@@ -41,7 +41,8 @@ Install and load Splunk and the BOTSv3 data first; see [the BOTSv3 setup guide](
 
 The runner preflight requires these non-empty values:
 
-- `OPENAI_API_KEY` — SH planner, default GPT-5.4-mini Senior workers, and GPT-5.4 escalation.
+- `OPENAI_API_KEY` — SH planner and GPT-5.4 escalation.
+- `FEATHERLESS_API_KEY` — default `zai-org/GLM-5.3` Senior workers on Featherless. To run an OpenAI Senior instead, pass `--senior-model gpt-5.4-mini --senior-base-url "" --senior-api-key-env OPENAI_API_KEY`.
 - `NIM_API_KEY` — Llama 3.3 Extractor on NVIDIA NIM.
 - `SPLUNK_PASS` — local Splunk authentication.
 
