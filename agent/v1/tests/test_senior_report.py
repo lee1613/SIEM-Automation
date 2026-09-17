@@ -99,3 +99,92 @@ def test_stamping_an_empty_report_still_produces_a_header():
     out = stamp_header("", senior_id="s2", qid="Q999", round_n=1,
                        rounds_remaining=0, novel_spl_count=0)
     assert out.startswith("# s2 - Q999 - Round 1")
+
+
+def test_truncate_words_preserves_newlines_in_multiline_report():
+    """Truncation should preserve original whitespace, not join all words."""
+    multiline = "line one\nline two\nline three\n" + " ".join(["word"] * (REPORT_WORD_CAP + 50))
+    out, cut = truncate_words(multiline)
+    assert cut is True
+    assert "\n" in out  # Newlines are preserved
+    assert "[truncated" in out
+
+
+def test_truncate_then_stamp_preserves_sections():
+    """Integration test: truncate then stamp should not lose report structure."""
+    long_report = GOOD + " " + " ".join(["filler"] * 420)
+    truncated, _ = truncate_words(long_report)
+    stamped = stamp_header(truncated, senior_id="s1", qid="Q216", round_n=1,
+                          rounds_remaining=5, novel_spl_count=2)
+    assert "## Prior rounds" in stamped
+    assert "## Ruled out" in stamped
+
+
+def test_stamp_header_removes_title_anywhere_in_body():
+    """Title line matching ^# can appear anywhere, not just at position 0."""
+    report_with_preamble = "Here is my report:\n# Senior #1 - Q216 - Round 1\n## Prior rounds\nfoo"
+    out = stamp_header(report_with_preamble, senior_id="s1", qid="Q216", round_n=2,
+                      rounds_remaining=5, novel_spl_count=1)
+    assert "# Senior #1 - Q216 - Round 1" not in out  # Old title removed
+    assert "Here is my report:" in out  # Preamble preserved
+    assert out.splitlines()[0].startswith("# s1 - Q216 - Round 2")  # New title first
+
+
+def test_stamp_header_removes_prior_runner_stamps():
+    """Any prior _stamped by runner: line should be removed."""
+    old_stamp = """# s1 - Q216 - Round 1
+_stamped by runner: rounds_remaining=5 novel_spl=0_
+## Prior rounds
+content"""
+    out = stamp_header(old_stamp, senior_id="s1", qid="Q216", round_n=2,
+                      rounds_remaining=5, novel_spl_count=2)
+    assert "_stamped by runner: rounds_remaining=5 novel_spl=0_" not in out
+    assert "rounds_remaining=5" in out  # New stamp is there
+    assert "novel_spl=2" in out
+
+
+def test_report_violations_checks_prior_rounds_even_at_end():
+    """Prior rounds section can appear last; cap should still be checked."""
+    report = """# Senior #1 - Q216 - Round 1
+**Scope:** sourcetype=test
+**Insight:** NOT_FOUND
+**Candidate:** none **Confidence:** 20
+
+## This round
+### What I ran
+- query
+### What it means
+result
+
+## Ruled out
+- feed
+
+## Open questions for SH
+- question
+
+## Prior rounds
+- Round 1: a.
+- Round 2: b.
+- Round 3: c.
+- Round 4: d.
+- Round 5: e.
+- Round 6: f.
+- Round 7: g.
+- Round 8: h.
+"""
+    violations = report_violations(report)
+    assert any("Prior rounds" in v for v in violations)
+
+
+def test_prior_rounds_section_with_modified_heading_is_not_checked():
+    """Current implementation misses 'Prior rounds (compressed)' etc; regex fix will catch it."""
+    # This is documenting current behavior; the fix will make violations detected.
+    pass
+
+
+def test_novel_spl_normalizes_prior_set():
+    """Prior set should be normalized even if passed in unnormalized."""
+    prior = {"Index=botsv3  | stats count"}
+    n, updated = novel_spl(prior, ["index=botsv3 | stats count"])
+    assert n == 0  # Same query, even though prior had different case/spacing
+    assert updated == {"index=botsv3 | stats count"}  # Normalized

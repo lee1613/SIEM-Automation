@@ -40,7 +40,7 @@ def _norm_query(q: str) -> str:
 def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
     """How many queries this round this senior had not already run, and the
     updated seen-set. Diffed against ALL of its prior rounds, not just the last."""
-    seen = set(prior)
+    seen = {_norm_query(q) for q in prior}
     fresh = {_norm_query(q) for q in (spl_used or []) if _norm_query(q)}
     new = fresh - seen
     return len(new), seen | fresh
@@ -49,17 +49,17 @@ def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
 def truncate_words(text: str, cap: int = REPORT_WORD_CAP) -> tuple[str, bool]:
     """Cut a report at the word cap. `value`/`confidence` are separate schema
     fields, so truncating the prose never touches the answer (§8)."""
-    words = (text or "").split()
-    if len(words) <= cap:
+    m = list(re.finditer(r"\S+", text or ""))
+    if len(m) <= cap:
         return text or "", False
-    return " ".join(words[:cap]) + f"\n\n_[truncated at {cap} words]_", True
+    return text[:m[cap - 1].end()] + f"\n\n_[truncated at {cap} words]_", True
 
 
 def report_violations(md: str) -> list[str]:
     """Template problems worth logging. Advisory: a malformed report is still
     read by SH — the rubric is what judges it."""
     out = [f"missing section {s!r}" for s in REQUIRED_SECTIONS if s not in (md or "")]
-    body = re.search(r"^## Prior rounds\s*$(.*?)^## ", md or "",
+    body = re.search(r"^## Prior rounds[^\n]*$(.*?)(?=^#{1,2} |\Z)", md or "",
                      re.MULTILINE | re.DOTALL)
     if body:
         lines = [ln for ln in body.group(1).splitlines() if ln.strip()]
@@ -74,9 +74,19 @@ def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
     """Replace whatever title the senior wrote with the runner's own, and add the
     three fields the senior is not allowed to self-report."""
     body = (md or "").lstrip()
-    if body.startswith("# "):
-        body = body.split("\n", 1)[1] if "\n" in body else ""
+    # Remove the FIRST line matching ^# (senior's title) and any prior _stamped by runner: line
+    lines = body.splitlines(keepends=True)
+    filtered = []
+    title_removed = False
+    for line in lines:
+        if not title_removed and re.match(r"^# ", line):
+            title_removed = True
+            continue
+        if re.match(r"^_stamped by runner:", line):
+            continue
+        filtered.append(line)
+    body = "".join(filtered).lstrip("\n")
     head = (f"# {senior_id} - {qid} - Round {round_n}\n"
             f"_stamped by runner: rounds_remaining={rounds_remaining} "
             f"novel_spl={novel_spl_count}_\n")
-    return head + body.lstrip("\n")
+    return head + body
