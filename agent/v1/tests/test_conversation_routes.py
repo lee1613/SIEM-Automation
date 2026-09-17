@@ -1,8 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from conversation import (BASES, SeniorDirective, SHTurn, answer_blocked,
-                          directive_violations, effective_r2, grade_violations)
+from conversation import (BASES, ROUTES, TECHNIQUES, SeniorDirective, SHTurn,
+                          answer_blocked, directive_violations, effective_r2,
+                          grade_violations)
 from question_state import QuestionState
 
 BLANK = {
@@ -50,6 +51,18 @@ def test_critic_requires_a_flaw():
               flaw="", why_it_fails="w", fix_directive="f")
 
 
+def test_critic_requires_why_it_fails():
+    with pytest.raises(ValidationError):
+        entry(senior_id="s1", route="CRITIC", basis="shape_mismatch",
+              flaw="f", why_it_fails="", fix_directive="d")
+
+
+def test_critic_requires_a_fix_directive():
+    with pytest.raises(ValidationError):
+        entry(senior_id="s1", route="CRITIC", basis="shape_mismatch",
+              flaw="f", why_it_fails="w", fix_directive="")
+
+
 def test_critic_rejects_a_basis_outside_the_five():
     with pytest.raises(ValidationError):
         entry(senior_id="s1", route="CRITIC", basis="other",
@@ -61,6 +74,27 @@ def test_every_documented_basis_is_accepted():
         e = entry(senior_id="s1", route="CRITIC", basis=b, flaw="f",
                   why_it_fails="w", fix_directive="d")
         assert e.basis == b
+
+
+def test_routes_and_techniques_tuples_match_the_literals():
+    for r in ROUTES:
+        entry(senior_id="s1", route=r, reason="x", directive="x", decision="continue",
+              rationale="x", basis=BASES[0], flaw="f", why_it_fails="w", fix_directive="d",
+              clarify_reason="unclear", questions=["q"], spawn_type="senior",
+              technique="hunter", subquestion="s", value="v", source_senior="s1",
+              justification="j")
+    for t in TECHNIQUES:
+        e = entry(route="SPAWN", spawn_type="senior", technique=t,
+                  subquestion="s", reason="r")
+        assert e.technique == t
+
+
+def test_a_route_requiring_senior_id_rejects_a_blank_one():
+    for r in ("COMMAND", "CRITIC", "CLARIFY", "RETIRE"):
+        with pytest.raises(ValidationError):
+            entry(senior_id="", route=r, reason="x", directive="x", decision="continue",
+                  rationale="x", basis=BASES[0], flaw="f", why_it_fails="w",
+                  fix_directive="d", clarify_reason="unclear", questions=["q"])
 
 
 def test_clarify_needs_a_reason_and_one_to_three_questions():
@@ -100,6 +134,8 @@ def test_answer_needs_a_value_and_a_source():
     assert e.value == "199.66.91.253"
     with pytest.raises(ValidationError):
         entry(route="ANSWER", value="", source_senior="s1", justification="j")
+    with pytest.raises(ValidationError):
+        entry(route="ANSWER", value="v", source_senior="", justification="j")
 
 
 def test_a_turn_is_a_reading_plus_entries():
@@ -191,6 +227,13 @@ def test_a_second_exploration_is_refused_and_costs_no_slot():
     e = entry(route="SPAWN", spawn_type="exploration", subquestion="s", reason="r")
     assert directive_violations([e], st) != []
     assert st.spawns_used == 0
+
+
+def test_two_explorations_in_one_turn_are_refused_even_from_a_fresh_state():
+    st = QuestionState(points=1000)          # nothing committed yet
+    e1 = entry(route="SPAWN", spawn_type="exploration", subquestion="s1", reason="r")
+    e2 = entry(route="SPAWN", spawn_type="exploration", subquestion="s2", reason="r")
+    assert directive_violations([e1, e2], st) != []
 
 
 def test_answer_with_r1_fail_is_refused_at_turn_level():

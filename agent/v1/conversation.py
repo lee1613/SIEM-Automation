@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+from question_state import MAX_EXPLORATIONS, QuestionState
 
 GRADES = ("PASS", "WEAK", "FAIL")
 NA = "NA"
@@ -117,6 +118,15 @@ class SeniorDirective(BaseModel):
         description="ANSWER only. Durable incident facts for the case file, each in the form "
                     "'entity <type> <value>' or 'finding [verified|hypothesis] <claim> | evidence: <spl>'.")
 
+    # Enforces only the fields whose absence would change routing or leave the
+    # entry unactionable: COMMAND's `decision`/`directive`; CRITIC's `basis`/
+    # `flaw`/`why_it_fails`/`fix_directive`; CLARIFY's `clarify_reason`/
+    # `questions`; SPAWN's `spawn_type`/`subquestion`/(senior) `technique`;
+    # RETIRE's `reason`; ANSWER's `value`/`source_senior`. `rationale`, SPAWN's
+    # `reason`, `value_kind`, `justification` and SPAWN's `constraints` are
+    # deliberately left advisory — an unscoped or unexplained spawn is a bad
+    # turn, not a malformed one, and it's the orchestrator's prompt, not this
+    # validator, that has to push SH toward supplying them.
     @model_validator(mode="after")
     def _payload_matches_route(self):
         r = self.route
@@ -186,7 +196,7 @@ def answer_blocked(entry: SeniorDirective) -> bool:
     return entry.route == "ANSWER" and entry.r1_scope_alignment == "FAIL"
 
 
-def grade_violations(entries, *, graded: set, exploration: set) -> list[str]:
+def grade_violations(entries: list[SeniorDirective], *, graded: set, exploration: set) -> list[str]:
     """Grades must be emitted for every senior whose report was read, and never
     for an exploration worker (which structurally cannot produce a value)."""
     out = []
@@ -202,7 +212,7 @@ def grade_violations(entries, *, graded: set, exploration: set) -> list[str]:
     return out
 
 
-def directive_violations(entries, state) -> list[str]:
+def directive_violations(entries: list[SeniorDirective], state: QuestionState) -> list[str]:
     """Turn-level checks against the question's budget and gate history.
 
     Rejected back into another SH turn rather than silently dropped — a COMMAND
@@ -215,7 +225,7 @@ def directive_violations(entries, state) -> list[str]:
                          if e.route == "SPAWN" and e.spawn_type == "exploration")
     if senior_spawns > (state.budget["seniors"] - state.spawns_used):
         out.append(f"only {state.budget['seniors'] - state.spawns_used} senior slot(s) left")
-    if explore_spawns and not state.can_spawn_exploration():
+    if explore_spawns > (MAX_EXPLORATIONS - state.explorations_used):
         out.append("exploration already used on this question")
 
     for e in entries:
