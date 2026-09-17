@@ -8,8 +8,11 @@ tools, Intention protocol) with two additions:
   - the submit_finding contract: the worker reports via a terminal tool call whose
     arguments are the schema, never as prose (see finding.py)
 
-Each delegated task runs in a FRESH session (new thread_id, no cross-task memory). The
-worker's full state is returned for the run summary JSON and for LangSmith tracing.
+Worker graphs are built lazily and cached by (role, iteration cap): a task either
+starts a FRESH session (new thread_id, `run_senior`) or resumes a live senior's own
+thread_id with a new directive (`run_round`), consuming another round against the
+same graph. The worker's full state is returned for the run summary JSON and for
+LangSmith tracing.
 
 Per-step traces (LLM calls, tool calls) are sent to LangSmith automatically via
 LANGCHAIN_TRACING_V2. Each worker is tagged with its role, parent qid, and sequential
@@ -17,25 +20,18 @@ index so traces are filterable in the LangSmith UI.
 """
 
 import re
+import threading
 import uuid
 
 import splunk_agent as agent_mod
 from exploration import EXPLORATION_MODEL, build_exploration_agent, render_report, run_exploration
 from finding import _classify_prose, empty_finding, parse_finding, submit_finding
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from llm_errors import describe_llm_error, provider_of, resilient_http_client
 from specialists import SPECIALISTS, parse_specialist_tag
 from splunk_agent import MAX_ITER, iter_budget
 from web_tool import web_lookup
-
-# Points at/above this threshold get the higher-budget worker graph (see
-# splunk_agent.iter_budget). Kept as a local constant so the pool's graph
-# selection reads standalone; iter_budget is the single source of truth for
-# the actual iteration count.
-HIGH_VALUE_THRESHOLD = 500
-
-
 
 FINISH_INSTRUCTIONS = (
     "HOW TO FINISH — call `submit_finding` exactly once, as your final action.\n\n"
@@ -97,7 +93,8 @@ def _classify(answer: str) -> str:
 
 
 class SplunkWorkerPool:
-    """Builds worker graphs once per role and runs fresh-session tasks on demand."""
+    """Builds worker graphs lazily, keyed by (role, iteration cap), and runs
+    fresh-session tasks or resumable rounds against them on demand."""
 
     def __init__(self, splunk, *, senior_api_key: str, senior_model: str = "gpt-5.4",
                  senior_base_url: str | None = None, tracker=None,
@@ -126,28 +123,39 @@ class SplunkWorkerPool:
         # one round (8 iterations) — and building nine eagerly would pay for
         # graphs a given run never uses.
         self._graphs: dict = {}
+        # Guards check-and-build below: two senior threads racing the same
+        # (role, cap) key would otherwise each build a graph (each with its own
+        # MemorySaver) and the loser's graph — and any thread_id already run
+        # against it — is gone from self._graphs after the winner overwrites it.
+        self._graphs_lock = threading.Lock()
 
         # A CLARIFY reply is answered from what the senior already holds: no
         # tools, no Splunk, no round consumed (§3.3). So it is a bare model call
-        # over the thread's history, not a graph invocation.
+        # over the thread's history, not a graph invocation. Same token budget
+        # and transport settings as a worker graph's own LLM (see create_agent)
+        # — a reasoning model (GLM-5.3 is the default senior) can spend a
+        # tighter budget entirely on hidden reasoning and return "".
         self._clarify_llm = ChatOpenAI(
             api_key=senior_api_key, model=senior_model, base_url=senior_base_url,
-            temperature=0, max_completion_tokens=1024, http_client=self._http)
+            temperature=0, max_completion_tokens=16384, http_client=self._http,
+            timeout=agent_mod.LLM_TIMEOUT_S, max_retries=agent_mod.LLM_MAX_RETRIES)
 
     def _graph_for(self, role: str, cap: int):
         """The worker graph for this specialist role at this iteration cap."""
         key = (role, cap)
         if key not in self._graphs:
-            extra = SPECIALISTS.get(role, "")
-            instructions = FINISH_INSTRUCTIONS + ("\n\n" + extra if extra else "")
-            self._graphs[key], _ = agent_mod.create_agent(
-                self._senior_api_key, self.splunk,
-                model=self.senior_model, base_url=self.senior_base_url,
-                http_client=self._http,
-                extra_instructions=instructions,
-                extra_tools=[web_lookup, submit_finding],
-                max_iter=cap,
-            )
+            with self._graphs_lock:
+                if key not in self._graphs:  # re-check: lost the race while waiting
+                    extra = SPECIALISTS.get(role, "")
+                    instructions = FINISH_INSTRUCTIONS + ("\n\n" + extra if extra else "")
+                    self._graphs[key], _ = agent_mod.create_agent(
+                        self._senior_api_key, self.splunk,
+                        model=self.senior_model, base_url=self.senior_base_url,
+                        http_client=self._http,
+                        extra_instructions=instructions,
+                        extra_tools=[web_lookup, submit_finding],
+                        max_iter=cap,
+                    )
         return self._graphs[key]
 
     def run_senior(self, subquestion: str, parent_qid: str, idx: int,
@@ -199,6 +207,11 @@ class SplunkWorkerPool:
         appends the directive to the senior's existing transcript and hands it a
         fresh iteration budget — no re-briefing, which is the cost v1.3.0 paid on
         every replan round.
+
+        A given senior must call this with the SAME (technique, max_iter) on
+        every round: its thread_id lives inside the graph built for that
+        (role, cap) key's checkpointer, so resuming it against a different cap
+        resumes a graph that has never seen this thread_id.
         """
         graph = self._graph_for(technique, max_iter)
         return self._run("senior", graph, self.senior_model, message, qid, idx,
@@ -239,6 +252,18 @@ class SplunkWorkerPool:
         thread_id  = thread_id or f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
         run_name   = f"{role.capitalize()}-{idx}-{parent_qid}"
         api_failed = False
+        cfg        = {"configurable": {"thread_id": thread_id}}
+
+        # A resumed thread already holds every prior round's messages. Only the
+        # ones THIS invoke appends belong to this round - record how many exist
+        # before invoking so they can be sliced off below. 0 for a fresh thread,
+        # a graph with no checkpointer (the exploration graph, a test double)
+        # or a thread that has never been invoked.
+        before = 0
+        if hasattr(graph, "get_state"):
+            snap   = graph.get_state(cfg)
+            values = getattr(snap, "values", None) or {}
+            before = len(values.get("messages", []))
 
         try:
             answer, state = agent_mod.run_agent_traced(
@@ -260,7 +285,16 @@ class SplunkWorkerPool:
 
         print(f"\n[WORKER RESULT] {run_name}: {answer[:200]}")
 
-        spl_used, sourcetypes = extract_spl_and_sourcetypes(state)
+        # This round's messages only - see `before` above. Everything downstream
+        # (the finding, the SPL/sourcetypes it used, the serialized transcript)
+        # reads round_state instead of the full accumulated thread, or a round
+        # that ends without submit_finding would report the PRIOR round's value.
+        all_msgs   = state.get("messages", []) if isinstance(state, dict) else []
+        round_msgs = all_msgs[before:]
+        round_state = dict(state) if isinstance(state, dict) else {}
+        round_state["messages"] = round_msgs
+
+        spl_used, sourcetypes = extract_spl_and_sourcetypes(round_state)
         # A provider outage is not a reasoning outcome. Without this the crash
         # text ("worker crashed - ...") would classify as an ordinary give-up
         # like an honest give-up, and SH responds to an outage by decomposing the
@@ -282,12 +316,29 @@ class SplunkWorkerPool:
             status  = "api_failed" if api_failed else "runaway"
             finding = empty_finding(status)
         else:
-            msgs    = state.get("messages") if isinstance(state, dict) else []
-            finding = parse_finding(msgs, answer)
+            finding = parse_finding(round_msgs, answer)
             status  = finding["status"]
 
         steps   = int(state.get("step_count", 0)) if isinstance(state, dict) else 0
         cap_hit = steps > max_iter
+
+        # The cap (step > max_iter) and runaway (output_tokens > cap) paths both
+        # route should_continue -> END on an AIMessage that still has tool_calls
+        # (the cap's forced final call is made with submit_finding still bound;
+        # runaway can hit mid-ordinary-turn). That leaves the thread ending in a
+        # tool_calls message with no matching ToolMessage, which OpenAI rejects
+        # on any later call against this thread (the next clarify or round). Close
+        # them here - skipped when the graph has no checkpointer to update (an
+        # api_failed run never reached the graph; the exploration graph and test
+        # doubles have no update_state).
+        if not api_failed and hasattr(graph, "update_state"):
+            last = round_msgs[-1] if round_msgs else None
+            tool_calls = getattr(last, "tool_calls", None) if last is not None else None
+            if tool_calls:
+                closes = [ToolMessage(content="Finding recorded.",
+                                      tool_call_id=tc["id"], name=tc["name"])
+                         for tc in tool_calls]
+                graph.update_state(cfg, {"messages": closes}, as_node="agent")
 
         return {
             "role":        role,
@@ -300,7 +351,7 @@ class SplunkWorkerPool:
             "status":      status,
             "spl_used":    spl_used,
             "sourcetypes": sourcetypes,
-            "full_state":  serialize_messages(state),
+            "full_state":  serialize_messages(round_state),
             "iterations":  steps,
             "cap_hit":     cap_hit,
             "last_prompt_tokens": (int(state.get("last_prompt_tokens", 0))

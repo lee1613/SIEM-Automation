@@ -1,4 +1,5 @@
 import inspect
+import threading
 from types import SimpleNamespace
 
 from splunk_subagent import SplunkWorkerPool
@@ -31,6 +32,7 @@ def _pool_without_graphs() -> SplunkWorkerPool:
     pool._senior_api_key = "test"
     pool._http = None
     pool._graphs = {}
+    pool._graphs_lock = threading.Lock()
     pool._clarify_llm = None
     pool.exploration_graph = None
     pool.exploration_budget = {"content_scans": 0}
@@ -87,3 +89,128 @@ def test_clarify_never_touches_a_tool():
     src = inspect.getsource(SplunkWorkerPool.clarify)
     assert "bind_tools" not in src and "run_agent_traced" not in src, \
         "a clarify reply must be answerable from memory alone — no tools, no round"
+
+
+# ── review fixes ──────────────────────────────────────────────────────────────
+
+
+class _StatefulRecorder:
+    """A graph double that, unlike _Recorder, actually threads state across
+    calls the way a real MemorySaver-backed graph does: get_state sees what a
+    prior invoke (or update_state) appended, and invoke appends to the same
+    running transcript instead of returning one fixed snapshot."""
+
+    def __init__(self, prior_messages=None):
+        self.messages = list(prior_messages or [])
+        self.calls = []
+        self.state_updates = []
+        # what the *next* invoke() appends, and the step/token counts it reports
+        self.next_new_messages = []
+        self.next_step_count = 1
+        self.next_output_tokens = 0
+        self.next_last_prompt_tokens = 0
+
+    def get_state(self, config):
+        return SimpleNamespace(values={"messages": list(self.messages)})
+
+    def update_state(self, config, values, as_node=None):
+        self.state_updates.append({"config": config, "values": values, "as_node": as_node})
+        self.messages.extend(values.get("messages", []))
+
+    def invoke(self, payload, config=None):
+        self.calls.append((payload, config))
+        self.messages.extend(self.next_new_messages)
+        return {"messages": list(self.messages), "step_count": self.next_step_count,
+                "output_tokens": self.next_output_tokens,
+                "last_prompt_tokens": self.next_last_prompt_tokens}
+
+
+def test_a_round_ending_on_a_dangling_tool_call_is_closed_before_return():
+    """Cap/runaway routes should_continue -> END on an AIMessage that still has
+    tool_calls (should_continue only checks step/token count, not whether the
+    call was ever executed). Left open, the next round's invoke sends that
+    dangling tool_calls message straight back to the provider with no matching
+    ToolMessage, which OpenAI rejects outright."""
+    dangling = SimpleNamespace(
+        content="", tool_calls=[{"id": "call_abc", "name": "submit_finding",
+                                 "args": {"status": "partial"}}])
+    rec = _StatefulRecorder()
+    rec.next_new_messages = [dangling]
+    pool = _pool_without_graphs()
+    pool._graphs[("hunter", 8)] = rec
+
+    pool.run_round(thread_id="t", message="d", qid="Q216", idx=1,
+                   technique="hunter", max_iter=8)
+
+    assert rec.state_updates, "a thread left on a dangling tool call must be closed"
+    update = rec.state_updates[-1]
+    assert update["as_node"] == "agent"
+    closes = update["values"]["messages"]
+    assert len(closes) == 1
+    assert closes[0].tool_call_id == "call_abc"
+    assert closes[0].name == "submit_finding"
+
+
+def test_a_round_with_no_dangling_tool_call_does_not_touch_state():
+    finished = SimpleNamespace(content="done", tool_calls=None)
+    rec = _StatefulRecorder()
+    rec.next_new_messages = [finished]
+    pool = _pool_without_graphs()
+    pool._graphs[("hunter", 8)] = rec
+
+    pool.run_round(thread_id="t", message="d", qid="Q216", idx=1,
+                   technique="hunter", max_iter=8)
+
+    assert rec.state_updates == []
+
+
+def test_a_round_that_ends_without_submit_finding_ignores_the_prior_rounds_value():
+    """Round 1 finished with submit_finding(value='ROUND1') and a
+    run_splunk_search call. Round 2's invoke appends only prose - no
+    submit_finding. Reported value/insight/spl_used must come from round 2
+    alone, not from the thread's accumulated history."""
+    round1_search = SimpleNamespace(
+        content="", tool_calls=[{"id": "s1", "name": "run_splunk_search",
+                                 "args": {"query": "index=botsv3 sourcetype=round1_st | stats count"}}])
+    round1_finding = SimpleNamespace(
+        content="", tool_calls=[{"id": "f1", "name": "submit_finding",
+                                 "args": {"status": "solved", "value": "ROUND1",
+                                          "insight": "FOUND"}}])
+    rec = _StatefulRecorder(prior_messages=[round1_search, round1_finding])
+    rec.next_new_messages = [SimpleNamespace(content="still looking", tool_calls=None)]
+    pool = _pool_without_graphs()
+    pool._graphs[("hunter", 8)] = rec
+
+    out = pool.run_round(thread_id="t", message="round 2 directive", qid="Q216",
+                         idx=1, technique="hunter", max_iter=8)
+
+    assert out["value"] == "", "round 2 must not inherit round 1's value"
+    assert out["insight"] == "NOT_FOUND"
+    assert out["spl_used"] == [], "round 2 must not inherit round 1's SPL queries"
+    assert out["full_state"] == [
+        {"type": "SimpleNamespace", "content": "still looking"}
+    ], "full_state must hold only this round's messages"
+
+
+def test_graph_for_builds_under_a_lock_so_concurrent_callers_cannot_double_build():
+    src = inspect.getsource(SplunkWorkerPool._graph_for)
+    assert "_graphs_lock" in src, \
+        "two threads racing the same (role, cap) key must not each build a graph"
+
+
+def test_clarify_llm_uses_the_full_worker_token_budget_and_transport_settings():
+    """splunk_agent.py documents that a reasoning model (GLM-5.3, the default
+    senior) can spend a tight completion-token budget entirely on hidden
+    reasoning and return "" — workers get 16384 for exactly this reason. The
+    clarify LLM must match, plus have the same timeout/retry budget as every
+    other LLM call in the pipeline instead of relying on SDK defaults (600s)."""
+    src = inspect.getsource(SplunkWorkerPool.__init__)
+    assert "max_completion_tokens=16384" in src
+    assert "timeout=agent_mod.LLM_TIMEOUT_S" in src
+    assert "max_retries=agent_mod.LLM_MAX_RETRIES" in src
+
+
+def test_high_value_threshold_constant_is_gone():
+    import splunk_subagent
+    assert not hasattr(splunk_subagent, "HIGH_VALUE_THRESHOLD"), \
+        "iter_budget is the single source of truth for the iteration count"
