@@ -27,7 +27,7 @@ workers per wave, matching `SplunkConnectionPool`'s six connections.
 Two kinds of worker, both fresh-session (new `thread_id`, no cross-task memory) so one
 task's assumptions cannot contaminate another.
 
-**Senior** (GPT-5.4-mini) runs the actual investigation. Six pre-built graphs: three
+**Senior** (`zai-org/GLM-5.3` on Featherless) runs the actual investigation. Six pre-built graphs: three
 specialist prompts (`hunter` / `content` / `metrics`, in `agent/v1/specialists.py`) × two
 iteration budgets (`iter_budget` gives 25 iterations at ≥500 points, `MAX_ITER` otherwise).
 Tools are the seven Splunk ones in `agent/splunk_agent.py` — `run_splunk_search`,
@@ -59,7 +59,7 @@ six workers, so a 40s scan holds a slot for its whole duration.
 flowchart TD
     Q[BOTSv3 question] --> SH[SH planner — GPT-5.4<br/>strict json_schema Plan]
     B[(botsv3_fields.json<br/>102 sourcetypes + top 100 sources)] -.briefing.-> SH
-    SH -->|spawn_type=senior| W[Senior worker pool<br/>GPT-5.4-mini, up to 6 parallel]
+    SH -->|spawn_type=senior| W[Senior worker pool<br/>GLM-5.3, up to 6 parallel]
     SH -->|spawn_type=exploration| E[Exploration worker<br/>cheap NIM — finds WHICH feed]
     E -->|source_types, sources, insights| W
     W -->|submit_finding tool call| P[parse_finding<br/>shape + status guards]
