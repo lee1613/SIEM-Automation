@@ -119,7 +119,8 @@ class SeniorDirective(BaseModel):
                     "'entity <type> <value>' or 'finding [verified|hypothesis] <claim> | evidence: <spl>'.")
 
     # Enforces only the fields whose absence would change routing or leave the
-    # entry unactionable: COMMAND's `decision`/`directive`; CRITIC's `basis`/
+    # entry unactionable: `senior_id` for every route aimed at an existing senior
+    # (COMMAND/CRITIC/CLARIFY/RETIRE); COMMAND's `decision`/`directive`; CRITIC's `basis`/
     # `flaw`/`why_it_fails`/`fix_directive`; CLARIFY's `clarify_reason`/
     # `questions`; SPAWN's `spawn_type`/`subquestion`/(senior) `technique`;
     # RETIRE's `reason`; ANSWER's `value`/`source_senior`. `rationale`, SPAWN's
