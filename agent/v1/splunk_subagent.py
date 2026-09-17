@@ -257,4 +257,6 @@ class SplunkWorkerPool:
             "negative_findings": finding["negative_findings"],
             "notes":             finding["notes"],
             "structured":        finding["structured"],
+            "insight":           finding["insight"],
+            "report":            finding["report"],
         }

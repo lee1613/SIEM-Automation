@@ -84,7 +84,8 @@ def answer_shaped(value: str) -> bool:
 def submit_finding(status: str, value: str = "", value_kind: str = "",
                    evidence: str = "", confidence: int = 50,
                    sourcetypes_used: str = "", sources_used: str = "",
-                   ruled_out: str = "", notes: str = "") -> str:
+                   ruled_out: str = "", notes: str = "",
+                   insight: str = "", report: str = "") -> str:
     """Finish the task. Call this EXACTLY ONCE, as your final action.
 
     Every other tool gathers evidence; this one reports it. Do not write a prose
@@ -124,6 +125,12 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
       time window you narrowed, a host worth pivoting on, why a candidate could
       not be confirmed. A "partial" with no clean value belongs here, and the
       orchestrator reads it to plan the next round.
+    - insight: "FOUND" or "NOT_FOUND". This is the routing enum your orchestrator
+      reads first: FOUND means you hold a candidate for the question as asked;
+      NOT_FOUND means this scope does not contain it, and you can say why.
+    - report: your round report in markdown, following the template you were given
+      at spawn. ~400 words maximum. REWRITE the "Prior rounds" section each round
+      instead of appending to it - six lines total, covering every prior round.
     """
     return "Finding recorded. Stop here - do not call any further tools."
 
@@ -179,6 +186,8 @@ def empty_finding(status: str = "failed") -> dict:
         "negative_findings": [],
         "notes":             "",
         "structured":        False,
+        "insight":           "NOT_FOUND",
+        "report":            "",
     }
 
 
@@ -229,6 +238,16 @@ def parse_finding(messages: list, answer: str) -> dict:
             and confidence < SOLVED_MIN_CONFIDENCE:
         status = "partial"
 
+    # `insight` is the routing enum SH reads first. A worker that omitted it, or
+    # wrote something outside the two legal values, is classified the way the
+    # ledger already classifies it: a committed, submittable value is FOUND.
+    insight = str(args.get("insight", "")).strip().upper().replace(" ", "_")
+    if insight not in ("FOUND", "NOT_FOUND"):
+        insight = "FOUND" if value else "NOT_FOUND"
+    if not value:
+        # A value demoted to `notes` above leaves no candidate to route on.
+        insight = "NOT_FOUND"
+
     return {
         "status":     status,
         "value":      value,
@@ -242,4 +261,6 @@ def parse_finding(messages: list, answer: str) -> dict:
         "negative_findings": _split(args.get("ruled_out", "")),
         "notes":      notes,
         "structured": True,
+        "insight":    insight,
+        "report":     str(args.get("report", "")).strip(),
     }
