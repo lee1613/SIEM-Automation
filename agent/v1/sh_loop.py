@@ -15,6 +15,23 @@ cross-question memory. Writing SPL genuinely is not.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
+
+from case_file import parse_case_updates
+from conversation import directive_violations, effective_r2, grade_violations
+from conversation_log import ConversationLog
+from grounding import best_candidate, is_grounded
+from hitl import ABORT, RunPaused, resolve_interrupt
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from llm_errors import describe_llm_error
+from question_state import ROUND_ITERS, QuestionState
+from senior_session import SeniorSession
+from usage_tracker import context_window
+
+MAX_PARALLEL = 6          # matches SplunkConnectionPool's default size
+
 SH_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 security investigation (an August 2018 APT attack against Frothly; all data is in Splunk index=botsv3).
 
 THE BOUNDARY RULE — this is the rule the whole design rests on.
@@ -147,3 +164,382 @@ def render_rejection(violations: list) -> str:
             + "\n".join(f"- {v}" for v in violations)
             + "\nRe-issue this turn with those problems fixed. You do not get the "
               "turn back, so fix all of them at once.")
+
+
+class _Interrupt:
+    """resolve_interrupt() reads `.value` off a LangGraph interrupt. The loop is
+    not a graph, so it hands over the same shape rather than growing a graph just
+    to reach the existing HITL front-end."""
+
+    def __init__(self, value: dict):
+        self.value = value
+
+
+def _render_turn(turn) -> str:
+    """SH's own turn, as text, so the persistent message history carries it.
+
+    Cross-question memory is a list of messages and a pydantic object is not a
+    message — the same reason `render_plan_text` exists for the compiler loop.
+    """
+    rows = [f"Reading: {turn.reading}"]
+    for e in turn.entries:
+        target = e.senior_id or (e.source_senior if e.route == "ANSWER" else "(new)")
+        head = (f"[{e.route}] {target}  "
+                f"R1={e.r1_scope_alignment} R2={e.r2_progress} R3={e.r3_answer_readiness}")
+        detail = {
+            "SPAWN":   lambda: f"{e.spawn_type}/{e.technique}: {e.subquestion}  ({e.reason})",
+            "RETIRE":  lambda: e.reason,
+            "COMMAND": lambda: f"{e.decision}: {e.directive}  ({e.rationale})",
+            "CRITIC":  lambda: f"{e.basis}: {e.flaw} -> {e.fix_directive}",
+            "CLARIFY": lambda: f"{e.clarify_reason}: " + " | ".join(e.questions),
+            "ANSWER":  lambda: f"{e.value} ({e.value_kind}) — {e.justification}",
+        }[e.route]()
+        rows.append(head + "\n    " + detail)
+    return "\n".join(rows)
+
+
+def _entry_body(e) -> str:
+    """The conversation.md rendering of one route."""
+    if e.route == "SPAWN":
+        c = e.constraints
+        return (f"**Constraints:** sourcetypes={c.sourcetypes or '-'} "
+                f"sources={c.sources or '-'} fields={c.fields or '-'}\n"
+                f"**Technique:** {e.technique or e.spawn_type}\n"
+                f"**Reason:** {e.reason}\n\n{e.subquestion}")
+    if e.route == "COMMAND":
+        scope = "" if e.scope_change.is_empty() else f"\n**New scope:** {e.scope_change}"
+        return f"**{e.decision}** — {e.rationale}{scope}\n\n{e.directive}"
+    if e.route == "CRITIC":
+        scope = "" if e.scope_change.is_empty() else f"\n**New scope:** {e.scope_change}"
+        return (f"**Basis:** {e.basis}\n**Flaw:** {e.flaw}\n"
+                f"**Why it fails:** {e.why_it_fails}{scope}\n\n{e.fix_directive}")
+    if e.route == "CLARIFY":
+        return (f"**{e.clarify_reason}**\n"
+                + "\n".join(f"{i}. {q}" for i, q in enumerate(e.questions, start=1)))
+    if e.route == "RETIRE":
+        return e.reason
+    return f"**{e.value}** ({e.value_kind}) from {e.source_senior}\n\n{e.justification}"
+
+
+def _directive_text(e) -> str:
+    """What a senior is actually told this round."""
+    if e.route == "COMMAND":
+        scope = ("" if e.scope_change.is_empty()
+                 else f"\nYour scope is now: {e.scope_change}. Work inside it.")
+        return f"[{e.decision.upper()}] {e.rationale}\n\n{e.directive}{scope}"
+    scope = ("" if e.scope_change.is_empty()
+             else f"\nYour scope is now: {e.scope_change}. Work inside it.")
+    return (f"[CRITIC — {e.basis}] {e.flaw}\n{e.why_it_fails}\n\n"
+            f"{e.fix_directive}{scope}")
+
+
+def _apply_case_updates(case_file, lines: list, qid: str) -> int:
+    """SH's `case_updates` reuse the existing CASE UPDATES grammar verbatim."""
+    if not case_file or not lines:
+        return 0
+    text = "CASE UPDATES:\n" + "\n".join(f"- {ln.lstrip('- ')}" for ln in lines if ln.strip())
+    n = 0
+    for u in parse_case_updates(text):
+        if u["kind"] == "entity":
+            case_file.add_entity(u["etype"], u["value"], qid=qid)
+            n += 1
+        elif u["kind"] == "finding":
+            case_file.add_finding(u["claim"], evidence=u.get("evidence", ""),
+                                  source_qid=qid, status=u["status"])
+            n += 1
+    return n
+
+
+def _record(sid: str, qid: str, subq: str, result: dict) -> dict:
+    """A delegation record in the shape the ledger, the metrics row and the
+    fallback already read (orchestrator._delegation_record's 20 keys), so nothing
+    downstream of the orchestrator has to know which loop produced it."""
+    return {
+        "worker": sid, "qid": qid, "subquestion": subq,
+        "status": result.get("status", "?"), "answer": result.get("report", ""),
+        "spl_used": result.get("spl_used", []), "sourcetypes": result.get("sourcetypes", []),
+        "full_state": result.get("full_state", []), "iterations": result.get("iterations", 0),
+        "cap_hit": result.get("cap_hit", False), "duration_s": result.get("duration_s", 0.0),
+        "value": result.get("value", ""), "value_kind": result.get("value_kind", ""),
+        "evidence": result.get("evidence", ""), "worker_confidence": result.get("confidence"),
+        "search_space_used": result.get("search_space_used")
+                             or {"sourcetypes": [], "sources": []},
+        "negative_findings": result.get("negative_findings") or [],
+        "notes": result.get("notes", ""), "structured": result.get("structured", False),
+        "spawn_type": result.get("spawn_type", "senior"),
+        "search_space": result.get("search_space") or {},
+        "prior_info": "", "confidence": None,
+        # v1.3.1 additions — what the grade report reads.
+        "insight": result.get("insight", "NOT_FOUND"),
+        "novel_spl_count": result.get("novel_spl_count", 0),
+        "round": result.get("round", 0),
+    }
+
+
+def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: int,
+                 run_dir: str, case_file=None, dataset_briefing: str = "",
+                 delegations: list | None = None, max_parallel: int = MAX_PARALLEL,
+                 senior_window: int | None = None, hitl: bool = True) -> dict:
+    """Run one question as a bounded SH <-> Senior conversation.
+
+    Ends exactly three ways (§4.2): a grounded ANSWER whose source report is not
+    graded R1 = FAIL, waves exhausted, or SH turns exhausted. On either exhaustion
+    the answer falls back to the best candidate across every report this question
+    produced.
+    """
+    state = QuestionState(points=points)
+    log = ConversationLog(run_dir, qid)
+    window = senior_window or context_window(pool.senior_model)
+    delegations = delegations if delegations is not None else []
+
+    sessions: dict = {}          # sid -> SeniorSession
+    kinds: dict = {}             # sid -> "senior" | "exploration"
+    subqs: dict = {}             # sid -> the subquestion it was spawned with
+    unread: dict = {}            # sid -> report from the wave SH has not graded yet
+    all_reports: list = []       # every report this question produced
+    grades: list = []
+    counter = 0
+
+    msgs = [SystemMessage(content=SH_SYSTEM_PROMPT)]
+    if dataset_briefing:
+        msgs.append(SystemMessage(content=dataset_briefing))
+    if case_file is not None:
+        digest = case_file.render_digest()
+        if digest.strip():
+            msgs.append(SystemMessage(content=(
+                "CASE FILE (known incident state — verified [OK], hypothesis [?], "
+                "refuted [X]; re-verify [?]/[X] before relying on them):\n" + digest)))
+    msgs.append(HumanMessage(content=render_opening(
+        qid=qid, question=question, guidance=guidance, points=points,
+        budget=state.budget)))
+
+    answer, end_reason, ungrounded = "", "", 0
+
+    while True:
+        stop = state.exhausted()
+        if stop:
+            end_reason = stop
+            break
+
+        try:
+            turn = llm.invoke(msgs)
+        except Exception as exc:                       # noqa: BLE001 - reported, not swallowed
+            print(describe_llm_error(exc, f"SH-{qid}"))
+            log.note(f"SH turn failed: {exc}")
+            end_reason = "sh_failed"
+            break
+        state.record_turn()
+        msgs.append(AIMessage(content=_render_turn(turn)))
+
+        problems = grade_violations(
+            turn.entries, graded=set(unread),
+            exploration={s for s, k in kinds.items() if k == "exploration"},
+        ) + directive_violations(turn.entries, state)
+        if problems:
+            log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
+            msgs.append(HumanMessage(content=render_rejection(problems)))
+            continue
+
+        # Grades apply to the reports this turn just read. Exploration workers are
+        # not graded (§3.4), so they never produce a grade row or a thrash streak.
+        for e in turn.entries:
+            src = e.senior_id or e.source_senior
+            if src in unread and kinds.get(src) != "exploration":
+                novel = unread[src].get("novel_spl_count", 0)
+                r2 = effective_r2(e.r2_progress, novel)
+                grades.append({"qid": qid, "senior_id": src,
+                               "round": unread[src].get("round", 0),
+                               "r1": e.r1_scope_alignment, "r2_sh": e.r2_progress,
+                               "r2_effective": r2, "r3": e.r3_answer_readiness,
+                               "route": e.route, "decision": e.decision,
+                               "basis": e.basis, "novel_spl_count": novel})
+                state.record_r2(src, failed=(r2 == "FAIL"))
+        unread = {}
+
+        pending, clarified = {}, []
+        for e in turn.entries:
+            log.sh_to_senior(e.senior_id, e.route, body=_entry_body(e))
+
+            if e.route == "SPAWN":
+                counter += 1
+                sid = f"{'e' if e.spawn_type == 'exploration' else 's'}{counter}"
+                kinds[sid], subqs[sid] = e.spawn_type, e.subquestion
+                if e.spawn_type == "exploration":
+                    # §2.3: the v1.3.0 one-shot NIM scout, unchanged — never a
+                    # SeniorSession, never the senior graph, no slot, no grade.
+                    state.open_exploration(sid)
+                    pending[sid] = partial(pool.run_exploration, e.subquestion, qid, counter)
+                    continue
+                grant = state.open_senior(sid)
+                sessions[sid] = SeniorSession(
+                    sid=sid, pool=pool, qid=qid, technique=e.technique or "hunter",
+                    subquestion=e.subquestion, brief=SENIOR_BRIEF, window=window,
+                    rounds_granted=grant, idx=counter, constraints=e.constraints,
+                    iters=ROUND_ITERS)
+                pending[sid] = partial(sessions[sid].work,
+                                       ("Begin. " + e.reason) if e.reason else "Begin.",
+                                       rounds_remaining=state.rounds_left_for(sid))
+
+            elif e.route in ("COMMAND", "CRITIC"):
+                pending[e.senior_id] = partial(sessions[e.senior_id].work, _directive_text(e),
+                                               rounds_remaining=state.rounds_left_for(e.senior_id))
+
+            elif e.route == "CLARIFY":
+                try:
+                    reply = sessions[e.senior_id].clarify(e.questions)
+                except Exception as exc:               # noqa: BLE001 - reported, fed back to SH
+                    print(describe_llm_error(exc, f"Senior-{e.senior_id}-clarify"))
+                    log.note(f"{e.senior_id} clarify failed: {type(exc).__name__}: {exc}")
+                    reply = (f"(clarify failed: {type(exc).__name__}: {str(exc)[:200]}) — "
+                             "COMMAND the senior instead if you need this answered")
+                log.clarify_reply(e.senior_id, reply)
+                clarified.append(f"{e.senior_id}: {reply}")
+
+            elif e.route == "RETIRE":
+                sess = sessions.get(e.senior_id)
+                if sess:
+                    log.write_handoff(e.senior_id, sess.handoff(e.reason))
+                state.retire(e.senior_id)
+
+            elif e.route == "ANSWER":
+                evidence = {i: {"answer": r.get("report", ""), "value": r.get("value", "")}
+                            for i, r in enumerate(_senior_reports(all_reports))}
+                if is_grounded(e.value, evidence, question):
+                    answer, end_reason = e.value.strip(), "answer"
+                    _apply_case_updates(case_file, e.case_updates, qid)
+                else:
+                    ungrounded += 1
+                    log.note(f"GROUNDING FAILED for {e.value!r} (attempt {ungrounded})")
+                    if ungrounded >= 2:
+                        end_reason = "ungrounded"
+                    else:
+                        msgs.append(HumanMessage(content=(
+                            f"GROUNDING CHECK FAILED. Your proposed answer {e.value!r} "
+                            f"does not appear in any senior's report or in the question. "
+                            f"Either command a senior to produce it as an exact value, or "
+                            f"choose a value that DOES appear in the evidence.")))
+
+        if end_reason:
+            break
+        if clarified:
+            msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
+        if not pending:
+            continue
+        if state.waves_remaining <= 0:
+            end_reason = "rounds"
+            break
+
+        wave = _run_wave(pending, max_parallel=max_parallel)
+        # Rounds are senior rounds (§4.2); a scout-only wave costs SH's turn, not a round.
+        if any(kinds[sid] != "exploration" for sid in wave):
+            state.record_wave()
+
+        scouted = []
+        for sid, result in wave.items():
+            scout = kinds[sid] == "exploration"
+            if scout:
+                # run_exploration carries its rendered report in `answer`.
+                result = {**result, "report": result.get("answer", ""), "round": 1,
+                          "insight": "SCOPE", "spawn_type": "exploration"}
+            else:
+                state.record_round(sid)
+            rel = log.write_report(sid, result.get("round", 0), result.get("report", ""))
+            log.senior_to_sh(sid, round_n=result.get("round", 0),
+                             insight=result.get("insight", "?"),
+                             excerpt=result.get("notes") or result.get("value") or "",
+                             path=rel)
+            delegations.append(_record(sid, qid, subqs[sid], result))
+            all_reports.append(result)
+            failed = result.get("status") in ("api_failed", "runaway")
+
+            if failed:
+                # A transport failure is not a reasoning outcome (§7, §8). Only a
+                # senior held a slot, and every senior retirement writes a handoff.
+                if scout:
+                    log.note(f"{sid} exploration {result['status']} — no slot to refund")
+                else:
+                    log.write_handoff(sid, sessions[sid].handoff(
+                        f"{result['status']}: transport failure"))
+                    state.refund_spawn(sid)
+                    log.note(f"{sid} {result['status']} — retired, spawn slot refunded")
+                if hitl:
+                    choice = resolve_interrupt(
+                        [_Interrupt({"provider": result.get("provider", ""),
+                                     "error": result.get("answer", "")[:400],
+                                     "qids": [qid]})],
+                        qid=qid, run_dir=run_dir)
+                    if choice == ABORT:
+                        raise RunPaused(os.path.join(run_dir, "decision_request.json"),
+                                        f"operator aborted on {qid} after {sid} "
+                                        f"{result['status']}")
+            if scout:
+                scouted.append(f"--- {sid} | exploration scope proposal | "
+                               f"status={result.get('status', '?')} | not graded, "
+                               f"no route needed\n{(result.get('report') or '').strip()}")
+            elif not failed:
+                result["rounds_left"] = state.rounds_left_for(sid)
+                unread[sid] = result
+
+        if unread or scouted:
+            head = (render_wave(unread, waves_remaining=state.waves_remaining,
+                                turns_remaining=state.turns_remaining) if unread
+                    else f"WAVE COMPLETE. {state.waves_remaining} round(s) and "
+                         f"{state.turns_remaining} turn(s) remain on this question.")
+            msgs.append(HumanMessage(content="\n\n".join([head, *scouted])))
+
+    if not answer:
+        # A scout never produces a value (§2.3), so it is neither evidence nor a fallback.
+        reports = _senior_reports(all_reports)
+        answer = best_candidate({i: {"answer": r.get("report", ""),
+                                     "value": r.get("value", ""),
+                                     "status": r.get("status", "failed")}
+                                 for i, r in enumerate(reports)}) or ""
+        # best_candidate ranks on status and returns the report text; the bare
+        # value is what the scoreboard wants, so prefer it when one exists.
+        ranked = [r for r in reports if (r.get("value") or "").strip()]
+        if ranked:
+            ranked.sort(key=lambda r: (r.get("status") == "solved",
+                                       r.get("confidence") or 0))
+            answer = ranked[-1]["value"].strip()
+        log.note(f"question ended: {end_reason} — falling back to {answer!r}")
+
+    # End of question: sweep every survivor into a handoff (§7).
+    for sid, sess in sessions.items():
+        if state.is_active(sid):
+            log.write_handoff(sid, sess.handoff(f"end of question ({end_reason})"))
+            state.retire(sid)
+
+    return {
+        "answer": answer,
+        "end_reason": end_reason or "answer",
+        "turns": state.turns_used,
+        "waves": state.waves_used,
+        "spawns_used": state.spawns_used,
+        "senior_iterations": sum(s.iterations for s in sessions.values()),
+        "ceiling": state.senior_iteration_ceiling,
+        "compactions": sum(s.compactions for s in sessions.values()),
+        "grades": grades,
+        "reports": all_reports,
+        "delegations": delegations,
+    }
+
+
+def _senior_reports(reports: list) -> list:
+    return [r for r in reports if r.get("spawn_type") != "exploration"]
+
+
+def _run_wave(pending: dict, *, max_parallel: int) -> dict:
+    """Every piece of work in this wave (sid -> zero-arg callable: a senior round
+    or the exploration scout) runs in parallel; SH reads the whole wave in one
+    turn. Eight rounds therefore cost eight SH turns, not twenty-four (§4.3).
+    """
+    if len(pending) == 1:
+        sid, run = next(iter(pending.items()))
+        return {sid: run()}
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=max_parallel) as ex:
+        futures = {ex.submit(run): sid for sid, run in pending.items()}
+        for fut in as_completed(futures):
+            out[futures[fut]] = fut.result()
+    return out
