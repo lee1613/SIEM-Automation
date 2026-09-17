@@ -565,12 +565,28 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         else:
             response = model_with_tools.invoke(msgs)
 
+        # An empty reply (no text, no tool call) ends the round with nothing to
+        # report - the provider failed to parse a tool call, or reasoning ate the
+        # token budget. GLM-5.3 on Featherless did this twice in Q216's smoke test
+        # and both rounds reached SH blank. Ask once more, submit_finding only.
+        wasted_out = 0
+        if _terminal and not response.content and not getattr(response, "tool_calls", None):
+            meta = getattr(response, "response_metadata", None) or {}
+            wasted_out = int((getattr(response, "usage_metadata", None) or {}).get("output_tokens", 0))
+            print(f"[Empty reply] finish_reason={meta.get('finish_reason')} "
+                  f"output_tokens={wasted_out} — asking once more for submit_finding")
+            response = model_bare.invoke(msgs + [HumanMessage(
+                "Your last reply was empty: no text and no tool call. Call "
+                "submit_finding now with what you have so far. Do not invent a "
+                "value - an empty `value` with honest `notes` is fine."
+            )])
+
         if response.content:
             tag = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
             print(f"\n{tag}\n{response.content}\n")
 
         um = getattr(response, "usage_metadata", None) or {}
-        out_total = state.get("output_tokens", 0) + int(um.get("output_tokens", 0))
+        out_total = state.get("output_tokens", 0) + wasted_out + int(um.get("output_tokens", 0))
         # The prompt size of the call just made IS this thread's current context
         # size. v1.3.1 projects a round's growth off it to decide whether to
         # compact before working (spec §6); nothing else reads it.
@@ -679,7 +695,13 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         if state.get("output_tokens", 0) > OUTPUT_TOKEN_CAP:
             return END          # runaway — _run turns this into status="runaway"
         last = state["messages"][-1]
-        if getattr(last, "tool_calls", None):
+        calls = getattr(last, "tool_calls", None)
+        if calls and all(tc["name"] == "submit_finding" for tc in calls):
+            # The finding is read off this message (finding.parse_finding) and the
+            # caller closes the dangling call; running it would only buy one more
+            # paid model turn after the worker has already reported.
+            return END
+        if calls:
             return "verify"
         return END
 
