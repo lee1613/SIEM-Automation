@@ -19,6 +19,7 @@ holds. A doubt that fits none of the five is a CLARIFY, not a critic.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -210,6 +211,11 @@ def grade_violations(entries: list[SeniorDirective], *, graded: set, exploration
         needs_grades = (e.route == "ANSWER") or (e.senior_id in graded)
         if needs_grades and any(g not in GRADES for g in got):
             out.append(f"{e.senior_id or e.route}: all three grades required (PASS/WEAK/FAIL)")
+    addressed = ({e.senior_id for e in entries}
+                 | {e.source_senior for e in entries if e.route == "ANSWER"})
+    for sid in sorted(graded - exploration - addressed):
+        out.append(f"{sid}: its report was read but no route addressed it — "
+                   "grade it and give it exactly one route")
     return out
 
 
@@ -229,7 +235,14 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
     if explore_spawns > (MAX_EXPLORATIONS - state.explorations_used):
         out.append("exploration already used on this question")
 
+    targets = Counter(e.senior_id for e in entries if e.route != "SPAWN" and e.senior_id)
+    for sid, n in sorted(targets.items()):
+        if n > 1:
+            out.append(f"{sid} got more than one route this turn — exactly one per senior")
+
     for e in entries:
+        if e.route == "CLARIFY" and not state.is_active(e.senior_id):
+            out.append(f"{e.senior_id} is not an active senior")
         if e.route in ("COMMAND", "CRITIC"):
             if not state.is_active(e.senior_id):
                 out.append(f"{e.senior_id} is not an active senior")

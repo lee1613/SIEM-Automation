@@ -40,10 +40,13 @@ class _LLM:
         self.seen = []
 
     def invoke(self, msgs, **kw):
-        self.seen.append(msgs)
+        self.seen.append(list(msgs))    # a snapshot: the loop keeps appending to msgs
         if not self.turns:
             raise AssertionError("the loop asked for more turns than the test scripted")
-        return self.turns.pop(0)
+        turn = self.turns.pop(0)
+        if isinstance(turn, Exception):
+            raise turn
+        return turn
 
 
 class _Pool:
@@ -60,12 +63,14 @@ class _Pool:
         }
         self.result.update(over)
         self.rounds = 0
+        self.clarifies = 0
 
     def run_round(self, **kw):
         self.rounds += 1
         return dict(self.result)
 
     def clarify(self, **kw):
+        self.clarifies += 1
         return "Yes — the window you gave me."
 
 
@@ -288,3 +293,195 @@ def test_a_failed_clarify_is_fed_back_and_the_question_continues(tmp_path):
     out = _run(llm, _BrokenClarify(), tmp_path)
     assert out["answer"] == "1367.875"
     assert any("clarify failed" in str(m.content) for m in llm.seen[-1])
+
+
+# ── review fixes on 9795a4e ───────────────────────────────────────────────────
+
+def _continue(**kw):
+    base = dict(senior_id="s1", route="COMMAND", decision="continue",
+                rationale="keep going", directive="Go one step further.",
+                r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+    base.update(kw)
+    return entry(**base)
+
+
+def _retire(sid="s1", **kw):
+    base = dict(senior_id=sid, route="RETIRE", reason="done", r1_scope_alignment="PASS",
+                r2_progress="PASS", r3_answer_readiness="WEAK")
+    base.update(kw)
+    return entry(**base)
+
+
+def _conversation(tmp_path, qid="Q216"):
+    with open(os.path.join(str(tmp_path), qid, "conversation.md"), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_anti_thrash_sees_the_grades_of_the_report_being_read(tmp_path):
+    # I1: rounds 2 and 3 repeat round 1's SPL -> both code-FAIL. The continue on turn 4
+    # reads round 3, so the streak is already 2 and it must be refused.
+    pool = _Pool()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()),
+                _turn(_continue()), _turn(_answer())])
+    out = _run(llm, pool, tmp_path)
+    assert pool.rounds == 3, "a third consecutive continue must not run round 4"
+    assert out["answer"] == "1367.875"
+    assert "two consecutive R2 FAILs" in _conversation(tmp_path)
+
+
+def test_sh_reads_and_can_answer_from_the_final_wave(tmp_path):
+    # I2: 100pt has 3 rounds; the third wave must still be read by SH.
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()), _turn(_answer())])
+    out = _run(llm, _Pool(), tmp_path, points=100)
+    assert out["end_reason"] == "answer"
+    assert len(out["grades"]) == 3
+
+
+def test_sh_is_told_about_a_transport_failed_round(tmp_path):
+    # I3
+    pool = _Pool(status="api_failed", value="", insight="NOT_FOUND", report="")
+    llm = _LLM([_turn(_spawn()), _turn(_spawn()), _turn(_spawn())])
+    _run(llm, pool, tmp_path, points=100)
+    last = str(llm.seen[1][-1].content)
+    assert "transport failure" in last and "s1" in last
+
+
+def test_sh_remembers_earlier_questions_through_history(tmp_path):
+    # I4
+    history = []
+    _run(_LLM([_turn(_spawn()), _turn(_answer())]), _Pool(), tmp_path, history=history)
+    after_first = len(history)
+    assert after_first > 0
+    assert not any(type(m).__name__ == "SystemMessage" for m in history)
+
+    llm2 = _LLM([_turn(_spawn()), _turn(_answer())])
+    _run(llm2, _Pool(), tmp_path, qid="Q217", history=history)
+    assert any("Q216" in str(m.content) for m in llm2.seen[0]), \
+        "question 2's first SH call sees question 1"
+    assert len(history) > after_first
+
+
+def test_no_history_means_a_fresh_thread_per_question(tmp_path):
+    llm = _LLM([_turn(_spawn()), _turn(_answer())])
+    _run(llm, _Pool(), tmp_path)
+    assert len(llm.seen[0]) == 2          # system prompt + opening only
+
+
+def test_the_history_window_mirrors_the_orchestrator():
+    import orchestrator
+    import sh_loop
+    assert sh_loop.MAX_HISTORY_MSGS == orchestrator.MAX_HISTORY_MSGS
+
+
+def test_a_malformed_sh_turn_is_fed_back_not_fatal(tmp_path):
+    # I5: strict json_schema does not run the cross-field validator
+    import pydantic
+    bad = None
+    try:
+        entry(senior_id="s1", route="RETIRE", reason="")
+    except pydantic.ValidationError as exc:
+        bad = exc
+    assert bad is not None
+    llm = _LLM([_turn(_spawn()), bad, _turn(_answer())])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["end_reason"] == "answer"
+    assert out["turns"] == 3
+    assert any("did not validate" in str(m.content) for m in llm.seen[-1])
+
+
+def test_a_read_report_sh_does_not_route_is_rejected(tmp_path):
+    # M1: two seniors report; SH routes only s1, then fixes it
+    pool = _Pool()
+    llm = _LLM([_turn(_spawn(), _spawn(subquestion="Other feed.")),
+                _turn(_continue()),
+                _turn(_answer(source_senior="s2"), _retire("s1"))])
+    out = _run(llm, pool, tmp_path)
+    assert "no route addressed it" in _conversation(tmp_path)
+    assert pool.rounds == 2, "the half-routed turn ran nothing"
+    assert out["end_reason"] == "answer"
+
+
+def test_two_routes_to_one_senior_in_a_turn_are_rejected(tmp_path):
+    # M1
+    pool = _Pool()
+    llm = _LLM([_turn(_spawn()), _turn(_continue(), _retire()), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert pool.rounds == 1
+    assert "more than one route" in _conversation(tmp_path)
+
+
+def test_a_clarify_to_a_retired_senior_is_rejected(tmp_path):
+    # M2
+    clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
+                    questions=["Sure?"])
+    pool = _Pool()
+    llm = _LLM([_turn(_spawn()), _turn(_retire()), _turn(clarify), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert pool.clarifies == 0
+    assert "s1 is not an active senior" in _conversation(tmp_path)
+
+
+def test_the_fallback_is_a_bare_value_or_nothing(tmp_path):
+    # M3: no report ever held a value -> report text is never submitted
+    pool = _Pool(value="", insight="NOT_FOUND")
+    llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
+    out = _run(llm, pool, tmp_path, points=100)
+    assert out["end_reason"] == "turns"
+    assert out["answer"] == ""
+
+
+def test_the_fallback_skips_values_from_r1_fail_reports(tmp_path):
+    # M4
+    llm = _LLM([_turn(_spawn()), _turn(_retire(r1_scope_alignment="FAIL"))]
+               + [_turn() for _ in range(3)])
+    out = _run(llm, _Pool(), tmp_path, points=100)
+    assert out["end_reason"] == "turns"
+    assert out["answer"] == ""
+
+
+def test_the_stamped_rounds_remaining_counts_this_round_as_spent(tmp_path):
+    # M5: 100pt grants 3 rounds; after round 1, 2 remain
+    llm = _LLM([_turn(_spawn()), _turn(_answer())])
+    _run(llm, _Pool(), tmp_path, points=100)
+    with open(os.path.join(str(tmp_path), "Q216", "reports", "s1_round_1.md"),
+              encoding="utf-8") as f:
+        assert "rounds_remaining=2" in f.read()
+
+
+def test_a_crashing_senior_is_retired_and_its_sibling_survives(tmp_path):
+    # M6
+    class _Crashy(_Pool):
+        def run_round(self, **kw):
+            if kw["idx"] == 1:
+                raise RuntimeError("graph exploded")
+            return super().run_round(**kw)
+
+    llm = _LLM([_turn(_spawn(), _spawn(subquestion="Other feed.")),
+                _turn(_answer(source_senior="s2"))])
+    out = _run(llm, _Crashy(), tmp_path)
+    assert out["answer"] == "1367.875"
+    assert out["spawns_used"] == 1, "the crashed senior's slot was refunded"
+    assert os.path.exists(os.path.join(str(tmp_path), "Q216", "handoffs", "s1_handoff.md"))
+
+
+def test_entries_after_a_grounded_answer_are_ignored(tmp_path):
+    # M7
+    llm = _LLM([_turn(_spawn()), _turn(_answer(), _spawn(subquestion="Too late."))])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["end_reason"] == "answer"
+    assert out["spawns_used"] == 1
+    assert not os.path.exists(os.path.join(str(tmp_path), "Q216", "handoffs", "s2_handoff.md"))
+
+
+def test_each_delegation_records_its_duration(tmp_path):
+    # M8
+    import time
+
+    class _Slow(_Pool):
+        def run_round(self, **kw):
+            time.sleep(0.02)
+            return super().run_round(**kw)
+
+    sink = []
+    _run(_LLM([_turn(_spawn()), _turn(_answer())]), _Slow(), tmp_path, delegations=sink)
+    assert sink[0]["duration_s"] >= 0.01

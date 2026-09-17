@@ -251,3 +251,32 @@ def test_a_clean_turn_has_no_violations():
               directive="Establish which principal did it.", r1_scope_alignment="PASS",
               r2_progress="PASS", r3_answer_readiness="WEAK")
     assert directive_violations([e], st) == []
+
+
+def test_two_routes_to_one_senior_are_refused():
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    graded = dict(r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+    cont = entry(senior_id="s1", route="COMMAND", decision="continue", rationale="r",
+                 directive="d", **graded)
+    retire = entry(senior_id="s1", route="RETIRE", reason="done", **graded)
+    assert directive_violations([cont, retire], st) != []
+
+
+def test_a_read_report_left_unrouted_is_refused():
+    graded = dict(r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+    only_s1 = entry(senior_id="s1", route="RETIRE", reason="done", **graded)
+    assert grade_violations([only_s1], graded={"s1", "s2"}, exploration=set()) != []
+    answer_s2 = entry(route="ANSWER", value="v", source_senior="s2", justification="j",
+                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    assert grade_violations([only_s1, answer_s2], graded={"s1", "s2"}, exploration=set()) == []
+
+
+def test_a_clarify_must_target_an_active_senior():
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    st.retire("s1")
+    e = entry(senior_id="s1", route="CLARIFY", clarify_reason="unclear", questions=["what?"])
+    assert directive_violations([e], st) != []
+    assert directive_violations([entry(senior_id="e2", route="CLARIFY", clarify_reason="unclear",
+                                       questions=["what?"])], st) != []
