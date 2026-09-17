@@ -272,6 +272,12 @@ def test_a_read_report_left_unrouted_is_refused():
     assert grade_violations([only_s1, answer_s2], graded={"s1", "s2"}, exploration=set()) == []
 
 
+def test_an_answer_turn_need_not_route_its_siblings():
+    answer_s1 = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    assert grade_violations([answer_s1], graded={"s1", "s2"}, exploration=set()) == []
+
+
 def test_a_clarify_must_target_an_active_senior():
     st = QuestionState(points=1000)
     st.open_senior("s1")

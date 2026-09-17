@@ -211,8 +211,11 @@ def grade_violations(entries: list[SeniorDirective], *, graded: set, exploration
         needs_grades = (e.route == "ANSWER") or (e.senior_id in graded)
         if needs_grades and any(g not in GRADES for g in got):
             out.append(f"{e.senior_id or e.route}: all three grades required (PASS/WEAK/FAIL)")
-    addressed = ({e.senior_id for e in entries}
-                 | {e.source_senior for e in entries if e.route == "ANSWER"})
+    # An ANSWER ends the question and the sweep retires every survivor, so
+    # rejecting it for an unrouted sibling would only burn a turn.
+    if any(e.route == "ANSWER" for e in entries):
+        return out
+    addressed = {e.senior_id for e in entries}
     for sid in sorted(graded - exploration - addressed):
         out.append(f"{sid}: its report was read but no route addressed it — "
                    "grade it and give it exactly one route")
