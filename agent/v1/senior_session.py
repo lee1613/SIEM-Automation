@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 
 from question_state import ROUND_ITERS
-from senior_report import novel_spl, report_violations, stamp_header, truncate_words
+from senior_report import _norm_query, novel_spl, report_violations, stamp_header, truncate_words
 
 COMPACT_AT = 0.80    # projected context share that triggers a compaction
 ALERT_AT   = 0.70    # current context share that prints an operator alert
@@ -59,8 +59,10 @@ class SeniorSession:
         self.thread_id = self._new_thread()
         self.rounds_used = 0
         self.iterations = 0
+        self.thread_iterations = 0
         self.compactions = 0
         self.prior_spl: set = set()
+        self.spl_seen: dict = {}  # maps normalized query -> original spelling
         self.last_report = ""
         self.last_prompt_tokens = 0
         self.status = "active"
@@ -72,11 +74,11 @@ class SeniorSession:
     @property
     def mean_tokens_per_iteration(self) -> int:
         """Measured, not assumed: this thread's context divided by the iterations
-        that built it. ponytail: a flat average, not a growth curve — upgrade only
-        if compaction starts firing late."""
-        if self.iterations <= 0:
+        that built it (per-thread only, not cumulative). ponytail: a flat average,
+        not a growth curve — upgrade only if compaction starts firing late."""
+        if self.thread_iterations <= 0:
             return 0
-        return int(self.last_prompt_tokens / self.iterations)
+        return int(self.last_prompt_tokens / self.thread_iterations)
 
     # ── one round ─────────────────────────────────────────────────────────────
     def work(self, directive: str, *, rounds_remaining: int) -> dict:
@@ -88,11 +90,37 @@ class SeniorSession:
             idx=self.idx, technique=self.technique, max_iter=self.iters)
 
         self.rounds_used += 1
-        self.iterations += int(result.get("iterations", 0))
-        self.last_prompt_tokens = int(result.get("last_prompt_tokens", 0))
+        round_iterations = int(result.get("iterations", 0))
+        self.iterations += round_iterations
+        self.thread_iterations += round_iterations
         self.status = result.get("status", "?")
 
+        # Track original SPL spelling
+        for spl in (result.get("spl_used") or []):
+            norm = _norm_query(spl)
+            if norm and norm not in self.spl_seen:
+                self.spl_seen[norm] = spl
+
         count, self.prior_spl = novel_spl(self.prior_spl, result.get("spl_used") or [])
+
+        # Failed rounds: do not overwrite state but return stamped fallback report
+        if self.status in ("api_failed", "runaway"):
+            body, truncated = truncate_words(self._fallback_report(result))
+            report = stamp_header(body, senior_id=self.sid, qid=self.qid,
+                                  round_n=self.rounds_used,
+                                  rounds_remaining=rounds_remaining,
+                                  novel_spl_count=count)
+            # Don't update last_prompt_tokens or last_report for failed rounds
+            problems = report_violations(report)
+            if truncated:
+                problems.append("report truncated at the word cap")
+            if problems:
+                print(f"[{self.sid}] report template: {'; '.join(problems)}")
+            return {**result, "report": report, "novel_spl_count": count,
+                    "senior_id": self.sid, "round": self.rounds_used}
+
+        # Successful round: update state
+        self.last_prompt_tokens = int(result.get("last_prompt_tokens", 0))
         body, truncated = truncate_words(result.get("report") or self._fallback_report(result))
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,
                               round_n=self.rounds_used,
@@ -112,6 +140,13 @@ class SeniorSession:
         return {**result, "report": report, "novel_spl_count": count,
                 "senior_id": self.sid, "round": self.rounds_used}
 
+    def _render_spl_list(self) -> str:
+        """Render the SPL already run with original spellings, sorted by normalized key."""
+        if not self.spl_seen:
+            return "- (none)"
+        return "\n".join(f"- {self.spl_seen[norm]}"
+                         for norm in sorted(self.spl_seen.keys()))
+
     def _message_for(self, directive: str) -> str:
         """The round's input: the brief on round one, a compaction seed when the
         projection says so, otherwise the bare directive."""
@@ -123,12 +158,15 @@ class SeniorSession:
                           mean_per_iter=self.mean_tokens_per_iteration,
                           window=self.window, iters=self.iters):
             self.thread_id = self._new_thread()
+            self.thread_iterations = 0
             self.compactions += 1
             print(f"[{self.sid}] compacting: context {self.last_prompt_tokens:,} + "
                   f"{self.iters}x{self.mean_tokens_per_iteration:,} projected past "
                   f"{int(COMPACT_AT * 100)}% of {self.window:,}")
+            spl_section = f"## SPL you already ran — do not repeat, go one step further\n{self._render_spl_list()}\n\n"
             return (f"{self.brief}\n\n## Your task\n{self.subquestion}\n\n"
                     f"## Where you got to (your own last report)\n{self.last_report}\n\n"
+                    f"{spl_section}"
                     f"## This round\n{directive}")
 
         return directive
@@ -153,7 +191,7 @@ class SeniorSession:
     def handoff(self, reason: str) -> str:
         """The report template plus what a replacement needs. Feeds the case file."""
         head = self.last_report or f"# {self.sid} - {self.qid} - no completed round\n"
-        ruled = "\n".join(f"- {q}" for q in sorted(self.prior_spl)) or "- (none)"
+        ruled = self._render_spl_list()
         return (f"{head}\n\n## What I'd tell my replacement\n"
                 f"- Retired because: {reason}\n"
                 f"- Scope I owned: {self.constraints or self.subquestion}\n"

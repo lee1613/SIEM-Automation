@@ -142,3 +142,73 @@ def test_the_handoff_is_the_last_report_plus_advice_for_a_replacement():
 def test_a_handoff_before_any_round_still_renders():
     s = _session(_Pool())
     assert "What I'd tell my replacement" in s.handoff("never started")
+
+
+def test_compaction_fires_again_after_a_previous_compaction():
+    """Compaction mean must be per-thread, not cumulative across threads."""
+    # Each round returns 50k tokens from 8 iterations = 6_250 tokens/iter for THIS thread.
+    # Projection: 50k + 8*6.25k = 100k > 80k → must compact.
+    pool = _Pool(iterations=8, last_prompt_tokens=50_000)
+    s = _session(pool, window=WINDOW)
+    s.work("a", rounds_remaining=7)                # round 1, no compact yet
+    assert s.compactions == 0
+    s.work("b", rounds_remaining=6)                # round 2, must compact (50k + 8*6.25k > 80k)
+    assert s.compactions == 1
+    s.work("c", rounds_remaining=5)                # round 3, must compact AGAIN (new thread also 50k + 8*6.25k > 80k)
+    assert s.compactions == 2
+
+
+def test_failed_round_does_not_overwrite_state():
+    """api_failed or runaway rounds must not overwrite last_prompt_tokens or last_report."""
+    pool = _Pool(iterations=5, last_prompt_tokens=1_000)
+    s = _session(pool)
+    s.work("a", rounds_remaining=7)
+    assert "## Prior rounds" in s.last_report
+    first_report = s.last_report
+    first_tokens = s.last_prompt_tokens
+    assert first_tokens == 1_000
+
+    # Round 2 fails: api_failed, report empty, tokens 0
+    pool.result.update(status="api_failed", report="", last_prompt_tokens=0, spl_used=[])
+    out2 = s.work("b", rounds_remaining=6)
+    # State must not change
+    assert s.last_report == first_report, "last_report must not be overwritten on api_failed"
+    assert s.last_prompt_tokens == first_tokens, "last_prompt_tokens must not be overwritten on api_failed"
+    assert s.status == "api_failed"  # but status does update
+    assert s.rounds_used == 2  # and round count increases
+    # But the returned dict has the stamped fallback
+    assert "**Insight:**" in out2["report"]
+
+
+def test_original_spl_text_is_preserved():
+    """Handoff renders original SPL spelling, not normalized."""
+    pool = _Pool(spl_used=["index=botsv3 EventCode=4688"])
+    s = _session(pool)
+    s.work("a", rounds_remaining=7)
+    h = s.handoff("test")
+    assert "EventCode=4688" in h, "handoff must contain original case SPL"
+
+
+def test_compaction_seed_lists_spl_already_run():
+    """Compaction message includes a list of SPL already run, so novel_spl still diffs correctly."""
+    pool = _Pool(last_prompt_tokens=90_000, spl_used=["index=botsv3 | stats count"])
+    s = _session(pool)
+    s.work("a", rounds_remaining=7)
+    s.work("b", rounds_remaining=6)  # compacts
+    # The compaction message sent to the pool should include the SPL from round 1
+    message = pool.rounds[1]["message"]
+    assert "## SPL you already ran" in message or "SPL you already" in message, \
+        "compaction message must list prior SPL"
+    assert "index=botsv3 | stats count" in message, \
+        "compaction message must include the round 1 query in original case"
+
+
+def test_fallback_report_renders_with_stamped_header():
+    """When a result has no report field, _fallback_report fills in with stamped header."""
+    pool = _Pool(report="", insight="NOT_FOUND", value="candidate123", confidence=50)
+    s = _session(pool)
+    out = s.work("a", rounds_remaining=7)
+    assert out["report"].startswith("# s1 - Q216 - Round 1"), \
+        "stamped header must be present even in fallback"
+    assert "**Insight:** NOT_FOUND" in out["report"]
+    assert "**Candidate:** candidate123" in out["report"]
