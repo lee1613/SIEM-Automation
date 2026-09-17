@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""
+The senior's report (spec §3.1): template validation, the word cap, and the
+three header fields the RUNNER stamps rather than the senior.
+
+`round`, `rounds_remaining` and `novel_spl_count` are stamped here because a
+self-reported progress number is a progress number the senior can report
+favourably. `novel_spl_count == 0` is literal thrashing and hard-fails R2
+without an LLM in the loop (see conversation.effective_r2).
+
+The "Prior rounds" section is the compression mechanism: the senior REWRITES it
+each round rather than appending, so its own history stays six lines instead of
+growing linearly — which is also why the latest report doubles as the
+compaction artifact (§6).
+"""
+
+from __future__ import annotations
+
+import re
+
+REPORT_WORD_CAP = 400
+PRIOR_ROUNDS_MAX_LINES = 6
+
+REQUIRED_SECTIONS = (
+    "## Prior rounds",
+    "## This round",
+    "### What I ran",
+    "### What it means",
+    "## Ruled out",
+    "## Open questions for SH",
+)
+
+
+def _norm_query(q: str) -> str:
+    """Whitespace- and case-insensitive form, so re-running a query with different
+    spacing still counts as a repeat."""
+    return re.sub(r"\s+", " ", (q or "").strip().lower())
+
+
+def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
+    """How many queries this round this senior had not already run, and the
+    updated seen-set. Diffed against ALL of its prior rounds, not just the last."""
+    seen = set(prior)
+    fresh = {_norm_query(q) for q in (spl_used or []) if _norm_query(q)}
+    new = fresh - seen
+    return len(new), seen | fresh
+
+
+def truncate_words(text: str, cap: int = REPORT_WORD_CAP) -> tuple[str, bool]:
+    """Cut a report at the word cap. `value`/`confidence` are separate schema
+    fields, so truncating the prose never touches the answer (§8)."""
+    words = (text or "").split()
+    if len(words) <= cap:
+        return text or "", False
+    return " ".join(words[:cap]) + f"\n\n_[truncated at {cap} words]_", True
+
+
+def report_violations(md: str) -> list[str]:
+    """Template problems worth logging. Advisory: a malformed report is still
+    read by SH — the rubric is what judges it."""
+    out = [f"missing section {s!r}" for s in REQUIRED_SECTIONS if s not in (md or "")]
+    body = re.search(r"^## Prior rounds\s*$(.*?)^## ", md or "",
+                     re.MULTILINE | re.DOTALL)
+    if body:
+        lines = [ln for ln in body.group(1).splitlines() if ln.strip()]
+        if len(lines) > PRIOR_ROUNDS_MAX_LINES:
+            out.append(f"Prior rounds has {len(lines)} lines "
+                       f"(cap {PRIOR_ROUNDS_MAX_LINES})")
+    return out
+
+
+def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
+                 rounds_remaining: int, novel_spl_count: int) -> str:
+    """Replace whatever title the senior wrote with the runner's own, and add the
+    three fields the senior is not allowed to self-report."""
+    body = (md or "").lstrip()
+    if body.startswith("# "):
+        body = body.split("\n", 1)[1] if "\n" in body else ""
+    head = (f"# {senior_id} - {qid} - Round {round_n}\n"
+            f"_stamped by runner: rounds_remaining={rounds_remaining} "
+            f"novel_spl={novel_spl_count}_\n")
+    return head + body.lstrip("\n")
