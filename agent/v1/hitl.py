@@ -87,7 +87,12 @@ def resolve_interrupt(interrupts, *, qid: str, run_dir: str,
     print(f"[HITL] {payload.get('error')}")
     print("=" * 78)
     while True:
-        choice = input(f"[HITL] {'/'.join(options)}> ").strip().lower()
+        try:
+            choice = input(f"[HITL] {'/'.join(options)}> ").strip().lower()
+        except EOFError:
+            # isatty() can lie: a Git Bash background shell reports a tty whose
+            # stdin is already closed. Nobody can answer, so pause, don't crash.
+            raise RunPaused(path, banner + f" | decision request: {path}") from None
         if choice in options:
             print(f"[HITL] operator chose: {choice}")
             return choice
