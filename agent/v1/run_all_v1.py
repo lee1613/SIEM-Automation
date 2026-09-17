@@ -50,6 +50,7 @@ from hint_client import HintBook
 from hitl import RunPaused
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
+from sh_loop import run_question
 from splunk_pool import SplunkConnectionPool
 from splunk_subagent import SplunkWorkerPool
 from usage_tracker import UsageTracker
@@ -231,6 +232,11 @@ def main():
                         help="Run the Phase-0 recon pass before the question loop (seeds the case file).")
     parser.add_argument("--hints", action="store_true",
                         help="Buy official hint 1 on ungrounded >=500pt answers (cost deducted from earned points).")
+    parser.add_argument("--loop", default="conversational",
+                        choices=["conversational", "compiler"],
+                        help="conversational: the v1.3.1 SH<->Senior conversation "
+                             "(default on this branch). compiler: the v1.3.0 "
+                             "planner/executor/joiner loop, kept for A/B.")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
@@ -316,6 +322,29 @@ def main():
     checkpoint_db_path = os.path.join(logger.run_dir, "sh_checkpoints.sqlite")
     sh_graph, _ = build_sh_agent_compiler(OPENAI_API_KEY, SH_MODEL, ctx,
                                           checkpoint_db_path=checkpoint_db_path)
+
+    # The conversational loop drives one structured-output model directly rather
+    # than a graph: its routing decision is a validated object, and its memory is
+    # the message list run_question carries per question plus the case file.
+    from conversation import SHTurn
+    from langchain_openai import ChatOpenAI
+    from llm_errors import resilient_http_client
+    from plan_schema import load_manifest, render_briefing
+
+    sh_llm = ChatOpenAI(
+        api_key=OPENAI_API_KEY, model=SH_MODEL, max_completion_tokens=4096,
+        temperature=0, timeout=90.0, max_retries=3,
+        http_client=resilient_http_client(),
+    ).with_structured_output(SHTurn, method="json_schema", strict=True)
+    try:
+        briefing = render_briefing(load_manifest())
+    except (OSError, ValueError) as exc:
+        print(f"[SH] dataset briefing unavailable ({exc}) — running without it")
+        briefing = ""
+    # SH's cross-question memory for the conversational loop (mirrors the
+    # compiler graph's SQLite-checkpointed thread, kept as a plain message list
+    # here because run_question owns its own per-question message history).
+    sh_history: list = []
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
@@ -406,16 +435,41 @@ def main():
         stage_ms = {}
 
         # ── SH solves the question ────────────────────────────────────────────────
+        conv = {}
+        sh_llm_bound = None
         with logger.events.timer() as t_sh:
-            sh_answer, _ = run_sh(
-                sh_graph,
-                build_sh_message(qid, qtext, guidance, points=points),
-                run_thread,
-                qid=qid,
-                run_name=f"SH-{qid}",
-                tracker=tracker,
-                run_dir=logger.run_dir,
-            )
+            if args.loop == "conversational":
+                # Bare sh_llm.invoke() never reaches the tracker (run_question
+                # calls llm.invoke(msgs) with no config) — bind tracker/tags/
+                # metadata onto the model itself so every SH call this question
+                # is costed, same as run_sh's config= does for the compiler graph.
+                sh_llm_bound = sh_llm.with_config({
+                    "callbacks": [tracker], "tags": ["SH", qid],
+                    "metadata": {"role": "SH", "qid": qid},
+                    "run_name": f"SH-{qid}",
+                })
+                conv = run_question(
+                    llm=sh_llm_bound, pool=pool, qid=qid, question=qtext,
+                    guidance=guidance, points=points, run_dir=logger.run_dir,
+                    case_file=case_file, dataset_briefing=briefing,
+                    delegations=ctx.q_delegations, history=sh_history,
+                )
+                sh_answer = conv["answer"]
+                ctx.all_delegations.extend(ctx.q_delegations)
+                print(f"[SH CONV] {qid}: end={conv['end_reason']}  "
+                      f"turns={conv['turns']}  waves={conv['waves']}  "
+                      f"iterations={conv['senior_iterations']}/{conv['ceiling']}  "
+                      f"compactions={conv['compactions']}")
+            else:
+                sh_answer, _ = run_sh(
+                    sh_graph,
+                    build_sh_message(qid, qtext, guidance, points=points),
+                    run_thread,
+                    qid=qid,
+                    run_name=f"SH-{qid}",
+                    tracker=tracker,
+                    run_dir=logger.run_dir,
+                )
         stage_ms["sh"] = t_sh.ms
 
         # ── The answer SH already produced ───────────────────────────────────────
@@ -426,26 +480,42 @@ def main():
         # ('1368' -> '2085', where 1368 was correct), and changed nothing in 57.
         # Net zero, for a model dependency that twice put catastrophic text on
         # the scoreboard.
-        clean = sh_answer
-        if not sh_answer:
-            # run_sh returned its failure sentinel (it logged the reason).
-            clean = fallback_answer(sh_answer, ctx.q_delegations)
-            print("[SH] FAILED for this question; falling back to best worker answer")
-            logger.events.emit("sh_failed", qid=qid)
-        elif not answer_shaped(sh_answer):
-            # SH emitted something unsubmittable - a REPLAN block, a paragraph,
-            # a bare "?". A real worker's value beats it. This is the one case
-            # the extractor ever genuinely rescued (Q332, a REPLAN block that
-            # still contained the CVE), now handled without a model.
-            clean = fallback_answer(sh_answer, ctx.q_delegations)
-            print(f"[SH] answer not submittable ({sh_answer[:60]!r}); "
-                  "falling back to best worker answer")
-            logger.events.emit("sh_answer_unshaped", qid=qid)
+        if args.loop == "conversational":
+            # run_question's `answer` is already its own fallback (best
+            # candidate across every report this question produced, or "").
+            # Routing it through fallback_answer() would risk picking a
+            # delegation's `answer` field, which for conversational records is
+            # the whole markdown report, not a bare value — never submit that.
+            if answer_shaped(sh_answer):
+                clean = sh_answer
+            else:
+                clean = ""
+                if sh_answer:
+                    print(f"[SH CONV] answer not submittable ({sh_answer[:60]!r}); "
+                          "leaving blank rather than submitting report text")
+                    logger.events.emit("sh_conv_answer_unshaped", qid=qid)
+        else:
+            clean = sh_answer
+            if not sh_answer:
+                # run_sh returned its failure sentinel (it logged the reason).
+                clean = fallback_answer(sh_answer, ctx.q_delegations)
+                print("[SH] FAILED for this question; falling back to best worker answer")
+                logger.events.emit("sh_failed", qid=qid)
+            elif not answer_shaped(sh_answer):
+                # SH emitted something unsubmittable - a REPLAN block, a paragraph,
+                # a bare "?". A real worker's value beats it. This is the one case
+                # the extractor ever genuinely rescued (Q332, a REPLAN block that
+                # still contained the CVE), now handled without a model.
+                clean = fallback_answer(sh_answer, ctx.q_delegations)
+                print(f"[SH] answer not submittable ({sh_answer[:60]!r}); "
+                      "falling back to best worker answer")
+                logger.events.emit("sh_answer_unshaped", qid=qid)
         clean = finalize_answer(clean, ctx.q_delegations)
         print(f"[SH FINAL] clean={clean!r}")
 
         # ── Hint economy: ungrounded >=500pt answer buys official hint 1 ─────────
         hint_cost = 0
+        hint_conv: dict = {}
         if hint_book and points >= 500:
             tr = {i: {"answer": d.get("answer")} for i, d in enumerate(ctx.q_delegations)}
             if not is_grounded(clean, tr, qtext):
@@ -454,20 +524,51 @@ def main():
                     hint_cost = hint["cost"]
                     print(f"[HINT] buying hint 1 for {qid} (cost {hint_cost}): {hint['text']!r}")
                     logger.events.emit("hint_bought", qid=qid, cost=hint_cost)
-                    with logger.events.timer() as t_hint:
-                        sh_answer, _ = run_sh(
-                            sh_graph,
-                            (f"OFFICIAL HINT for {qid} (cost {hint_cost} pts, already "
-                             f"paid): {hint['text']}\nRe-investigate with this hint "
-                             f"and give a corrected FINAL ANSWER."),
-                            run_thread, qid=qid, run_name=f"SH-{qid}-hint",
-                            tracker=tracker, run_dir=logger.run_dir)
-                    stage_ms["hint"] = t_hint.ms
-                    clean = sh_answer
-                    if not answer_shaped(clean):
-                        clean = fallback_answer(sh_answer, ctx.q_delegations)
-                    clean = finalize_answer(clean, ctx.q_delegations)
-                    print(f"[HINT] post-hint clean={clean!r}")
+                    if args.loop == "conversational":
+                        # Same loop, same llm binding/history/case file — a
+                        # bare run_sh(sh_graph, ...) here would run the v1.3.0
+                        # compiler SH mid-experiment. run_dir is nested under
+                        # "hint" so its conversation artifacts don't overwrite
+                        # the first pass's.
+                        with logger.events.timer() as t_hint:
+                            hint_result = run_question(
+                                llm=sh_llm_bound, pool=pool, qid=qid, question=qtext,
+                                guidance=(f"{guidance}\nOFFICIAL HINT (cost {hint_cost} "
+                                          f"pts, already paid): {hint['text']}"),
+                                points=points,
+                                run_dir=os.path.join(logger.run_dir, "hint"),
+                                case_file=case_file, dataset_briefing=briefing,
+                                delegations=ctx.q_delegations, history=sh_history,
+                            )
+                        stage_ms["hint"] = t_hint.ms
+                        hint_conv = {
+                            "end_reason":        hint_result["end_reason"],
+                            "turns":             hint_result["turns"],
+                            "waves":             hint_result["waves"],
+                            "senior_iterations": hint_result["senior_iterations"],
+                            "ceiling":           hint_result["ceiling"],
+                            "compactions":       hint_result["compactions"],
+                        }
+                        if answer_shaped(hint_result["answer"]):
+                            clean = hint_result["answer"]
+                        # else: keep the pre-hint `clean`.
+                        clean = finalize_answer(clean, ctx.q_delegations)
+                        print(f"[HINT] post-hint clean={clean!r}")
+                    else:
+                        with logger.events.timer() as t_hint:
+                            sh_answer, _ = run_sh(
+                                sh_graph,
+                                (f"OFFICIAL HINT for {qid} (cost {hint_cost} pts, already "
+                                 f"paid): {hint['text']}\nRe-investigate with this hint "
+                                 f"and give a corrected FINAL ANSWER."),
+                                run_thread, qid=qid, run_name=f"SH-{qid}-hint",
+                                tracker=tracker, run_dir=logger.run_dir)
+                        stage_ms["hint"] = t_hint.ms
+                        clean = sh_answer
+                        if not answer_shaped(clean):
+                            clean = fallback_answer(sh_answer, ctx.q_delegations)
+                        clean = finalize_answer(clean, ctx.q_delegations)
+                        print(f"[HINT] post-hint clean={clean!r}")
 
         # ── Single scoreboard submission ──────────────────────────────────────────
         try:
@@ -517,6 +618,16 @@ def main():
             "num_delegations":  len(ctx.q_delegations),
             "delegations":      ctx.q_delegations,
             "candidate_ledger": build_ledger(ctx.q_delegations),
+            # §4.1: the experiment fails on cost if actuals track the ceiling.
+            "loop":              args.loop,
+            "end_reason":        conv.get("end_reason", ""),
+            "sh_turns":          conv.get("turns", 0),
+            "waves":             conv.get("waves", 0),
+            "senior_iterations": conv.get("senior_iterations", 0),
+            "ceiling":           conv.get("ceiling", 0),
+            "compactions":       conv.get("compactions", 0),
+            "grades":            conv.get("grades", []),
+            "hint_conv":         hint_conv,
         })
         with open(os.path.join(questions_dir, f"{qid}.json"), "w", encoding="utf-8") as f:
             json.dump(results[-1], f, indent=2, ensure_ascii=False)
