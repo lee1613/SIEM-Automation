@@ -163,3 +163,9 @@ def test_hint_conv_measurements_recorded_with_empty_default():
     assert '"hint_conv": dict' in SRC.replace(" ", "") or "hint_conv: dict = {}" in SRC
     assert '"hint_conv"' in SRC
     assert '"end_reason":        hint_result["end_reason"]'.replace(" ", "") in SRC.replace(" ", "")
+
+
+def test_hint_pass_delegations_reach_the_run_totals():
+    src = inspect.getsource(run_all_v1.main)
+    hint = src[src.index("hint_result = run_question"):]
+    assert "ctx.all_delegations.extend(ctx.q_delegations[n_before:])" in hint

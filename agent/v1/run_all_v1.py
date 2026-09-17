@@ -530,6 +530,7 @@ def main():
                         # compiler SH mid-experiment. run_dir is nested under
                         # "hint" so its conversation artifacts don't overwrite
                         # the first pass's.
+                        n_before = len(ctx.q_delegations)
                         with logger.events.timer() as t_hint:
                             hint_result = run_question(
                                 llm=sh_llm_bound, pool=pool, qid=qid, question=qtext,
@@ -541,6 +542,7 @@ def main():
                                 delegations=ctx.q_delegations, history=sh_history,
                             )
                         stage_ms["hint"] = t_hint.ms
+                        ctx.all_delegations.extend(ctx.q_delegations[n_before:])
                         hint_conv = {
                             "end_reason":        hint_result["end_reason"],
                             "turns":             hint_result["turns"],
