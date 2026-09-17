@@ -25,6 +25,8 @@ answered in text is more useful than one recorded as having failed, so
 
 from __future__ import annotations
 
+import re
+
 from langchain_core.tools import tool
 
 # Ordered worst-to-best; mirrors grounding._STATUS_RANK.
@@ -241,8 +243,14 @@ def parse_finding(messages: list, answer: str) -> dict:
     # `insight` is the routing enum SH reads first. A worker that omitted it, or
     # wrote something outside the two legal values, is classified the way the
     # ledger already classifies it: a committed, submittable value is FOUND.
-    insight = str(args.get("insight", "")).strip().upper().replace(" ", "_")
-    if insight not in ("FOUND", "NOT_FOUND"):
+    # Separators (spaces, hyphens, underscores) are stripped before comparison
+    # so "Not-Found" / "NOTFOUND" / "not_found" all normalise the same way.
+    insight_raw = re.sub(r"[\s_-]+", "", str(args.get("insight") or "").strip().upper())
+    if insight_raw == "FOUND":
+        insight = "FOUND"
+    elif insight_raw == "NOTFOUND":
+        insight = "NOT_FOUND"
+    else:
         insight = "FOUND" if value else "NOT_FOUND"
     if not value:
         # A value demoted to `notes` above leaves no candidate to route on.
@@ -262,5 +270,5 @@ def parse_finding(messages: list, answer: str) -> dict:
         "notes":      notes,
         "structured": True,
         "insight":    insight,
-        "report":     str(args.get("report", "")).strip(),
+        "report":     str(args.get("report") or "").strip(),
     }

@@ -45,3 +45,16 @@ def test_empty_finding_carries_the_new_keys():
 def test_prose_fallback_still_produces_the_new_keys():
     f = parse_finding([], "FINAL ANSWER: 42")
     assert f["insight"] == "NOT_FOUND" and f["report"] == ""
+
+
+def test_explicit_none_report_and_insight_are_null_safe():
+    f = parse_finding([_msg(status="partial", value="", report=None, insight=None)], "")
+    assert f["report"] == ""
+    assert f["insight"] == "NOT_FOUND"
+
+
+def test_insight_normalisation_tolerates_hyphens_and_no_separators():
+    hyphenated = parse_finding([_msg(status="partial", value="42", insight="Not-Found")], "")
+    smashed    = parse_finding([_msg(status="partial", value="42", insight="NOTFOUND")], "")
+    assert hyphenated["insight"] == "NOT_FOUND"
+    assert smashed["insight"] == "NOT_FOUND"
