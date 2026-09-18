@@ -76,9 +76,13 @@ with the reason:
 
 | Tier | Seniors | Rounds **per senior** | SH turns | Iterations per round | Ceiling |
 |---|---|---|---|---|---|
-| 1000 pt | 3 | 8 | 12 | 12 | 288 |
-| 500 pt | 2 | 5 | 8 | 12 | 120 |
+| 1000 pt | 3 | 8 | 28 | 12 | 288 |
+| 500 pt | 2 | 5 | 13 | 12 | 120 |
 | 100 pt | 1 | 3 | 5 | 12 | 36 |
+
+SH turns are `seniors × (rounds + 1) + 1`. That is enough for every senior to use all
+its rounds one after another (a turn per wave plus its spawn turn) and still leave a turn
+for the final ANSWER.
 
 SH normally runs one senior. It opens a second in parallel only when it has a competing
 suspicion that can be checked on different data. A question ends when one of these happens:
@@ -343,8 +347,6 @@ outcome split, structured-vs-prose rate, and solved-rate by SH confidence decile
   test, not a full run.
 - **The conversational loop is sequential.** Latency is about 2× v1.3.0 on the same senior.
   Questions are independent, but the runner solves them one at a time. `future_work.md` #6.
-- **The SH turn caps (5 / 8 / 12) can bind before per-senior rounds** when seniors run one
-  after another. Watch for `end_reason = turns` on v1.4.1 runs. `future_work.md` #8.
 - **Confidence is recorded but uncalibrated, and not even monotonic** — 90–99 → 0/3 while
   30–39 → 1/1 across 25 spawns. Nothing routes on it. `future_work.md` #4.
 - **NIM models are priced at zero**, so every reported cost is OpenAI-only. The architecture

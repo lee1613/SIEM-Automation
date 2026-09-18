@@ -25,9 +25,12 @@ ROUND_ITERS = 12         # iterations per senior round (v1.4.1: was 8, ~3-5 SPL 
 MAX_EXPLORATIONS = 1     # §2.3 — a second scout means the first failed
 
 # base_points -> budget. Read with tier_budget(); the floors are 1000/500/else.
+# sh_turns = seniors * (rounds + 1) + 1: enough for every senior to run all its
+# rounds one after another (a turn per wave plus its spawn turn) and a final ANSWER
+# (v1.4.1: was 12 / 8 / 5, which cut sequential seniors short on the upper tiers).
 TIERS: dict[int, dict] = {
-    1000: {"seniors": 3, "rounds": 8, "sh_turns": 12},
-    500:  {"seniors": 2, "rounds": 5, "sh_turns": 8},
+    1000: {"seniors": 3, "rounds": 8, "sh_turns": 28},
+    500:  {"seniors": 2, "rounds": 5, "sh_turns": 13},
     100:  {"seniors": 1, "rounds": 3, "sh_turns": 5},
 }
 

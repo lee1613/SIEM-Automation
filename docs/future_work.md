@@ -234,7 +234,8 @@ question's handoff had already recorded.
 
 ## 8. SH turn caps may bind before per-senior rounds
 
-**Status:** open question, 2026-09-18.
+**Status:** resolved 2026-09-18 in v1.4.1. The caps are now `seniors × (rounds + 1) + 1`:
+28 / 13 / 5, up from 12 / 8 / 5. Kept here for the reasoning.
 
 v1.4.1 made rounds per senior: each of up to 3 seniors gets the full tier rounds. The SH
 turn caps stayed at 5 / 8 / 12, and every wave costs one SH turn. When seniors run one after

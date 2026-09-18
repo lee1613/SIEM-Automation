@@ -4,8 +4,8 @@ from question_state import ROUND_ITERS, QuestionState, tier_budget
 
 def test_tier_table_matches_the_spec():
     assert tier_budget(100)  == {"tier": 100,  "seniors": 1, "rounds": 3, "sh_turns": 5,  "iters": 12}
-    assert tier_budget(500)  == {"tier": 500,  "seniors": 2, "rounds": 5, "sh_turns": 8,  "iters": 12}
-    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 8, "sh_turns": 12, "iters": 12}
+    assert tier_budget(500)  == {"tier": 500,  "seniors": 2, "rounds": 5, "sh_turns": 13, "iters": 12}
+    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 8, "sh_turns": 28, "iters": 12}
 
 
 def test_points_below_500_fall_to_the_base_tier():
@@ -137,3 +137,9 @@ def test_record_round_remembers_whether_the_round_hit_the_cap():
 
 def test_an_unknown_senior_is_not_capped():
     assert QuestionState(points=100).last_round_capped("nobody") is False
+
+
+def test_sh_turns_cover_every_senior_running_all_rounds_in_sequence():
+    for pts in (100, 500, 1000):
+        b = tier_budget(pts)
+        assert b["sh_turns"] >= b["seniors"] * (b["rounds"] + 1) + 1
