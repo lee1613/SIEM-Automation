@@ -100,3 +100,17 @@ def test_a_passing_round_clears_the_thrash_streak():
     st.record_r2("s1", failed=False)
     st.record_r2("s1", failed=True)
     assert st.continue_blocked("s1") is False
+
+
+def test_record_round_remembers_whether_the_round_hit_the_cap():
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    assert st.last_round_capped("s1") is False      # nothing worked yet
+    st.record_round("s1", capped=True)
+    assert st.last_round_capped("s1") is True
+    st.record_round("s1", capped=False)
+    assert st.last_round_capped("s1") is False, "only the LAST round counts"
+
+
+def test_an_unknown_senior_is_not_capped():
+    assert QuestionState(points=100).last_round_capped("nobody") is False

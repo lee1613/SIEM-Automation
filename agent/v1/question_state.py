@@ -52,6 +52,7 @@ class QuestionState:
     used: dict = field(default_factory=dict)         # sid -> rounds actually worked
     r2_streak: dict = field(default_factory=dict)    # sid -> consecutive R2 FAILs
     retired: set = field(default_factory=set)
+    capped: dict = field(default_factory=dict)       # sid -> last round ran out of iterations
 
     def __post_init__(self) -> None:
         self.budget = tier_budget(self.points)
@@ -114,8 +115,15 @@ class QuestionState:
         self.retire(sid)
 
     # ── per-senior rounds ─────────────────────────────────────────────────────
-    def record_round(self, sid: str) -> None:
+    def record_round(self, sid: str, *, capped: bool = False) -> None:
         self.used[sid] = self.used.get(sid, 0) + 1
+        self.capped[sid] = bool(capped)
+
+    def last_round_capped(self, sid: str) -> bool:
+        """Did this senior's most recent round run out of iterations? A capped
+        round stopped where the budget ran out, not where the work finished —
+        §3.5 blocks an ANSWER sourced from one."""
+        return bool(self.capped.get(sid, False))
 
     def rounds_left_for(self, sid: str) -> int:
         own = self.granted.get(sid, 0) - self.used.get(sid, 0)

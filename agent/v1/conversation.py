@@ -257,4 +257,13 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                        "RETIRE it or change its scope, do not continue")
         if answer_blocked(e):
             out.append("ANSWER is blocked: the source report is graded R1 = FAIL")
+        # The cut-off gate (§3.5). A round that ran out of iterations stopped where
+        # the budget ended, not where the work did: test_20260918_104111's s1 filed
+        # a FOUND report carrying the runner's cap line and two unanswered questions
+        # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
+        # CLARIFY costs no round, so the cheap move is always available.
+        if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
+            out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
+                       "at the iteration cap — CLARIFY it (costs no round) or COMMAND "
+                       "one more round before answering from it")
     return out

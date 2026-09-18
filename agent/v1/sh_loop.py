@@ -68,9 +68,10 @@ GRADE EVERY REPORT YOU READ — three enums per senior, alongside the route:
   R3 answer readiness   Is there a candidate in submittable shape, or prose / a hedge / nothing?
 Each is PASS, WEAK or FAIL. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
 
-TWO GATES YOU MUST RESPECT
+THREE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
   * Wrong question: if you grade the source report R1 = FAIL, the ANSWER route is blocked. A value can be real, grounded and well-formed and still answer something adjacent to what was asked.
+  * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them with a CLARIFY, which costs no round, or COMMAND one more round. Then answer.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -481,7 +482,11 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 result = {**result, "report": result.get("answer", ""), "round": 1,
                           "insight": "SCOPE", "spawn_type": "exploration"}
             else:
-                state.record_round(sid)
+                # Same rule the report's own cap line uses (SeniorSession.work):
+                # a round that spent every iteration was cut off, not concluded.
+                state.record_round(
+                    sid, capped=(bool(result.get("cap_hit"))
+                                 or int(result.get("iterations", 0)) >= ROUND_ITERS))
             rel = log.write_report(sid, result.get("round", 0), result.get("report", ""))
             log.senior_to_sh(sid, round_n=result.get("round", 0),
                              insight=result.get("insight", "?"),

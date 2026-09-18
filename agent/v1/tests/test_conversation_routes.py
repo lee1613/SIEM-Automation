@@ -286,3 +286,48 @@ def test_a_clarify_must_target_an_active_senior():
     assert directive_violations([e], st) != []
     assert directive_violations([entry(senior_id="e2", route="CLARIFY", clarify_reason="unclear",
                                        questions=["what?"])], st) != []
+
+
+# ── the capped-report gate (§3.5) ──────────────────────────────────────────────
+# test_20260918_104111: s1's round 1 ran out of iterations, its report carried the
+# runner's "Iteration cap reached" line and two open questions for SH, and SH
+# graded it all-PASS and answered 4 seconds later. The value was wrong. A report
+# the senior was cut off mid-way through is not a finished report.
+
+def _spawned(sid="s1", *, capped: bool) -> QuestionState:
+    st = QuestionState(points=1000)
+    st.open_senior(sid)
+    st.record_round(sid, capped=capped)
+    return st
+
+
+def test_answer_is_blocked_when_its_source_report_was_cut_off_at_the_cap():
+    e = entry(route="ANSWER", value="7113", value_kind="count", source_senior="s1",
+              justification="the report computes the duration",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    out = directive_violations([e], _spawned(capped=True))
+    assert any("cut off at the iteration cap" in v for v in out), out
+
+
+def test_answer_passes_when_the_source_round_finished_on_its_own():
+    e = entry(route="ANSWER", value="1666", value_kind="count", source_senior="s1",
+              justification="coinhive flows bracket the window",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    assert directive_violations([e], _spawned(capped=False)) == []
+
+
+def test_a_later_uncapped_round_clears_the_block():
+    st = _spawned(capped=True)
+    st.record_round("s1", capped=False)
+    e = entry(route="ANSWER", value="1666", value_kind="count", source_senior="s1",
+              justification="confirmed after one more round",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    assert directive_violations([e], st) == []
+
+
+def test_the_block_does_not_touch_other_routes():
+    st = _spawned(capped=True)
+    e = entry(senior_id="s1", route="COMMAND", decision="continue",
+              rationale="finish the window", directive="Bracket the coinhive flows.",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+    assert directive_violations([e], st) == []
