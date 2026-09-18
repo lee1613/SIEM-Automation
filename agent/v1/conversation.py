@@ -64,6 +64,17 @@ class SeniorDirective(BaseModel):
         description="Did this round produce information the prior rounds did not have?")
     r3_answer_readiness: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
         description="Is there a candidate in submittable shape, or prose / a hedge / nothing?")
+    r4_premise_verification: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
+        description="Is every premise the senior's conclusion or direction rests on backed by "
+                    "a result shown in the report? PASS: each has a query and result behind "
+                    "it. WEAK: minor premises untested, the chain holds without them. FAIL: "
+                    "the candidate or the direction depends on a premise nobody tested.")
+    open_question_answers: list[str] = Field(
+        description="Your answer to each bullet in the '## Open questions for SH' section of "
+                    "the report this entry addresses (for ANSWER: the source senior's report), "
+                    "in order, one per question. Answer from the case, the question text and "
+                    "sibling reports; if you cannot, say what would settle it. Empty only when "
+                    "that report asked nothing, and for SPAWN.")
     route: Literal["SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER"] = Field(
         description="Exactly one route for this senior this wave.")
 
@@ -200,19 +211,43 @@ def answer_blocked(entry: SeniorDirective) -> bool:
     return entry.route == "ANSWER" and entry.r1_scope_alignment == "FAIL"
 
 
+def premise_blocked(entry: SeniorDirective) -> bool:
+    """The unverified-premise gate: a value derived from a premise nobody tested
+    is a guess with a query attached (Q216, test_20260918_104111: 'powershell is
+    the miner' was assumed, never checked, and every later query built on it)."""
+    return entry.route == "ANSWER" and entry.r4_premise_verification == "FAIL"
+
+
+def open_question_violations(entries: list[SeniorDirective], asked: dict) -> list[str]:
+    """SH answers every open question a senior put to it. `asked` maps each senior
+    whose report was just read to how many questions it asked (see
+    senior_report.open_questions). The entry that owes the answers is the route
+    addressed to that senior, or the ANSWER built on its report."""
+    out = []
+    for e in entries:
+        sid = e.source_senior if e.route == "ANSWER" else e.senior_id
+        need = asked.get(sid, 0)
+        got = sum(1 for a in e.open_question_answers if a.strip())
+        if need and got < need:
+            out.append(f"{sid} asked {need} open question(s) and you answered {got} — "
+                       f"answer each one, in order, in open_question_answers")
+    return out
+
+
 def grade_violations(entries: list[SeniorDirective], *, graded: set, exploration: set) -> list[str]:
     """Grades must be emitted for every senior whose report was read, and never
     for an exploration worker (which structurally cannot produce a value)."""
     out = []
     for e in entries:
-        got = (e.r1_scope_alignment, e.r2_progress, e.r3_answer_readiness)
+        got = (e.r1_scope_alignment, e.r2_progress, e.r3_answer_readiness,
+               e.r4_premise_verification)
         if e.senior_id in exploration:
             if any(g != NA for g in got):
                 out.append(f"{e.senior_id}: exploration workers are not graded")
             continue
         needs_grades = (e.route == "ANSWER") or (e.senior_id in graded)
         if needs_grades and any(g not in GRADES for g in got):
-            out.append(f"{e.senior_id or e.route}: all three grades required (PASS/WEAK/FAIL)")
+            out.append(f"{e.senior_id or e.route}: all four grades required (PASS/WEAK/FAIL)")
     # An ANSWER ends the question and the sweep retires every survivor, so
     # rejecting it for an unrouted sibling would only burn a turn.
     if any(e.route == "ANSWER" for e in entries):
@@ -259,6 +294,10 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                        "RETIRE it or change its scope, do not continue")
         if answer_blocked(e):
             out.append("ANSWER is blocked: the source report is graded R1 = FAIL")
+        if premise_blocked(e):
+            out.append("ANSWER is blocked: the source report is graded R4 = FAIL — its "
+                       "conclusion rests on a premise nobody tested. COMMAND a round that "
+                       "tests that premise first, or CRITIC it")
         # The cut-off gate (§3.5). A round that ran out of iterations stopped where
         # the budget ended, not where the work did: test_20260918_104111's s1 filed
         # a FOUND report carrying the runner's cap line and two unanswered questions

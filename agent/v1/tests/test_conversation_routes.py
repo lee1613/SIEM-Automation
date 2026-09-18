@@ -3,12 +3,14 @@ from pydantic import ValidationError
 
 from conversation import (BASES, ROUTES, TECHNIQUES, SeniorDirective, SHTurn,
                           answer_blocked, directive_violations, effective_r2,
-                          grade_violations)
+                          grade_violations, open_question_violations,
+                          premise_blocked)
 from question_state import QuestionState
 
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
-    "r3_answer_readiness": "NA", "route": "RETIRE",
+    "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
+    "open_question_answers": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
@@ -276,17 +278,20 @@ def test_two_routes_to_one_senior_are_refused():
 
 
 def test_a_read_report_left_unrouted_is_refused():
-    graded = dict(r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+    graded = dict(r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK",
+                  r4_premise_verification="PASS")
     only_s1 = entry(senior_id="s1", route="RETIRE", reason="done", **graded)
     assert grade_violations([only_s1], graded={"s1", "s2"}, exploration=set()) != []
     answer_s2 = entry(route="ANSWER", value="v", source_senior="s2", justification="j",
-                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+                      r4_premise_verification="PASS")
     assert grade_violations([only_s1, answer_s2], graded={"s1", "s2"}, exploration=set()) == []
 
 
 def test_an_answer_turn_need_not_route_its_siblings():
     answer_s1 = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
-                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+                      r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+                      r4_premise_verification="PASS")
     assert grade_violations([answer_s1], graded={"s1", "s2"}, exploration=set()) == []
 
 
@@ -343,3 +348,80 @@ def test_the_block_does_not_touch_other_routes():
               rationale="finish the window", directive="Bracket the coinhive flows.",
               r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
     assert directive_violations([e], st) == []
+
+
+# ── R4 premise verification ──────────────────────────────────────────────────
+
+def _graded(**kw):
+    base = dict(senior_id="s1", route="COMMAND", decision="continue", rationale="r",
+                directive="d", r1_scope_alignment="PASS", r2_progress="PASS",
+                r3_answer_readiness="WEAK", r4_premise_verification="PASS")
+    base.update(kw)
+    return entry(**base)
+
+
+def test_r4_is_required_on_a_graded_report():
+    assert grade_violations([_graded()], graded={"s1"}, exploration=set()) == []
+    no_r4 = _graded(r4_premise_verification="NA")
+    assert grade_violations([no_r4], graded={"s1"}, exploration=set()) != []
+
+
+def test_an_exploration_entry_must_not_carry_r4():
+    e = entry(senior_id="e1", route="RETIRE", reason="scope proposed",
+              r4_premise_verification="PASS")
+    assert grade_violations([e], graded=set(), exploration={"e1"}) != []
+
+
+def test_r4_fail_blocks_answer_and_r4_weak_does_not():
+    def ans(r4):
+        return entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+                     r1_scope_alignment="PASS", r2_progress="PASS",
+                     r3_answer_readiness="PASS", r4_premise_verification=r4)
+    assert premise_blocked(ans("FAIL")) is True
+    assert premise_blocked(ans("WEAK")) is False
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    out = directive_violations([ans("FAIL")], st)
+    assert any("R4" in v for v in out)
+    assert directive_violations([ans("PASS")], st) == []
+
+
+def test_r4_fail_does_not_block_a_command():
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    assert directive_violations([_graded(r4_premise_verification="FAIL")], st) == []
+
+
+# ── SH must answer the senior's open questions ───────────────────────────────
+
+def test_unanswered_open_questions_reject_the_turn():
+    asked = {"s1": 2}
+    assert open_question_violations([_graded()], asked) != []
+    one = _graded(open_question_answers=["Yes, that window.", "   "])
+    assert open_question_violations([one], asked) != []      # blanks do not count
+    both = _graded(open_question_answers=["Yes, that window.", "No — stay in scope."])
+    assert open_question_violations([both], asked) == []
+
+
+def test_a_senior_that_asked_nothing_needs_no_answers():
+    assert open_question_violations([_graded()], {"s1": 0}) == []
+    assert open_question_violations([_graded()], {}) == []
+
+
+def test_an_answer_route_answers_its_source_seniors_questions():
+    a = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+              r4_premise_verification="PASS")
+    assert open_question_violations([a], {"s1": 1}) != []
+    a2 = a.model_copy(update={"open_question_answers": ["Only the one host."]})
+    assert open_question_violations([a2], {"s1": 1}) == []
+
+
+def test_every_route_to_a_senior_must_answer_its_questions():
+    for route_kw in (dict(route="RETIRE", reason="done"),
+                     dict(route="CLARIFY", clarify_reason="suspect", questions=["q?"]),
+                     dict(route="CRITIC", basis=BASES[0], flaw="f", why_it_fails="w",
+                          fix_directive="d")):
+        e = entry(senior_id="s1", r1_scope_alignment="PASS", r2_progress="PASS",
+                  r3_answer_readiness="WEAK", r4_premise_verification="PASS", **route_kw)
+        assert open_question_violations([e], {"s1": 1}) != [], route_kw["route"]

@@ -3,6 +3,7 @@ from senior_report import (
     PRIOR_ROUNDS_MAX_LINES,
     REPORT_WORD_CAP,
     novel_spl,
+    open_questions,
     report_violations,
     stamp_header,
     truncate_words,
@@ -21,6 +22,9 @@ GOOD = """# Senior #1 - Q216 - Round 1
 - index=botsv3 sourcetype=cisco:nvm | stats count -> 0 events
 ### What it means
 The feed carries no events in the window, so this scope cannot hold the answer.
+
+## Assumptions
+- The window SH gave me is the incident window - UNVERIFIED
 
 ## Ruled out
 - cisco:nvm - no events in the given window
@@ -249,3 +253,32 @@ result
 """
     violations = report_violations(report)
     assert any("Prior rounds" in v for v in violations)
+
+
+def test_a_report_without_an_assumptions_section_is_a_violation():
+    assert report_violations(GOOD.replace("## Assumptions", "## Notes")) != []
+
+
+def test_open_questions_are_the_bullets_of_that_section():
+    assert open_questions(GOOD) == [
+        "Is the window you gave me the incident window, or the whole index?"]
+
+
+def test_none_is_not_an_open_question():
+    for blank in ("- none", "- None.", "- n/a", "- (none)", "none"):
+        md = GOOD.split("## Open questions for SH")[0] + "## Open questions for SH\n" + blank
+        assert open_questions(md) == [], blank
+
+
+def test_open_questions_stop_at_the_next_heading_and_at_the_cap_line():
+    md = (GOOD + "- Should I widen to the whole feed?\n\n"
+          "_Iteration cap reached: 8/8 iterations used this round — cut off, not finished._\n")
+    assert open_questions(md) == [
+        "Is the window you gave me the incident window, or the whole index?",
+        "Should I widen to the whole feed?"]
+    later = GOOD + "\n## Something else\n- not a question for SH\n"
+    assert len(open_questions(later)) == 1
+
+
+def test_no_open_questions_section_means_none():
+    assert open_questions(GOOD.split("## Open questions for SH")[0]) == []

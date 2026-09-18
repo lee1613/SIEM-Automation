@@ -220,8 +220,9 @@ class SplunkWorkerPool:
                          max_iter=max_iter, thread_id=thread_id)
 
     def clarify(self, *, thread_id: str, qid: str, idx: int, questions: list,
-                technique: str = "senior", max_iter: int = 8) -> str:
+                technique: str = "senior", max_iter: int = 8, preface: str = "") -> str:
         """Answer SH's clarifying questions from the senior's existing context.
+        `preface` (SH's answers to the senior's own open questions) precedes them.
 
         No tools and no round consumed (§3.3): if the senior would have to touch
         Splunk to answer, the route was a COMMAND, not a CLARIFY. The exchange is
@@ -231,7 +232,8 @@ class SplunkWorkerPool:
         config  = {"configurable": {"thread_id": thread_id}}
         history = list((graph.get_state(config).values or {}).get("messages", []))
         ask = HumanMessage(content=(
-            "Your orchestrator has questions about the report you just filed. "
+            preface
+            + "Your orchestrator has questions about the report you just filed. "
             "Answer them from what you ALREADY know — do not search, do not call "
             "any tool. If you genuinely cannot answer without a new query, say so "
             "in one line and name the query that would settle it.\n\n"

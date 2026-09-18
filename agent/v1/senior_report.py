@@ -26,6 +26,7 @@ REQUIRED_SECTIONS = (
     "## This round",
     "### What I ran",
     "### What it means",
+    "## Assumptions",
     "## Ruled out",
     "## Open questions for SH",
 )
@@ -66,6 +67,25 @@ def report_violations(md: str) -> list[str]:
         if len(lines) > PRIOR_ROUNDS_MAX_LINES:
             out.append(f"Prior rounds has {len(lines)} lines "
                        f"(cap {PRIOR_ROUNDS_MAX_LINES})")
+    return out
+
+
+_NOT_A_QUESTION = {"", "none", "n/a", "na", "(none)", "nothing", "no"}
+
+
+def open_questions(md: str) -> list[str]:
+    """The senior's "## Open questions for SH" bullets. SH must answer each one
+    (conversation.open_question_violations), so a bullet saying "none" is not a
+    question. The section ends at the next heading or the runner's cap line."""
+    m = re.search(r"^## Open questions for SH[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
+                  md or "", re.MULTILINE | re.DOTALL)
+    if not m:
+        return []
+    out = []
+    for ln in m.group(1).splitlines():
+        b = re.match(r"^\s*(?:[-*]|\d+[.)])\s+(.*)$", ln)
+        if b and b.group(1).strip().strip(".").lower() not in _NOT_A_QUESTION:
+            out.append(b.group(1).strip())
     return out
 
 

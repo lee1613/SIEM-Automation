@@ -178,11 +178,12 @@ class SeniorSession:
                 + f"\n### What it means\n{(result.get('notes') or '').strip()[:800]}\n")
 
     # ── clarify (§3.3) ────────────────────────────────────────────────────────
-    def clarify(self, questions: list) -> str:
-        """No tools, no round. Only SH's turn budget bounds how often this happens."""
+    def clarify(self, questions: list, preface: str = "") -> str:
+        """No tools, no round. Only SH's turn budget bounds how often this happens.
+        `preface` carries SH's answers to this senior's own open questions."""
         return self.pool.clarify(thread_id=self.thread_id, qid=self.qid, idx=self.idx,
                                  questions=list(questions), technique=self.technique,
-                                 max_iter=self.iters)
+                                 max_iter=self.iters, preface=preface)
 
     # ── retirement (§7) ───────────────────────────────────────────────────────
     def handoff(self, reason: str) -> str:

@@ -23,7 +23,7 @@ import os
 import sys
 
 GRADES = ("PASS", "WEAK", "FAIL")
-DIMENSIONS = ("r1", "r2_sh", "r2_effective", "r3")
+DIMENSIONS = ("r1", "r2_sh", "r2_effective", "r3", "r4")
 
 
 def summarize(grades: list) -> dict:

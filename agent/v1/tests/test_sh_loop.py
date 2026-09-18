@@ -10,7 +10,8 @@ from sh_loop import NO_ANSWER, run_question
 # second top-level tests/ directory, so a cross-test import is ambiguous.
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
-    "r3_answer_readiness": "NA", "route": "RETIRE",
+    "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
+    "open_question_answers": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
@@ -85,7 +86,8 @@ def _spawn(**kw):
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
-                r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+                r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+                r4_premise_verification="PASS")
     base.update(kw)
     return entry(**base)
 
@@ -149,7 +151,7 @@ def test_running_out_of_turns_ends_the_question_with_no_answer(tmp_path):
     # 100pt tier: 5 SH turns. Script 5 spawn-less no-op turns by clarifying forever.
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="unclear",
                     questions=["what?"], r1_scope_alignment="WEAK",
-                    r2_progress="PASS", r3_answer_readiness="WEAK")
+                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     llm = _LLM([_turn(_spawn())] + [_turn(clarify) for _ in range(6)])
     out = _run(llm, _Pool(), tmp_path, points=100)
     assert out["end_reason"] == "turns"
@@ -159,7 +161,7 @@ def test_running_out_of_turns_ends_the_question_with_no_answer(tmp_path):
 def test_a_clarify_consumes_a_turn_but_no_wave(tmp_path):
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
                     questions=["Was the window mine?"], r1_scope_alignment="PASS",
-                    r2_progress="PASS", r3_answer_readiness="WEAK")
+                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     pool = _Pool()
     llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer())])
     out = _run(llm, pool, tmp_path)
@@ -173,7 +175,7 @@ def test_a_clarify_consumes_a_turn_but_no_wave(tmp_path):
 def test_retirement_writes_a_handoff(tmp_path):
     retire = entry(senior_id="s1", route="RETIRE", reason="scope exhausted",
                    r1_scope_alignment="PASS", r2_progress="WEAK",
-                   r3_answer_readiness="WEAK")
+                   r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     llm = _LLM([_turn(_spawn()), _turn(retire), _turn(_answer())])
     _run(llm, _Pool(), tmp_path)
     assert os.path.exists(os.path.join(str(tmp_path), "Q216", "handoffs", "s1_handoff.md"))
@@ -208,7 +210,7 @@ def test_a_repeated_round_is_graded_r2_fail_by_code(tmp_path):
     cont = entry(senior_id="s1", route="COMMAND", decision="continue",
                  rationale="keep going", directive="Go one step further.",
                  r1_scope_alignment="PASS", r2_progress="PASS",
-                 r3_answer_readiness="WEAK")
+                 r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     llm = _LLM([_turn(_spawn()), _turn(cont), _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     second = [g for g in out["grades"] if g["round"] == 2][0]
@@ -289,7 +291,7 @@ def test_a_failed_clarify_is_fed_back_and_the_question_continues(tmp_path):
 
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
                     questions=["Was the window mine?"], r1_scope_alignment="PASS",
-                    r2_progress="PASS", r3_answer_readiness="WEAK")
+                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer())])
     out = _run(llm, _BrokenClarify(), tmp_path)
     assert out["answer"] == "1367.875"
@@ -301,14 +303,15 @@ def test_a_failed_clarify_is_fed_back_and_the_question_continues(tmp_path):
 def _continue(**kw):
     base = dict(senior_id="s1", route="COMMAND", decision="continue",
                 rationale="keep going", directive="Go one step further.",
-                r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK")
+                r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="WEAK",
+                r4_premise_verification="PASS")
     base.update(kw)
     return entry(**base)
 
 
 def _retire(sid="s1", **kw):
     base = dict(senior_id=sid, route="RETIRE", reason="done", r1_scope_alignment="PASS",
-                r2_progress="PASS", r3_answer_readiness="WEAK")
+                r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
     base.update(kw)
     return entry(**base)
 
@@ -488,3 +491,36 @@ def test_each_delegation_records_its_duration(tmp_path):
     sink = []
     _run(_LLM([_turn(_spawn()), _turn(_answer())]), _Slow(), tmp_path, delegations=sink)
     assert sink[0]["duration_s"] >= 0.01
+
+
+# ── SH must answer the senior's open questions; R4 is recorded ───────────────
+
+ASKING = REPORT.replace("## Open questions for SH\n- none\n",
+                        "## Open questions for SH\n- Is host A the one the question means?\n")
+
+
+class _Recording(_Pool):
+    def __init__(self, **over):
+        super().__init__(**over)
+        self.messages = []
+
+    def run_round(self, **kw):
+        self.messages.append(kw.get("message", ""))
+        return super().run_round(**kw)
+
+
+def test_ignoring_a_seniors_open_question_is_rejected(tmp_path):
+    pool = _Recording(report=ASKING)
+    answered = _continue(open_question_answers=["Yes: host A is the endpoint in scope."])
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(answered),
+                _turn(_answer(open_question_answers=["Yes, host A."]))])
+    _run(llm, pool, tmp_path)
+    assert pool.rounds == 2, "the ignoring turn must not run a round"
+    assert "open question" in _conversation(tmp_path).lower()
+    assert "host A is the endpoint in scope" in pool.messages[-1],         "SH's answer must reach the senior with its next directive"
+
+
+def test_grade_rows_record_r4(tmp_path):
+    llm = _LLM([_turn(_spawn()), _turn(_answer(r4_premise_verification="WEAK"))])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["grades"][0]["r4"] == "WEAK"

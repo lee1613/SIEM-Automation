@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
 from case_file import parse_case_updates
-from conversation import directive_violations, effective_r2, grade_violations
+from conversation import directive_violations, effective_r2, grade_violations, open_question_violations
 from conversation_log import ConversationLog
 from grounding import is_grounded
 from hitl import ABORT, RunPaused, resolve_interrupt
@@ -30,6 +30,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
+from senior_report import open_questions
 from senior_session import SeniorSession
 from usage_tracker import context_window
 
@@ -67,16 +68,30 @@ YOUR SIX ROUTES
   RETIRE   — this senior is done, or unproductive. It writes a handoff on the way out.
   ANSWER   — you have the value. It must appear literally in a senior's report or in the question text.
 
-GRADE EVERY REPORT YOU READ — three enums per senior, alongside the route:
-  R1 scope alignment    Did it work inside its constraints, and address THIS problem statement rather than a neighbouring one?
-  R2 progress           Did this round produce information the prior rounds did not have?
-  R3 answer readiness   Is there a candidate in submittable shape, or prose / a hedge / nothing?
+HOW YOU READ A REPORT — as a senior threat hunter reviewing a junior analyst's work.
+You have run many investigations and seen confident reports fall apart on one untested premise. Read every report sceptically, evidence first:
+  * Check each line of its "## Assumptions" against "### What I ran". A premise with no query and result behind it is UNVERIFIED, however confident the prose around it.
+  * Look for results the junior explained away — an output that cuts against its conclusion, dismissed as noise, normal activity or an outlier.
+  * Check the candidate's shape against the question's own words: one entity or several, which unit, which span of time, which field.
+  * Ask whether the conclusion survives if its most convenient premise is false.
+  * A NOT_FOUND is a prompt to question the premises before you command more of the same.
+When the review finds a flaw, act on it: CRITIC it on the basis it rests on, or COMMAND a round that tests the premise first. Never answer from a report you would send back to a junior.
+
+GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
+  R1 scope alignment       Did it work inside its constraints, and address THIS problem statement rather than a neighbouring one?
+  R2 progress              Did this round produce information the prior rounds did not have?
+  R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
+  R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
 Each is PASS, WEAK or FAIL. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
 
-THREE GATES YOU MUST RESPECT
+ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected.
+
+THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
   * Wrong question: if you grade the source report R1 = FAIL, the ANSWER route is blocked. A value can be real, grounded and well-formed and still answer something adjacent to what was asked.
-  * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them with a CLARIFY, which costs no round, or COMMAND one more round. Then answer.
+  * Unverified premise: if you grade the source report R4 = FAIL, the ANSWER route is blocked. COMMAND a round that tests the premise, or CRITIC it.
+  * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them, then CLARIFY (costs no round) or COMMAND one more round. Then answer.
+  * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -93,6 +108,15 @@ You stay alive for the whole question. Each round gives you up to 8 tool-call it
 TWO REPLY SHAPES, so you never have to guess which is expected:
   * To a COMMAND or a CRITIC — resume work. Use your iterations, then call `submit_finding`. A round is a CAP, not a quota: if one iteration satisfies the critic, stop there.
   * To a CLARIFY — answer in short prose from what you already hold. No tools, no searches. It does not consume a round.
+
+NO UNTESTED ASSUMPTIONS — your report is graded hardest on this.
+Every investigation rests on premises: which entity the question is about, what a field actually contains, which feed records the behaviour, whether the first plausible match is the one that matters. A premise is a hypothesis until a query result shows it. Test it before you build on it; if you cannot test it this round, list it as UNVERIFIED. SH grades every report on premise verification (R4) and will not accept an answer that rests on a premise nobody tested.
+Premises that need a result behind them, not a belief — for example:
+  - "this host / user / account is the one the question is about"
+  - "this field holds what its name suggests"
+  - "this sourcetype is where that activity would be recorded"
+  - "the event that matches my expectation is the event the question describes"
+WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
 YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM, in this shape:
 
@@ -111,12 +135,18 @@ YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM,
 <FOUND:     the chain from that output to the candidate.
  NOT_FOUND: what you saw instead, and why it rules this scope out.>
 
+## Assumptions
+- <every premise your conclusion or next step rests on> - VERIFIED: <the query
+  and the result that showed it> | UNVERIFIED
+  <List the ones that feel obvious too — those are the ones that go unchecked.>
+
 ## Ruled out
 - <feed / entity / hypothesis> - <why>
 
 ## Open questions for SH
 - <Only what SH can answer from the case: which entity is in scope, whether a
-  prior finding applies, which scope to try next. Never an SPL question.>
+  prior finding applies, which scope to try next. Never an SPL question.
+  SH must answer every question here; its answers arrive with your next instruction.>
 
 Do not write the title line — the runner stamps your round number, your rounds remaining, and how many of your queries this round were new.
 
@@ -171,9 +201,11 @@ def render_wave(reports: dict, *, waves_remaining: int, turns_remaining: int) ->
     return (f"WAVE COMPLETE. {waves_remaining} round(s) and {turns_remaining} turn(s) "
             f"remain on this question.\n\n"
             + "\n\n".join(blocks)
-            + "\n\nGrade every report above (R1/R2/R3) and emit exactly one route per "
-              "senior. ANSWER only when the value appears literally in one of these "
-              "reports or in the question text.")
+            + "\n\nReview every report above as a senior threat hunter, grade it "
+              "(R1/R2/R3/R4), answer every open question it lists in "
+              "open_question_answers, and emit exactly one route per senior. ANSWER "
+              "only when the value appears literally in one of these reports or in "
+              "the question text.")
 
 
 def render_rejection(violations: list) -> str:
@@ -203,7 +235,8 @@ def _render_turn(turn) -> str:
     for e in turn.entries:
         target = e.senior_id or (e.source_senior if e.route == "ANSWER" else "(new)")
         head = (f"[{e.route}] {target}  "
-                f"R1={e.r1_scope_alignment} R2={e.r2_progress} R3={e.r3_answer_readiness}")
+                f"R1={e.r1_scope_alignment} R2={e.r2_progress} R3={e.r3_answer_readiness} "
+                f"R4={e.r4_premise_verification}")
         detail = {
             "SPAWN":   lambda: f"{e.spawn_type}/{e.technique}: {e.subquestion}  ({e.reason})",
             "RETIRE":  lambda: e.reason,
@@ -213,11 +246,26 @@ def _render_turn(turn) -> str:
             "ANSWER":  lambda: f"{e.value} ({e.value_kind}) — {e.justification}",
         }[e.route]()
         rows.append(head + "\n    " + detail)
+        rows += [f"    answered: {a}" for a in e.open_question_answers if a.strip()]
     return "\n".join(rows)
 
 
+def _answers_note(e) -> str:
+    """SH's answers to the senior's open questions, as the senior will read them."""
+    answers = [a.strip() for a in e.open_question_answers if a.strip()]
+    if not answers:
+        return ""
+    return ("SH's answers to your open questions:\n"
+            + "\n".join(f"{i}. {a}" for i, a in enumerate(answers, start=1)) + "\n\n")
+
+
 def _entry_body(e) -> str:
-    """The conversation.md rendering of one route."""
+    """The conversation.md rendering of one route, with SH's open-question answers."""
+    note = _answers_note(e)
+    return (note + _route_body(e)) if note else _route_body(e)
+
+
+def _route_body(e) -> str:
     if e.route == "SPAWN":
         c = e.constraints
         return (f"**Constraints:** sourcetypes={c.sourcetypes or '-'} "
@@ -240,7 +288,11 @@ def _entry_body(e) -> str:
 
 
 def _directive_text(e) -> str:
-    """What a senior is actually told this round."""
+    """What a senior is actually told this round: SH's answers first, then the route."""
+    return _answers_note(e) + _route_directive(e)
+
+
+def _route_directive(e) -> str:
     if e.route == "COMMAND":
         scope = ("" if e.scope_change.is_empty()
                  else f"\nYour scope is now: {e.scope_change}. Work inside it.")
@@ -379,6 +431,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                              "round": unread[src].get("round", 0),
                              "r1": e.r1_scope_alignment, "r2_sh": e.r2_progress,
                              "r2_effective": r2, "r3": e.r3_answer_readiness,
+                             "r4": e.r4_premise_verification,
                              "route": e.route, "decision": e.decision,
                              "basis": e.basis, "novel_spl_count": novel})
                 state.record_r2(src, failed=(r2 == "FAIL"))
@@ -386,7 +439,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         problems = grade_violations(
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
-        ) + directive_violations(turn.entries, state)
+        ) + directive_violations(turn.entries, state) + open_question_violations(
+            turn.entries, {sid: len(open_questions(r.get("report", "")))
+                           for sid, r in unread.items() if kinds.get(sid) != "exploration"})
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
@@ -425,7 +480,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
             elif e.route == "CLARIFY":
                 try:
-                    reply = sessions[e.senior_id].clarify(e.questions)
+                    reply = sessions[e.senior_id].clarify(e.questions,
+                                                          preface=_answers_note(e))
                 except Exception as exc:               # noqa: BLE001 - reported, fed back to SH
                     print(describe_llm_error(exc, f"Senior-{e.senior_id}-clarify"))
                     log.note(f"{e.senior_id} clarify failed: {type(exc).__name__}: {exc}")
