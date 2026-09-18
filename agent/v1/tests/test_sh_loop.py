@@ -2,7 +2,7 @@
 import os
 
 from conversation import SeniorDirective, SHTurn
-from sh_loop import NO_ANSWER, run_question
+from sh_loop import NO_ANSWER, render_wave, run_question
 
 # Every SeniorDirective field is required under strict json_schema, so tests fill
 # the unused ones. Repeated here rather than imported from
@@ -75,6 +75,11 @@ class _Pool:
         return "Yes — the window you gave me."
 
 
+def _scoped(sourcetype, **kw):
+    """A senior spawn that owns one sourcetype, so it can run beside another."""
+    return _spawn(constraints={"sourcetypes": [sourcetype], "sources": [], "fields": []}, **kw)
+
+
 def _spawn(**kw):
     base = dict(route="SPAWN", spawn_type="senior", technique="",
                 subquestion="Find the flow duration in cisco:nvm.",
@@ -122,7 +127,7 @@ def test_iterations_are_reported_against_the_tier_ceiling(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     assert out["senior_iterations"] == 6
-    assert out["ceiling"] == 192            # 1000pt tier: 3 x 8 x 8
+    assert out["ceiling"] == 288            # 1000pt tier: 3 seniors x 8 rounds x 12
 
 
 def test_an_ungrounded_answer_is_pushed_back_once_then_gives_no_answer(tmp_path):
@@ -396,7 +401,7 @@ def test_a_malformed_sh_turn_is_fed_back_not_fatal(tmp_path):
 def test_a_read_report_sh_does_not_route_is_rejected(tmp_path):
     # M1: two seniors report; SH routes only s1, then fixes it
     pool = _Pool()
-    llm = _LLM([_turn(_spawn(), _spawn(subquestion="Other feed.")),
+    llm = _LLM([_turn(_scoped("dns"), _scoped("smtp", subquestion="Other feed.")),
                 _turn(_continue()),
                 _turn(_answer(source_senior="s2"), _retire("s1"))])
     out = _run(llm, pool, tmp_path)
@@ -430,7 +435,7 @@ def test_no_value_anywhere_ends_with_the_honest_marker(tmp_path):
     pool = _Pool(value="", insight="NOT_FOUND")
     llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
     out = _run(llm, pool, tmp_path, points=100)
-    assert out["end_reason"] == "turns"
+    assert out["end_reason"] == "rounds"   # the one slot is spent and retired
     assert out["answer"] == NO_ANSWER
 
 
@@ -440,7 +445,7 @@ def test_a_value_sh_never_answered_with_is_not_submitted(tmp_path):
     # The senior's report here holds a value and is graded R1 PASS.
     llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
     out = _run(llm, _Pool(), tmp_path, points=100)
-    assert out["end_reason"] == "turns"
+    assert out["end_reason"] == "rounds"
     assert out["answer"] == NO_ANSWER
     assert out["answer"] != "1367.875"
 
@@ -462,7 +467,7 @@ def test_a_crashing_senior_is_retired_and_its_sibling_survives(tmp_path):
                 raise RuntimeError("graph exploded")
             return super().run_round(**kw)
 
-    llm = _LLM([_turn(_spawn(), _spawn(subquestion="Other feed.")),
+    llm = _LLM([_turn(_scoped("dns"), _scoped("smtp", subquestion="Other feed.")),
                 _turn(_answer(source_senior="s2"))])
     out = _run(llm, _Crashy(), tmp_path)
     assert out["answer"] == "1367.875"
@@ -517,10 +522,60 @@ def test_ignoring_a_seniors_open_question_is_rejected(tmp_path):
     _run(llm, pool, tmp_path)
     assert pool.rounds == 2, "the ignoring turn must not run a round"
     assert "open question" in _conversation(tmp_path).lower()
-    assert "host A is the endpoint in scope" in pool.messages[-1],         "SH's answer must reach the senior with its next directive"
+    assert "host A is the endpoint in scope" in pool.messages[-1], \
+        "SH's answer must reach the senior with its next directive"
 
 
 def test_grade_rows_record_r4(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(_answer(r4_premise_verification="WEAK"))])
     out = _run(llm, _Pool(), tmp_path)
     assert out["grades"][0]["r4"] == "WEAK"
+
+
+# ── v1.4.1: soft R4, parallel seniors on disjoint scopes ─────────────────────
+
+def test_an_answer_on_an_unverified_premise_is_allowed_but_logged(tmp_path):
+    # R4 is a warning, not a gate: an educated guess may be submitted.
+    llm = _LLM([_turn(_spawn()), _turn(_answer(r4_premise_verification="FAIL"))])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["answer"] == "1367.875"
+    assert "unverified premise" in _conversation(tmp_path).lower()
+
+
+def test_a_weak_r4_tells_the_senior_to_verify_first(tmp_path):
+    pool = _Recording()
+    llm = _LLM([_turn(_spawn()), _turn(_continue(r4_premise_verification="WEAK")),
+                _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert "UNVERIFIED" in pool.messages[1] and "first" in pool.messages[1].lower()
+
+
+def test_a_passing_r4_adds_no_reminder(tmp_path):
+    pool = _Recording()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert "UNVERIFIED" not in pool.messages[1]
+
+
+def test_the_wave_flags_unverified_premises_to_sh():
+    report = "## Assumptions\n- a - VERIFIED: q -> 3\n- b - UNVERIFIED\n"
+    text = render_wave({"s1": {"report": report, "novel_spl_count": 1}},
+                       slots_remaining=1, turns_remaining=3)
+    assert "1 UNVERIFIED" in text
+
+
+def test_two_parallel_seniors_on_disjoint_scopes_both_run(tmp_path):
+    pool = _Pool()
+    llm = _LLM([_turn(_scoped("dns"), _scoped("smtp", subquestion="Other feed.")),
+                _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert pool.rounds == 2
+
+
+def test_an_overlapping_parallel_spawn_is_rejected(tmp_path):
+    pool = _Pool()
+    llm = _LLM([_turn(_scoped("dns"), _scoped("dns", subquestion="Same feed.")),
+                _turn(_spawn()), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert pool.rounds == 1, "the overlapping turn ran nothing"
+    assert "overlap" in _conversation(tmp_path).lower()

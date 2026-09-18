@@ -1,10 +1,18 @@
 import pytest
+from conversation import (
+    BASES,
+    ROUTES,
+    TECHNIQUES,
+    SeniorDirective,
+    SHTurn,
+    answer_blocked,
+    directive_violations,
+    effective_r2,
+    grade_violations,
+    open_question_violations,
+    spawn_overlap_violations,
+)
 from pydantic import ValidationError
-
-from conversation import (BASES, ROUTES, TECHNIQUES, SeniorDirective, SHTurn,
-                          answer_blocked, directive_violations, effective_r2,
-                          grade_violations, open_question_violations,
-                          premise_blocked)
 from question_state import QuestionState
 
 BLANK = {
@@ -219,7 +227,8 @@ def test_a_directive_to_a_senior_with_no_rounds_left_is_refused():
     st = QuestionState(points=100)          # 3 rounds
     st.open_senior("s1")
     for _ in range(3):
-        st.record_wave(); st.record_round("s1")
+        st.record_wave()
+        st.record_round("s1")
     e = entry(senior_id="s1", route="CRITIC", basis="shape_mismatch", flaw="f",
               why_it_fails="w", fix_directive="d", r1_scope_alignment="PASS",
               r2_progress="PASS", r3_answer_readiness="WEAK")
@@ -372,18 +381,14 @@ def test_an_exploration_entry_must_not_carry_r4():
     assert grade_violations([e], graded=set(), exploration={"e1"}) != []
 
 
-def test_r4_fail_blocks_answer_and_r4_weak_does_not():
-    def ans(r4):
-        return entry(route="ANSWER", value="v", source_senior="s1", justification="j",
-                     r1_scope_alignment="PASS", r2_progress="PASS",
-                     r3_answer_readiness="PASS", r4_premise_verification=r4)
-    assert premise_blocked(ans("FAIL")) is True
-    assert premise_blocked(ans("WEAK")) is False
+def test_r4_fail_does_not_block_an_answer():
+    # R4 is a warning, not a gate: an educated guess may be submitted.
+    a = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+              r4_premise_verification="FAIL")
     st = QuestionState(points=1000)
     st.open_senior("s1")
-    out = directive_violations([ans("FAIL")], st)
-    assert any("R4" in v for v in out)
-    assert directive_violations([ans("PASS")], st) == []
+    assert directive_violations([a], st) == []
 
 
 def test_r4_fail_does_not_block_a_command():
@@ -425,3 +430,45 @@ def test_every_route_to_a_senior_must_answer_its_questions():
         e = entry(senior_id="s1", r1_scope_alignment="PASS", r2_progress="PASS",
                   r3_answer_readiness="WEAK", r4_premise_verification="PASS", **route_kw)
         assert open_question_violations([e], {"s1": 1}) != [], route_kw["route"]
+
+
+# ── a parallel senior must own a scope no other active senior touches ────────
+
+def _scope(sourcetypes=(), sources=()):
+    return {"sourcetypes": list(sourcetypes), "sources": list(sources), "fields": []}
+
+
+def _senior_spawn(**scope):
+    return entry(route="SPAWN", spawn_type="senior", subquestion="s", reason="r",
+                 constraints=_scope(**scope))
+
+
+def test_a_lone_spawn_needs_no_constraints():
+    assert spawn_overlap_violations([_senior_spawn()], {}) == []
+
+
+def test_disjoint_parallel_seniors_are_allowed():
+    active = {"s1": SeniorDirective.model_fields["constraints"].annotation(**_scope(["dns"]))}
+    assert spawn_overlap_violations([_senior_spawn(sourcetypes=["o365"])], active) == []
+    two = [_senior_spawn(sourcetypes=["dns"]), _senior_spawn(sources=["smtp"])]
+    assert spawn_overlap_violations(two, {}) == []
+
+
+def test_an_overlapping_parallel_spawn_is_refused():
+    active = {"s1": SeniorDirective.model_fields["constraints"].annotation(**_scope(["DNS"]))}
+    out = spawn_overlap_violations([_senior_spawn(sourcetypes=["dns", "o365"])], active)
+    assert out and "s1" in out[0]
+    same_turn = [_senior_spawn(sources=["a"]), _senior_spawn(sources=["a"])]
+    assert spawn_overlap_violations(same_turn, {}) != []
+
+
+def test_an_unscoped_senior_cannot_run_in_parallel():
+    active = {"s1": SeniorDirective.model_fields["constraints"].annotation(**_scope())}
+    assert spawn_overlap_violations([_senior_spawn(sourcetypes=["dns"])], active) != []
+    assert spawn_overlap_violations([_senior_spawn(), _senior_spawn(sources=["x"])], {}) != []
+
+
+def test_exploration_spawns_are_not_scope_checked():
+    e = entry(route="SPAWN", spawn_type="exploration", subquestion="s", reason="r")
+    active = {"s1": SeniorDirective.model_fields["constraints"].annotation(**_scope())}
+    assert spawn_overlap_violations([e], active) == []

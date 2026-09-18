@@ -68,7 +68,9 @@ class SeniorDirective(BaseModel):
         description="Is every premise the senior's conclusion or direction rests on backed by "
                     "a result shown in the report? PASS: each has a query and result behind "
                     "it. WEAK: minor premises untested, the chain holds without them. FAIL: "
-                    "the candidate or the direction depends on a premise nobody tested.")
+                    "the candidate or the direction depends on a premise nobody tested. A "
+                    "warning, not a gate: an educated guess may still be answered, but it is "
+                    "dangerous ground, and a WEAK/FAIL tells the senior to verify first.")
     open_question_answers: list[str] = Field(
         description="Your answer to each bullet in the '## Open questions for SH' section of "
                     "the report this entry addresses (for ANSWER: the source senior's report), "
@@ -211,11 +213,48 @@ def answer_blocked(entry: SeniorDirective) -> bool:
     return entry.route == "ANSWER" and entry.r1_scope_alignment == "FAIL"
 
 
-def premise_blocked(entry: SeniorDirective) -> bool:
-    """The unverified-premise gate: a value derived from a premise nobody tested
-    is a guess with a query attached (Q216, test_20260918_104111: 'powershell is
-    the miner' was assumed, never checked, and every later query built on it)."""
-    return entry.route == "ANSWER" and entry.r4_premise_verification == "FAIL"
+def spawn_overlap_violations(entries: list[SeniorDirective], active: dict) -> list[str]:
+    """Parallel seniors must own disjoint scopes (v1.4.1). `active` maps each
+    active senior to the constraints it was spawned with. Once two or more seniors
+    would be live, every one needs its own sourcetypes/sources and no two may
+    share one — overlapping seniors only duplicate each other's work. A lone
+    senior may still be spawned unscoped. Exploration scouts are not checked.
+
+    ponytail: compares spawn-time constraints; a later COMMAND scope_change is not
+    tracked here. Track per-senior scope on the session if that ever matters."""
+    # An ANSWER ends the question and later entries are ignored (M7), so a spawn
+    # riding along with it never runs — rejecting the turn for it only burns a turn.
+    if any(e.route == "ANSWER" for e in entries):
+        return []
+    spawns = [e for e in entries if e.route == "SPAWN" and e.spawn_type == "senior"]
+    scopes = list(active.items()) + [(f"new SPAWN #{i}", e.constraints)
+                                     for i, e in enumerate(spawns, start=1)]
+    if not spawns or len(scopes) < 2:
+        return []
+
+    def keys(sc) -> set:
+        if sc is None:
+            return set()
+        return ({("sourcetype", x.lower()) for x in sc.sourcetypes}
+                | {("source", x.lower()) for x in sc.sources})
+
+    out = []
+    for i in range(len(active), len(scopes)):
+        name, mine = scopes[i][0], keys(scopes[i][1])
+        if not mine:
+            out.append(f"{name}: a senior running beside another needs its own "
+                       "sourcetype/source constraints")
+            continue
+        for other, sc in scopes[:i]:
+            theirs = keys(sc)
+            if not theirs:
+                out.append(f"{name}: {other} has no constraints, so overlap cannot be "
+                           "ruled out — scope or retire it before running a parallel senior")
+            elif mine & theirs:
+                shared = ", ".join(sorted(v for _, v in mine & theirs))
+                out.append(f"{name} overlaps {other} on {shared} — a parallel senior "
+                           "must own a scope no other active senior touches")
+    return out
 
 
 def open_question_violations(entries: list[SeniorDirective], asked: dict) -> list[str]:
@@ -294,10 +333,6 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                        "RETIRE it or change its scope, do not continue")
         if answer_blocked(e):
             out.append("ANSWER is blocked: the source report is graded R1 = FAIL")
-        if premise_blocked(e):
-            out.append("ANSWER is blocked: the source report is graded R4 = FAIL — its "
-                       "conclusion rests on a premise nobody tested. COMMAND a round that "
-                       "tests that premise first, or CRITIC it")
         # The cut-off gate (§3.5). A round that ran out of iterations stopped where
         # the budget ended, not where the work did: test_20260918_104111's s1 filed
         # a FOUND report carrying the runner's cap line and two unanswered questions

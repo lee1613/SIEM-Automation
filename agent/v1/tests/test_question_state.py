@@ -1,12 +1,11 @@
 import pytest
-
 from question_state import ROUND_ITERS, QuestionState, tier_budget
 
 
 def test_tier_table_matches_the_spec():
-    assert tier_budget(100)  == {"tier": 100,  "seniors": 1, "rounds": 3, "sh_turns": 5,  "iters": 8}
-    assert tier_budget(500)  == {"tier": 500,  "seniors": 2, "rounds": 5, "sh_turns": 8,  "iters": 8}
-    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 8, "sh_turns": 12, "iters": 8}
+    assert tier_budget(100)  == {"tier": 100,  "seniors": 1, "rounds": 3, "sh_turns": 5,  "iters": 12}
+    assert tier_budget(500)  == {"tier": 500,  "seniors": 2, "rounds": 5, "sh_turns": 8,  "iters": 12}
+    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 8, "sh_turns": 12, "iters": 12}
 
 
 def test_points_below_500_fall_to_the_base_tier():
@@ -17,7 +16,7 @@ def test_points_below_500_fall_to_the_base_tier():
 
 def test_ceiling_is_seniors_times_rounds_times_iterations():
     st = QuestionState(points=1000)
-    assert st.senior_iteration_ceiling == 3 * 8 * ROUND_ITERS == 192
+    assert st.senior_iteration_ceiling == 3 * 8 * ROUND_ITERS == 288
 
 
 def test_spawn_slots_are_consumed_and_capped():
@@ -52,28 +51,52 @@ def test_exploration_is_capped_at_one_and_costs_no_senior_slot():
     assert st.can_spawn_exploration() is False
 
 
-def test_a_senior_spawned_late_gets_only_the_waves_that_remain():
-    st = QuestionState(points=1000)            # 8 rounds
-    st.open_senior("s1")
-    for _ in range(6):
+def _work(st, sid, n):
+    for _ in range(n):
         st.record_wave()
-    assert st.open_senior("s2") == 2           # min(8, 8 - 6)
+        st.record_round(sid)
 
 
-def test_rounds_left_for_is_bounded_by_both_clocks():
-    st = QuestionState(points=500)             # 5 rounds
+def test_a_late_senior_gets_its_own_full_rounds():
+    # Rounds are per senior: a replacement is not left with the question's leftovers.
+    st = QuestionState(points=1000)            # 8 rounds per senior
     st.open_senior("s1")
-    st.record_wave(); st.record_round("s1")
+    _work(st, "s1", 8)
+    assert st.open_senior("s2") == 8
+    assert st.rounds_left_for("s2") == 8
+
+
+def test_rounds_left_for_counts_only_the_seniors_own_rounds():
+    st = QuestionState(points=500)             # 5 rounds per senior
+    st.open_senior("s1")
+    _work(st, "s1", 1)
+    st.open_senior("s2")
+    _work(st, "s2", 3)                         # other seniors' waves do not spend s1's rounds
     assert st.rounds_left_for("s1") == 4
-    for _ in range(4):
-        st.record_wave()
-    assert st.rounds_left_for("s1") == 0
+    assert st.rounds_left_for("s2") == 2
 
 
-def test_question_ends_when_waves_run_out():
-    st = QuestionState(points=100)             # 3 rounds, 5 turns
-    for _ in range(3):
-        st.record_wave()
+def test_a_spent_senior_with_a_free_slot_does_not_end_the_question():
+    st = QuestionState(points=500)             # 2 seniors x 5 rounds
+    st.open_senior("s1")
+    _work(st, "s1", 5)
+    assert st.exhausted() == ""                # SH can still spawn s2
+
+
+def test_question_ends_when_every_slot_is_used_and_every_senior_is_spent():
+    st = QuestionState(points=100)             # 1 senior x 3 rounds
+    assert st.exhausted() == ""                # nothing spawned yet
+    st.open_senior("s1")
+    _work(st, "s1", 2)
+    assert st.exhausted() == ""
+    _work(st, "s1", 1)
+    assert st.exhausted() == "rounds"
+
+
+def test_retiring_the_last_senior_with_no_slot_left_ends_the_question():
+    st = QuestionState(points=100)
+    st.open_senior("s1")
+    st.retire("s1")
     assert st.exhausted() == "rounds"
 
 

@@ -1,23 +1,24 @@
 """Tests for SeniorSession (spec §2.3, §6, §7)."""
+from question_state import ROUND_ITERS
 from senior_session import SeniorSession, should_alert, should_compact
 
 WINDOW = 100_000
 
 
 def test_compaction_triggers_when_the_projected_round_would_pass_80_percent():
-    # 60k now + 8 rounds-worth of 3k/iteration = 84k > 80k
+    # 60k now + a round's worth (ROUND_ITERS) of 3k/iteration = 84k > 80k
     assert should_compact(60_000, mean_per_iter=3_000, window=WINDOW) is True
 
 
 def test_no_compaction_when_the_projection_stays_under_80_percent():
-    # 40k now + 8 * 3k = 64k < 80k
+    # 40k now + 12 * 3k = 76k < 80k
     assert should_compact(40_000, mean_per_iter=3_000, window=WINDOW) is False
 
 
 def test_the_80_percent_boundary_is_exclusive():
     # exactly 80 000 projected is not yet over the line
-    assert should_compact(80_000 - 8 * 1_000, mean_per_iter=1_000, window=WINDOW) is False
-    assert should_compact(80_001 - 8 * 1_000, mean_per_iter=1_000, window=WINDOW) is True
+    assert should_compact(80_000 - ROUND_ITERS * 1_000, mean_per_iter=1_000, window=WINDOW) is False
+    assert should_compact(80_001 - ROUND_ITERS * 1_000, mean_per_iter=1_000, window=WINDOW) is True
 
 
 def test_the_operator_alert_fires_at_70_percent_of_the_window():
@@ -220,16 +221,16 @@ def test_fallback_report_renders_with_stamped_header():
 def test_a_round_that_used_every_iteration_says_so_at_the_end_of_its_report():
     # Q216 smoke test: s1 spent all 8 iterations and SH read a blank report with
     # no hint that the round was cut off rather than finished.
-    pool = _Pool(iterations=9, cap_hit=True)          # forced-submit path: step 9 > 8
+    pool = _Pool(iterations=ROUND_ITERS + 1, cap_hit=True)   # forced-submit path
     out = _session(pool).work("a", rounds_remaining=7)
-    assert out["report"].rstrip().endswith("_Iteration cap reached: 8/8 iterations used "
+    assert out["report"].rstrip().endswith(f"_Iteration cap reached: {ROUND_ITERS}/{ROUND_ITERS} iterations used "
                                            "this round — cut off, not finished._")
 
 
 def test_the_cap_note_survives_the_fallback_report():
-    pool = _Pool(report="", iterations=8)
+    pool = _Pool(report="", iterations=ROUND_ITERS)
     out = _session(pool).work("a", rounds_remaining=7)
-    assert "Iteration cap reached: 8/8" in out["report"].splitlines()[-1]
+    assert f"Iteration cap reached: {ROUND_ITERS}/{ROUND_ITERS}" in out["report"].splitlines()[-1]
 
 
 def test_a_round_under_the_cap_carries_no_note():

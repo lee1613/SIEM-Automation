@@ -63,7 +63,7 @@ def test_a_wave_renders_every_report_with_its_stamped_numbers():
                "insight": "FOUND", "status": "solved", "value": "1367.875",
                "confidence": 80, "rounds_left": 6},
     }
-    text = render_wave(reports, waves_remaining=5, turns_remaining=7)
+    text = render_wave(reports, slots_remaining=5, turns_remaining=7)
     assert "s1" in text and "s2" in text
     assert "novel_spl=0" in text or "novel SPL: 0" in text
     assert "1367.875" in text
@@ -74,7 +74,7 @@ def test_a_wave_flags_the_code_side_r2_failure_explicitly():
     reports = {"s1": {"report": "r", "novel_spl_count": 0, "insight": "NOT_FOUND",
                       "status": "partial", "value": "", "confidence": 10,
                       "rounds_left": 2}}
-    text = render_wave(reports, waves_remaining=2, turns_remaining=3)
+    text = render_wave(reports, slots_remaining=2, turns_remaining=3)
     assert "R2 = FAIL" in text
 
 

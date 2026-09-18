@@ -7,6 +7,7 @@ from senior_report import (
     report_violations,
     stamp_header,
     truncate_words,
+    unverified_premises,
 )
 
 GOOD = """# Senior #1 - Q216 - Round 1
@@ -282,3 +283,11 @@ def test_open_questions_stop_at_the_next_heading_and_at_the_cap_line():
 
 def test_no_open_questions_section_means_none():
     assert open_questions(GOOD.split("## Open questions for SH")[0]) == []
+
+
+def test_unverified_premises_counts_only_the_assumptions_section():
+    assert unverified_premises(GOOD) == 1
+    md = GOOD.replace("- The window SH gave me is the incident window - UNVERIFIED",
+                      "- a - VERIFIED: q -> 3 events\n- b - UNVERIFIED\n- c - UNVERIFIED")
+    assert unverified_premises(md) == 2
+    assert unverified_premises(GOOD.split("## Assumptions")[0]) == 0

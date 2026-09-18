@@ -21,7 +21,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
 from case_file import parse_case_updates
-from conversation import directive_violations, effective_r2, grade_violations, open_question_violations
+from conversation import (
+    directive_violations,
+    effective_r2,
+    grade_violations,
+    open_question_violations,
+    spawn_overlap_violations,
+)
 from conversation_log import ConversationLog
 from grounding import is_grounded
 from hitl import ABORT, RunPaused, resolve_interrupt
@@ -30,7 +36,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
-from senior_report import open_questions
+from senior_report import open_questions, unverified_premises
 from senior_session import SeniorSession
 from usage_tracker import context_window
 
@@ -50,7 +56,7 @@ def _window(messages) -> list:
     """Bounded cross-question history, same rule as orchestrator._window."""
     return list(messages)[-MAX_HISTORY_MSGS:]
 
-SH_SYSTEM_PROMPT = """You are the SH agent — the mastermind orchestrator for a BOTSv3 security investigation (an August 2018 APT attack against Frothly; all data is in Splunk index=botsv3).
+SH_SYSTEM_PROMPT = f"""You are the SH agent — the mastermind orchestrator for a BOTSv3 security investigation (an August 2018 APT attack against Frothly; all data is in Splunk index=botsv3).
 
 THE BOUNDARY RULE — this is the rule the whole design rests on.
 You speak in constraints and goals. Your seniors speak in evidence and SPL.
@@ -58,10 +64,17 @@ You have no Splunk access and never will. You never write a query, and you never
 `scope_change` is the one lever that is yours alone. It is how you act on a NOT_FOUND without writing a single query.
 
 HOW A QUESTION RUNS
-You spawn ONE senior. It works up to 8 iterations (~3-5 searches) and files a report. You read the whole wave in a single turn and emit exactly ONE route per senior whose report you just read (an ANSWER turn may skip the others — they are retired automatically). Seniors stay ALIVE between rounds — they remember everything they did, so never re-brief one on what it already knows.
+You normally spawn ONE senior. Each round it works up to {ROUND_ITERS} iterations and files a report. You read the whole wave in a single turn and emit exactly ONE route per senior whose report you just read (an ANSWER turn may skip the others — they are retired automatically). Seniors stay ALIVE between rounds — they remember everything they did, so never re-brief one on what it already knows.
+Rounds belong to each senior: every senior gets the tier's full round budget, and a senior you spawn later gets its own full budget too. Spawn slots are the scarce resource.
+
+PARALLEL SENIORS — allowed, when justified. Two seniors working at once finish sooner than one after the other. You MAY spawn a second senior alongside the first — at the start or later — only when all three hold:
+  (a) you have a concrete, competing suspicion that the first senior's scope cannot test;
+  (b) the new senior's constraints share NO sourcetype and NO source with any active senior — their work must not overlap (the runner rejects a spawn that overlaps);
+  (c) `reason` states that suspicion and why it is worth a spawn slot now.
+If you cannot state all three, do not spawn in parallel: one senior at a time is the default.
 
 YOUR SIX ROUTES
-  SPAWN    — another senior. Only with a stated reason the current senior's constraints cannot cover. Parallel seniors are the exception, not the default. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope; it costs no senior slot and is capped at one per question.
+  SPAWN    — another senior. Only with a stated reason the current senior's constraints cannot cover. In parallel only under the PARALLEL SENIORS rule above. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope; it costs no senior slot and is capped at one per question.
   COMMAND  — `continue` (direction is right, go further) or `retry` (the approach was wrong; same question, different angle). `rationale` is 1-2 sentences from the CASE's perspective. `directive` states a GOAL.
   CRITIC   — the report is wrong, and you can say what it contradicts. Pick the `basis` that names what you are checking it against; there is no 'other' bucket, deliberately. `fix_directive`: state what to establish first and what follows depending on what that turns up. Do not write the query. If one blunt step is the honest directive, write one step — do not invent a branch to fill the shape.
   CLARIFY  — you do not understand the report (`unclear`) or you doubt it (`suspect`). HARD RULE: a clarify must be answerable from what the senior ALREADY holds. No tools, no new searches. "Go find out" is always a COMMAND.
@@ -82,40 +95,38 @@ GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
   R2 progress              Did this round produce information the prior rounds did not have?
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
-Each is PASS, WEAK or FAIL. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
+Each is PASS, WEAK or FAIL.
+R4 is a WARNING, not a gate. Some premises genuinely cannot be verified, and an educated guess may still be answered — but it is dangerous ground. A WEAK or FAIL R4 tells the senior to verify its UNVERIFIED premises first thing next round; prefer that round over answering, and if you do answer on an unverified premise, say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
 
 ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected.
 
 THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
   * Wrong question: if you grade the source report R1 = FAIL, the ANSWER route is blocked. A value can be real, grounded and well-formed and still answer something adjacent to what was asked.
-  * Unverified premise: if you grade the source report R4 = FAIL, the ANSWER route is blocked. COMMAND a round that tests the premise, or CRITIC it.
   * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them, then CLARIFY (costs no round) or COMMAND one more round. Then answer.
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
+  * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
 NEVER INVENT DATASET FACTS. A critic must rest on something you actually hold: the report itself, the case file, a sibling report, the expected shape, or the question's own wording."""
 
 
-SENIOR_BRIEF = """You are a Senior Splunk analyst on a BOTSv3 investigation (August 2018, Frothly; all data is in index=botsv3). You work for SH, who is orchestrating this question.
+SENIOR_BRIEF = f"""You are a Senior Splunk analyst on a BOTSv3 investigation (August 2018, Frothly; all data is in index=botsv3). You work for SH, who is orchestrating this question.
 
 THE BOUNDARY: SH speaks in constraints and goals; you speak in evidence and SPL. SH cannot query Splunk and will never hand you a query. Turning a goal into SPL is your job.
 
 HOW YOU RUN
-You stay alive for the whole question. Each round gives you up to 8 tool-call iterations, then you file a report with `submit_finding`. You remember every prior round of your own, so never repeat a query you have already run — going one step further is the only thing a round is for.
+You stay alive for the whole question. Each round gives you up to {ROUND_ITERS} tool-call iterations, then you file a report with `submit_finding`. You remember every prior round of your own, so never repeat a query you have already run — going one step further is the only thing a round is for.
 
 TWO REPLY SHAPES, so you never have to guess which is expected:
   * To a COMMAND or a CRITIC — resume work. Use your iterations, then call `submit_finding`. A round is a CAP, not a quota: if one iteration satisfies the critic, stop there.
   * To a CLARIFY — answer in short prose from what you already hold. No tools, no searches. It does not consume a round.
 
 NO UNTESTED ASSUMPTIONS — your report is graded hardest on this.
-Every investigation rests on premises: which entity the question is about, what a field actually contains, which feed records the behaviour, whether the first plausible match is the one that matters. A premise is a hypothesis until a query result shows it. Test it before you build on it; if you cannot test it this round, list it as UNVERIFIED. SH grades every report on premise verification (R4) and will not accept an answer that rests on a premise nobody tested.
-Premises that need a result behind them, not a belief — for example:
-  - "this host / user / account is the one the question is about"
-  - "this field holds what its name suggests"
-  - "this sourcetype is where that activity would be recorded"
-  - "the event that matches my expectation is the event the question describes"
+Every conclusion rests on premises. A premise is a hypothesis until a query result shows it. SH grades every report on premise verification (R4), and an untested premise is dangerous ground: it is how an investigation goes off track and returns a confident wrong answer.
+VERIFY FIRST. The first thing you do each round is try to verify the premises your work depends on, before you build further on them.
+An educated guess is allowed only when a premise genuinely cannot be verified. Then say so: list it as UNVERIFIED, and state why it could not be tested.
 WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
 YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM, in this shape:
@@ -168,17 +179,23 @@ def render_opening(*, qid: str, question: str, guidance: str, points: int,
     lines += [
         "",
         f"BUDGET for this question: at most {budget['seniors']} senior(s) total, "
-        f"{budget['rounds']} rounds, {budget['sh_turns']} turns of your own, "
+        f"{budget['rounds']} rounds EACH, {budget['sh_turns']} turns of your own, "
         f"{budget['iters']} iterations per senior round.",
         "",
-        "Start by spawning exactly ONE senior. Name its domain constraints, whether "
-        "it is a metrics senior, and a self-contained problem statement. A second senior needs a "
-        "stated reason the first one's constraints cannot cover it.",
+        "Start with ONE senior: its domain constraints, whether it is a metrics senior, "
+        "and a self-contained problem statement. Spawn a second one in parallel only "
+        "under the PARALLEL SENIORS rule (a competing suspicion, a scope with no overlap, "
+        "and a stated reason).",
     ]
     return "\n".join(lines)
 
 
-def render_wave(reports: dict, *, waves_remaining: int, turns_remaining: int) -> str:
+def _budget_line(slots_remaining: int, turns_remaining: int) -> str:
+    return (f"WAVE COMPLETE. {turns_remaining} turn(s) and {slots_remaining} spawn slot(s) "
+            "remain on this question; each senior's own rounds_left is on its report.")
+
+
+def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int) -> str:
     """What SH reads at the top of a turn: every report from the wave just finished.
 
     The stamped numbers are restated outside the report body so the gate that
@@ -196,10 +213,13 @@ def render_wave(reports: dict, *, waves_remaining: int, turns_remaining: int) ->
         if novel == 0:
             head += "\n!! This round ran NO new query. R2 = FAIL for it, by code, " \
                     "and you cannot grade it otherwise."
+        unverified = unverified_premises(r.get("report") or "")
+        if unverified:
+            head += (f"\n!! {unverified} UNVERIFIED premise(s) in its Assumptions — "
+                     "dangerous ground. Weigh them in R4.")
         blocks.append(head + "\n" + (r.get("report") or "").strip())
 
-    return (f"WAVE COMPLETE. {waves_remaining} round(s) and {turns_remaining} turn(s) "
-            f"remain on this question.\n\n"
+    return (_budget_line(slots_remaining, turns_remaining) + "\n\n"
             + "\n\n".join(blocks)
             + "\n\nReview every report above as a senior threat hunter, grade it "
               "(R1/R2/R3/R4), answer every open question it lists in "
@@ -288,8 +308,14 @@ def _route_body(e) -> str:
 
 
 def _directive_text(e) -> str:
-    """What a senior is actually told this round: SH's answers first, then the route."""
-    return _answers_note(e) + _route_directive(e)
+    """What a senior is actually told this round: SH's answers first, a verify-first
+    reminder when SH graded its premises WEAK/FAIL (R4 is soft), then the route."""
+    verify = ""
+    if e.r4_premise_verification in ("WEAK", "FAIL"):
+        verify = (f"FIRST, before anything else this round: verify the UNVERIFIED premises "
+                  f"in your Assumptions (SH graded premise verification "
+                  f"R4 = {e.r4_premise_verification}).\n\n")
+    return _answers_note(e) + verify + _route_directive(e)
 
 
 def _route_directive(e) -> str:
@@ -441,7 +467,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             exploration={s for s, k in kinds.items() if k == "exploration"},
         ) + directive_violations(turn.entries, state) + open_question_violations(
             turn.entries, {sid: len(open_questions(r.get("report", "")))
-                           for sid, r in unread.items() if kinds.get(sid) != "exploration"})
+                           for sid, r in unread.items() if kinds.get(sid) != "exploration"}
+        ) + spawn_overlap_violations(
+            turn.entries, {sid: s.constraints for sid, s in sessions.items()
+                           if state.is_active(sid)})
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
@@ -501,6 +530,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                             for i, r in enumerate(_senior_reports(all_reports))}
                 if is_grounded(e.value, evidence, question):
                     answer, end_reason = e.value.strip(), "answer"
+                    if e.r4_premise_verification == "FAIL":
+                        log.note(f"answered on an unverified premise (R4 = FAIL) — "
+                                 f"allowed, but dangerous ground: {e.justification}")
                     _apply_case_updates(case_file, e.case_updates, qid)
                 else:
                     ungrounded += 1
@@ -526,9 +558,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
         if not pending:
             continue
-        if state.waves_remaining <= 0:
-            end_reason = "rounds"
-            break
 
         wave = _run_wave(pending, max_parallel=max_parallel)
         # Rounds are senior rounds (§4.2); a scout-only wave costs SH's turn, not a round.
@@ -591,10 +620,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 unread[sid] = result
 
         if unread or scouted or failures:
-            head = (render_wave(unread, waves_remaining=state.waves_remaining,
+            head = (render_wave(unread, slots_remaining=state.slots_remaining,
                                 turns_remaining=state.turns_remaining) if unread
-                    else f"WAVE COMPLETE. {state.waves_remaining} round(s) and "
-                         f"{state.turns_remaining} turn(s) remain on this question.")
+                    else _budget_line(state.slots_remaining, state.turns_remaining))
             msgs.append(HumanMessage(content="\n\n".join([head, *scouted, *failures])))
 
     if not answer:

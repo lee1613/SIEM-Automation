@@ -89,6 +89,14 @@ def open_questions(md: str) -> list[str]:
     return out
 
 
+def unverified_premises(md: str) -> int:
+    """How many lines of the "## Assumptions" section are marked UNVERIFIED —
+    surfaced to SH as a warning, never a gate (R4 is soft by design)."""
+    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
+                  md or "", re.MULTILINE | re.DOTALL)
+    return sum(1 for ln in (m.group(1).splitlines() if m else []) if "UNVERIFIED" in ln)
+
+
 def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
                  rounds_remaining: int, novel_spl_count: int) -> str:
     """Replace whatever title the senior wrote with the runner's own, and add the

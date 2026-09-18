@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-Per-question budget and accounting for the v1.3.1 conversational loop.
+Per-question budget and accounting for the v1.4 conversational loop.
 
 Every number in spec §4 lives here, and nothing here calls a model — the whole
 termination story (§4.2) is therefore unit-testable without a run.
 
-Two clocks, independently exhaustible, which is why both are named:
-  * WAVES   — one wave is one parallel round of senior work, and one SH turn
-              reads a whole wave (§4.3). The tier's round budget is the wave cap.
-  * TURNS   — SH turns. A CLARIFY consumes a turn but no wave, so a question can
-              run out of turns with waves left, or the reverse.
+Two budgets, independently exhaustible, which is why both are named:
+  * ROUNDS  — per senior (v1.4.1). Every senior is granted the tier's full
+              round count when it spawns, so a replacement is not left with the
+              question's leftovers. Rounds run out for the QUESTION only when
+              every spawn slot is used and no active senior has a round left.
+  * TURNS   — SH turns. A CLARIFY consumes a turn but no round, so a question
+              can run out of turns with rounds left, or the reverse.
 
-A senior additionally carries its own round grant, set at spawn to
-min(tier rounds, waves remaining) — rounds are a question-level clock, not a
-per-senior allowance that resets when a replacement is spawned (§2.3).
+Waves (one parallel round of senior work, read by one SH turn, §4.3) are still
+counted for reporting, but no longer cap anything.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-ROUND_ITERS = 8          # iterations per senior round (§4: ~3-5 SPL searches)
+ROUND_ITERS = 12         # iterations per senior round (v1.4.1: was 8, ~3-5 SPL searches)
 MAX_EXPLORATIONS = 1     # §2.3 — a second scout means the first failed
 
 # base_points -> budget. Read with tier_budget(); the floors are 1000/500/else.
@@ -59,8 +60,8 @@ class QuestionState:
 
     # ── clocks ────────────────────────────────────────────────────────────────
     @property
-    def waves_remaining(self) -> int:
-        return max(0, self.budget["rounds"] - self.waves_used)
+    def slots_remaining(self) -> int:
+        return max(0, self.budget["seniors"] - self.spawns_used)
 
     @property
     def turns_remaining(self) -> int:
@@ -81,7 +82,8 @@ class QuestionState:
         """'' while the question can continue; else which budget ran out."""
         if self.turns_remaining <= 0:
             return "turns"
-        if self.waves_remaining <= 0:
+        if self.slots_remaining <= 0 and not any(
+                self.is_active(sid) and self.rounds_left_for(sid) > 0 for sid in self.granted):
             return "rounds"
         return ""
 
@@ -97,7 +99,7 @@ class QuestionState:
         if not self.can_spawn_senior():
             raise ValueError(f"no senior slots left ({self.spawns_used}/{self.budget['seniors']})")
         self.spawns_used += 1
-        grant = min(self.budget["rounds"], self.waves_remaining)
+        grant = self.budget["rounds"]
         self.granted[sid] = grant
         self.used[sid] = 0
         self.r2_streak[sid] = 0
@@ -126,8 +128,7 @@ class QuestionState:
         return bool(self.capped.get(sid, False))
 
     def rounds_left_for(self, sid: str) -> int:
-        own = self.granted.get(sid, 0) - self.used.get(sid, 0)
-        return max(0, min(own, self.waves_remaining))
+        return max(0, self.granted.get(sid, 0) - self.used.get(sid, 0))
 
     def retire(self, sid: str) -> None:
         self.retired.add(sid)
