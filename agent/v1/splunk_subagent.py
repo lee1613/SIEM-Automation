@@ -137,8 +137,10 @@ class SplunkWorkerPool:
         # tighter budget entirely on hidden reasoning and return "".
         self._clarify_llm = ChatOpenAI(
             api_key=senior_api_key, model=senior_model, base_url=senior_base_url,
-            temperature=0, max_completion_tokens=16384, http_client=self._http,
-            timeout=agent_mod.LLM_TIMEOUT_S, max_retries=agent_mod.LLM_MAX_RETRIES)
+            temperature=0, http_client=self._http,
+            timeout=agent_mod.LLM_TIMEOUT_S, max_retries=agent_mod.LLM_MAX_RETRIES,
+            # Same field trap as the worker graph - see token_limit_kwargs.
+            **agent_mod.token_limit_kwargs(senior_base_url))
 
     def _graph_for(self, role: str, cap: int):
         """The worker graph for this specialist role at this iteration cap."""

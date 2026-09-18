@@ -203,9 +203,12 @@ def test_clarify_llm_uses_the_full_worker_token_budget_and_transport_settings():
     senior) can spend a tight completion-token budget entirely on hidden
     reasoning and return "" — workers get 16384 for exactly this reason. The
     clarify LLM must match, plus have the same timeout/retry budget as every
-    other LLM call in the pipeline instead of relying on SDK defaults (600s)."""
+    other LLM call in the pipeline instead of relying on SDK defaults (600s).
+
+    The budget is now sent through token_limit_kwargs — the plain field never
+    reached Featherless, which capped it at 4096 (see test_token_limit.py)."""
     src = inspect.getsource(SplunkWorkerPool.__init__)
-    assert "max_completion_tokens=16384" in src
+    assert "token_limit_kwargs(senior_base_url)" in src
     assert "timeout=agent_mod.LLM_TIMEOUT_S" in src
     assert "max_retries=agent_mod.LLM_MAX_RETRIES" in src
 
@@ -214,3 +217,14 @@ def test_high_value_threshold_constant_is_gone():
     import splunk_subagent
     assert not hasattr(splunk_subagent, "HIGH_VALUE_THRESHOLD"), \
         "iter_budget is the single source of truth for the iteration count"
+
+
+def test_the_clarify_model_sends_the_token_cap_the_provider_reads():
+    # Same 4096 trap as the worker graph: langchain renames max_tokens, Featherless
+    # ignores the renamed field, and a truncated clarify reply reaches SH as "".
+    from splunk_subagent import SplunkWorkerPool
+    pool = SplunkWorkerPool(None, senior_api_key="sk-fake",
+                            senior_model="zai-org/GLM-5.3",
+                            senior_base_url="https://api.featherless.ai/v1")
+    assert pool._clarify_llm.extra_body == {"max_tokens": 16384}
+    assert pool._clarify_llm.max_tokens is None
