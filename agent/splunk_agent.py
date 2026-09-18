@@ -25,6 +25,7 @@ import re
 import sys
 import textwrap
 import threading
+import uuid
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
@@ -166,6 +167,30 @@ _STRIP = frozenset({
     "_serial", "_subsecond", "punct", "linecount", "splunk_server",
     "splunk_server_group", "timestartpos", "timeendpos",
 })
+
+def repair_tool_calls(response, tools: list):
+    """Mend malformed tool calls before they reach the graph. GLM-5.3 on
+    Featherless once emitted submit_finding with no name and no id (Q216 r8): the
+    empty name failed to execute and ToolMessage(tool_call_id=None) crashed the
+    worker. A missing id gets a fresh one; a missing name is recovered only when
+    exactly one bound tool's parameters fit the arguments."""
+    calls = getattr(response, "tool_calls", None) or []
+    if all(tc.get("id") and tc.get("name") for tc in calls):
+        return response
+    fixed = []
+    for tc in calls:
+        tc = dict(tc)
+        tc["id"] = tc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+        if not tc.get("name"):
+            keys = set(tc.get("args") or {})
+            fits = [t.name for t in tools
+                    if keys and keys <= set((t.args or {}).keys())]
+            if len(fits) == 1:
+                tc["name"] = fits[0]
+        print(f"[Repaired tool call] name={tc.get('name')!r} id={tc['id']}")
+        fixed.append(tc)
+    return response.model_copy(update={"tool_calls": fixed})
+
 
 def _format_result(result: dict, keep_raw: bool = False) -> str:
     strip_set = _STRIP if keep_raw else (_STRIP | {"_raw"})
@@ -624,6 +649,8 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                 "submit_finding now with what you have so far. Do not invent a "
                 "value - an empty `value` with honest `notes` is fine."
             )])
+
+        response = repair_tool_calls(response, tools)
 
         if response.content:
             tag = "[Agent thinking]" if getattr(response, "tool_calls", None) else "[Agent response]"
