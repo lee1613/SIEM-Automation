@@ -37,8 +37,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-
 from llm_errors import describe_llm_error, resilient_http_client
+from splunk_agent import token_limit_kwargs
 
 EXPLORATION_MODEL    = "nvidia/nemotron-3-super-120b-a12b"
 EXPLORATION_MAX_ITER = 8       # a lookup task; 8 tool calls is generous
@@ -196,8 +196,9 @@ def build_exploration_agent(api_key: str, base_url: str, splunk, *,
     """Compile the exploration ReAct agent. Returns (graph, budget)."""
     budget = {"content_scans": 0}
     llm = ChatOpenAI(api_key=api_key, model=model, base_url=base_url,
-                     temperature=0, max_completion_tokens=2048,
-                     http_client=resilient_http_client())
+                     temperature=0, http_client=resilient_http_client(),
+                     # NIM is not OpenAI either - see token_limit_kwargs.
+                     **token_limit_kwargs(base_url, 2048))
     graph = create_react_agent(llm, make_tools(splunk, budget))
     return graph, budget
 
