@@ -135,7 +135,9 @@ class SeniorDirective(BaseModel):
     premise_audit: list[str] = Field(
         description="ANSWER only. Your own audit before answering: trace the chain from the "
                     "question's words to the value and list every premise it rests on that the "
-                    "source report's Assumptions do NOT list — above all, why this entity and not "
+                    "source report's Assumptions do NOT list. Open with a 'Coverage' line: every way "
+                    "the question's key concept could show up in the data and whether the seniors "
+                    "searched each. Then above all, why this entity and not "
                     "another that could fit the question. One per line: '<premise> - VERIFIED: "
                     "<where the report shows it>' or '<premise> - UNVERIFIED'. Write 'none found' "
                     "only after tracing. Empty for every other route.")
@@ -268,10 +270,19 @@ def premise_audit_violations(entries: list) -> list[str]:
     """An ANSWER must carry SH's own premise audit (`premise_audit`): the premises the
     chain rests on that the senior never listed. Soft on content — an UNVERIFIED line
     is allowed, like R4 — but an ANSWER with no audit at all is rejected."""
-    return [f"ANSWER from {e.source_senior} has no premise_audit — trace the chain from the "
-            "question to the value and list the premises the report did not"
-            for e in entries
-            if e.route == "ANSWER" and not any(a.strip() for a in e.premise_audit)]
+    out = []
+    for e in entries:
+        if e.route != "ANSWER":
+            continue
+        if not any(a.strip() for a in e.premise_audit):
+            out.append(f"ANSWER from {e.source_senior} has no premise_audit — trace the chain "
+                       "from the question to the value and list the premises the report did not")
+        elif not any(a.strip().lstrip("-* ").lower().startswith("coverage")
+                     for a in e.premise_audit):
+            out.append(f"ANSWER from {e.source_senior}: premise_audit has no Coverage line — "
+                       "list every way the question's concept could show up in the data and "
+                       "whether each was searched")
+    return out
 
 
 def unverified_audit(entry) -> list[str]:

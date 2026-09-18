@@ -91,7 +91,7 @@ def _spawn(**kw):
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
-                premise_audit=["none found"],
+                premise_audit=["Coverage - VERIFIED: every way searched"],
                 r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
                 r4_premise_verification="PASS")
     base.update(kw)
@@ -612,7 +612,8 @@ def test_an_answer_without_a_premise_audit_is_rejected_then_accepted(tmp_path):
 
 def test_an_answer_on_an_unverified_audit_line_is_allowed_and_logged(tmp_path):
     llm = _LLM([_turn(_spawn()),
-                _turn(_answer(premise_audit=["this endpoint and not another - UNVERIFIED"]))])
+                _turn(_answer(premise_audit=["Coverage - VERIFIED: every way searched",
+                                             "this endpoint and not another - UNVERIFIED"]))])
     out = _run(llm, _Pool(), tmp_path)
     assert out["end_reason"] == "answer"
     assert "UNVERIFIED premises in SH's own audit" in _conversation(tmp_path)
@@ -622,3 +623,9 @@ def test_a_report_without_a_selection_premise_is_flagged_to_sh():
     text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
                        slots_remaining=2, turns_remaining=5)
     assert "no Selection premise" in text
+
+
+def test_a_report_without_a_coverage_premise_is_flagged_to_sh():
+    text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
+                       slots_remaining=2, turns_remaining=5)
+    assert "no Coverage premise" in text

@@ -299,3 +299,11 @@ def test_a_selection_line_in_assumptions_is_detected():
     md = GOOD.replace("## Assumptions\n", "## Assumptions\n- Selection: the only host with the pattern - UNVERIFIED\n")
     assert has_selection_premise(md)
     assert unverified_premises(md) == 2
+
+
+def test_a_coverage_line_in_assumptions_is_detected():
+    from senior_report import has_coverage_premise
+    assert not has_coverage_premise(GOOD)
+    md = GOOD.replace("## Assumptions\n",
+                      "## Assumptions\n- Coverage: two kinds of evidence, one searched - UNVERIFIED\n")
+    assert has_coverage_premise(md)

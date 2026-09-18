@@ -38,7 +38,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
-from senior_report import has_selection_premise, open_questions, unverified_premises
+from senior_report import (
+    has_coverage_premise,
+    has_selection_premise,
+    open_questions,
+    unverified_premises,
+)
 from senior_session import SeniorSession
 from usage_tracker import context_window
 
@@ -102,7 +107,7 @@ R4 is a WARNING, not a gate. Some premises genuinely cannot be verified, and an 
 
 ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected.
 
-AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. The one most often missing is the choice itself: why this entity and not another that could fit the question. Mark each VERIFIED (and where the report shows it) or UNVERIFIED. If an UNVERIFIED one could change the answer, COMMAND a round to test it instead of answering. Answering on one is allowed, but it is dangerous ground and is logged. Write 'none found' only after tracing. An ANSWER without an audit is rejected.
+AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. Open the audit with a Coverage line: name the key concept the question asks about, list every way it could show up in the data, and say whether the seniors' searches covered each. A way nobody searched is UNVERIFIED, however well the chosen candidate is verified — a candidate can only win against candidates that were looked for. Then check the choice itself: why this entity and not another that could fit the question. Mark each VERIFIED (and where the report shows it) or UNVERIFIED. If an UNVERIFIED one could change the answer, COMMAND a round to test it instead of answering. Answering on one is allowed, but it is dangerous ground and is logged. Write 'none found' only after tracing. An ANSWER without an audit is rejected.
 
 THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
@@ -110,7 +115,7 @@ THE GATES YOU MUST RESPECT
   * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them, then CLARIFY (costs no round) or COMMAND one more round. Then answer.
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
   * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
-  * Premise audit: an ANSWER must carry `premise_audit`, or the turn is rejected.
+  * Premise audit: an ANSWER must carry `premise_audit`, opening with a Coverage line, or the turn is rejected.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -132,7 +137,8 @@ NO UNTESTED ASSUMPTIONS — your report is graded hardest on this.
 Every conclusion rests on premises. A premise is a hypothesis until a query result shows it. SH grades every report on premise verification (R4), and an untested premise is dangerous ground: it is how an investigation goes off track and returns a confident wrong answer.
 VERIFY FIRST. The first thing you do each round is try to verify the premises your work depends on, before you build further on them.
 An educated guess is allowed only when a premise genuinely cannot be verified. Then say so: list it as UNVERIFIED, and state why it could not be tested.
-THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Before you compute anything, ask what else in the data could fit the question's words, and look for it. The first match you find is a candidate, not the answer. Your Assumptions must open with a Selection line: why this entity (or feed, or value) and not another, which other candidates you searched for, and the query that ruled each out.
+COVER THE CONCEPT BEFORE YOU CHOOSE. Before you select anything, name the key concept the question asks about, then list every way that concept could show up in the data you can reach — each distinct kind of evidence, not just the first one that returns rows. Search each one. The candidates are everything those searches find; the first match is only one of them. Your Assumptions must open with a Coverage line: the ways you listed, and for each the query that searched it and what came back, or that it is not yet searched (UNVERIFIED).
+THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your Assumptions follow Coverage with a Selection line: why this entity (or feed, or value) and not the other candidates Coverage found, and the query that ruled each out.
 WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
 YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM, in this shape:
@@ -153,8 +159,10 @@ YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM,
  NOT_FOUND: what you saw instead, and why it rules this scope out.>
 
 ## Assumptions
-- Selection: <why this entity and not another; the other candidates searched for and
-  the query that ruled each out> - VERIFIED: <queries and results> | UNVERIFIED
+- Coverage: <every way the question's concept could show up in this data; for each, the
+  query that searched it and what came back> - VERIFIED | UNVERIFIED: <ways not searched>
+- Selection: <why this entity and not the other candidates Coverage found; the query
+  that ruled each out> - VERIFIED: <queries and results> | UNVERIFIED
 - <every premise your conclusion or next step rests on> - VERIFIED: <the query
   and the result that showed it> | UNVERIFIED
   <List the ones that feel obvious too — those are the ones that go unchecked.>
@@ -222,6 +230,10 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int) ->
             head += "\n!! This round ran NO new query. R2 = FAIL for it, by code, " \
                     "and you cannot grade it otherwise."
         unverified = unverified_premises(r.get("report") or "")
+        if r.get("report") and not has_coverage_premise(r["report"]):
+            head += ("\n!! Its Assumptions list no Coverage premise — it never said which "
+                     "ways the question's concept could show up in the data were searched. "
+                     "Its candidate set may be whatever it found first.")
         if r.get("report") and not has_selection_premise(r["report"]):
             head += ("\n!! Its Assumptions list no Selection premise — it never said why "
                      "this entity and not another. Treat that choice as UNVERIFIED.")

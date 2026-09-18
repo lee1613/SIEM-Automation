@@ -97,12 +97,23 @@ def unverified_premises(md: str) -> int:
     return sum(1 for ln in (m.group(1).splitlines() if m else []) if "UNVERIFIED" in ln)
 
 
-def has_selection_premise(md: str) -> bool:
-    """Whether "## Assumptions" says why this entity and not another (a 'Selection' line)."""
+def _has_assumption(md: str, label: str) -> bool:
+    """Whether "## Assumptions" has a bullet opening with `label`."""
     m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
                   md or "", re.MULTILINE | re.DOTALL)
-    return bool(m and re.search(r"^\s*[-*]\s*\**Selection", m.group(1),
+    return bool(m and re.search(rf"^\s*[-*]\s*\**{label}", m.group(1),
                                 re.MULTILINE | re.IGNORECASE))
+
+
+def has_selection_premise(md: str) -> bool:
+    """Whether the report says why this entity and not another (a 'Selection' line)."""
+    return _has_assumption(md, "Selection")
+
+
+def has_coverage_premise(md: str) -> bool:
+    """Whether the report lists the ways the question's concept could show up in the
+    data and what searched each (a 'Coverage' line) — the set Selection chooses from."""
+    return _has_assumption(md, "Coverage")
 
 
 def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
