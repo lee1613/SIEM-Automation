@@ -20,7 +20,15 @@ from __future__ import annotations
 import uuid
 
 from question_state import ROUND_ITERS
-from senior_report import _norm_query, novel_spl, report_violations, stamp_header, truncate_words
+from senior_report import (
+    _norm_query,
+    novel_spl,
+    report_scope,
+    report_violations,
+    stamp_header,
+    truncate_words,
+    uncovered_fields,
+)
 
 COMPACT_AT = 0.80    # projected context share that triggers a compaction
 ALERT_AT   = 0.70    # current context share that prints an operator alert
@@ -67,6 +75,8 @@ class SeniorSession:
         self.last_prompt_tokens = 0
         self.status = "active"
         self.briefed = False
+        self.coverage_note = ""      # runner's field check, relayed into the next round
+        self._fields: dict = {}      # (sourcetype, source) -> field names, per session
 
     def _new_thread(self) -> str:
         return f"senior_{self.qid}_{self.sid}_{uuid.uuid4().hex[:8]}"
@@ -84,6 +94,8 @@ class SeniorSession:
     def work(self, directive: str, *, rounds_remaining: int) -> dict:
         """Resume this senior for one round and return its stamped report."""
         message = self._message_for(directive)
+        if self.coverage_note:
+            message = f"{self.coverage_note}\n\n{message}"
 
         result = self.pool.run_round(
             thread_id=self.thread_id, message=message, qid=self.qid,
@@ -115,6 +127,9 @@ class SeniorSession:
             # capped round's report is where the budget ran out, not a conclusion.
             body = (body.rstrip() + f"\n\n_Iteration cap reached: {self.iters}/{self.iters} "
                     "iterations used this round — cut off, not finished._\n")
+        self.coverage_note = "" if failed else self._coverage_check(body)
+        if self.coverage_note:
+            body = body.rstrip() + f"\n\n{self.coverage_note}\n"
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,
                               round_n=self.rounds_used,
                               rounds_remaining=rounds_remaining,
@@ -135,6 +150,35 @@ class SeniorSession:
 
         return {**result, "report": report, "novel_spl_count": count,
                 "senior_id": self.sid, "round": self.rounds_used}
+
+    def _coverage_check(self, report: str) -> str:
+        """Name the fields of the report's own scope that its Coverage line skips.
+        A Coverage list drawn from memory misses the field the data actually uses;
+        the scope's field list is the ground truth for what could carry the concept."""
+        st, src = report_scope(report)
+        if not (st or src):
+            return ""
+        missed = uncovered_fields(report, self._scope_fields(st, src))
+        if not missed:
+            return ""
+        return (f"_Coverage check (runner): {len(missed)} field(s) of {st or src} are never "
+                f"named in your Coverage line: {', '.join(missed)}. For each, say whether it "
+                "could carry the question's concept, and search the ones that could — "
+                "across all their values, not only the most common._")
+
+    def _scope_fields(self, sourcetype: str, source: str) -> list[str]:
+        key = (sourcetype, source)
+        if key not in self._fields:
+            splunk = getattr(self.pool, "splunk", None)
+            try:
+                rows = (splunk.get_sourcetype_fields(sourcetype=sourcetype, source=source)
+                        .get("results", []) if splunk else [])
+            except Exception as exc:  # the check is advisory; never fail a round on it
+                print(f"[{self.sid}] coverage check skipped: {exc}")
+                rows = []
+            self._fields[key] = [r["field"] for r in rows
+                                 if int(r.get("distinct_count") or 0) > 0]
+        return self._fields[key]
 
     def _render_spl_list(self) -> str:
         """Render the SPL already run with original spellings, sorted by normalized key."""

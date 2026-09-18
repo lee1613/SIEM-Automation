@@ -116,6 +116,39 @@ def has_coverage_premise(md: str) -> bool:
     return _has_assumption(md, "Coverage")
 
 
+# Splunk bookkeeping present in every feed — never where a concept shows up.
+_META_FIELD = re.compile(r"^(date_\w+|punct|linecount|splunk_server\w*|index|source|"
+                         r"sourcetype|host|timeendpos|timestartpos|eventtype|tag(::\w+)?)$")
+
+
+def report_scope(md: str) -> tuple[str, str]:
+    """The (sourcetype, source) a report's **Scope:** line names; '' where absent."""
+    m = re.search(r"^\*\*Scope:\*\*(.*)$", md or "", re.MULTILINE)
+    if not m:
+        return "", ""
+
+    def one(key):
+        v = re.search(rf"\b{key}\s*=\s*([^\s|,]+)", m.group(1))
+        return v.group(1).strip("`\"'<>") if v else ""
+    return one("sourcetype"), one("source")
+
+
+def coverage_text(md: str) -> str:
+    """The Coverage bullet of "## Assumptions", continuation lines included."""
+    m = re.search(r"^\s*[-*]\s*\**Coverage(.*?)(?=^\s*[-*]\s|^#{1,3} |^_|\Z)",
+                  md or "", re.MULTILINE | re.DOTALL | re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+def uncovered_fields(md: str, fields: list[str]) -> list[str]:
+    """Fields of the report's scope its Coverage line never names — ways the
+    concept could show up that nobody said were considered."""
+    text = coverage_text(md).lower()
+    return [f for f in fields
+            if not _META_FIELD.match(f)
+            and not re.search(rf"(?<![\w:]){re.escape(f.lower())}(?![\w:])", text)]
+
+
 def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
                  rounds_remaining: int, novel_spl_count: int) -> str:
     """Replace whatever title the senior wrote with the runner's own, and add the
