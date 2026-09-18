@@ -341,3 +341,11 @@ def test_an_over_cap_report_trims_its_narrative_and_keeps_what_sh_needs():
     tail = GOOD[GOOD.index("## Assumptions"):]
     assert out.endswith(tail) or tail.strip() in out
     assert open_questions(out) == open_questions(GOOD)
+
+
+def test_a_none_bullet_with_a_reason_is_not_a_question():
+    md = GOOD.split("## Open questions for SH")[0] + (
+        "## Open questions for SH\n- None — the definition is anchored.\n")
+    assert open_questions(md) == []
+    md2 = md.replace("- None — the definition is anchored.", "- Does the window include setup?")
+    assert open_questions(md2) == ["Does the window include setup?"]

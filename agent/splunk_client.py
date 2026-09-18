@@ -114,8 +114,14 @@ class SplunkClient:
         """Return top values for a field, optionally scoped to a sourcetype and/or source."""
         field = re.sub(r'["|]', "", field)          # keep LLM args inside the SPL term
         st_filter = _scope(sourcetype, source)
+        # stats, not `top`: `top limit=N` returns exactly N rows, so the result
+        # never said 1,573 distinct values existed behind the 100 shown (Q216 r9).
+        # With stats the job's result count is every distinct value, and
+        # _format_result flags the rows that were not returned.
         return self.search(
-            f"index={index}{st_filter} | top limit={top_n} {field}",
+            f"index={index}{st_filter} | stats count by {field} "
+            f"| eventstats sum(count) as _total | eval percent=round(count*100/_total, 4) "
+            f"| fields - _total | sort 0 - count",
             earliest="0",
             max_results=top_n,
         )

@@ -109,7 +109,10 @@ def open_questions(md: str) -> list[str]:
     out = []
     for ln in m.group(1).splitlines():
         b = re.match(r"^\s*(?:[-*]|\d+[.)])\s+(.*)$", ln)
-        if b and b.group(1).strip().strip(".").lower() not in _NOT_A_QUESTION:
+        # "None — the definition is anchored" is still no question (Q216 r9: the
+        # gate rejected SH's ANSWER twice over it), so judge the first word alone.
+        lead = re.split(r"\s*[—–:;,(-]\s*|\s{2,}", b.group(1).strip(), maxsplit=1)[0] if b else ""
+        if b and lead.strip().strip(".").lower() not in _NOT_A_QUESTION:
             out.append(b.group(1).strip())
     return out
 
