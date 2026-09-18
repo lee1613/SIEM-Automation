@@ -37,7 +37,9 @@ BASES = (
 )
 
 ROUTES = ("SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER")
-TECHNIQUES = ("hunter", "content", "metrics")
+# hunter/content were pruned on 2026-09-18 smoke evidence: SH's per-round directives
+# already carry both rules. metrics stays — SH cannot enforce it mid-round.
+TECHNIQUES = ("metrics",)
 
 
 class Scope(BaseModel):
@@ -99,9 +101,11 @@ class SeniorDirective(BaseModel):
 
     # SPAWN
     constraints: Scope = Field(description="SPAWN only. The domain this new senior owns.")
-    technique: Literal["hunter", "content", "metrics", ""] = Field(
-        description="SPAWN of a senior. hunter: enumerate the population before filtering. "
-                    "content: read raw events first. metrics: compute every number in SPL.")
+    technique: Literal["metrics", ""] = Field(
+        description="SPAWN of a senior. 'metrics' when the answer is a number that must be "
+                    "computed in SPL (every number via eval/stats, never by hand). Otherwise "
+                    "empty: a plain senior, whose approach you set in the subquestion and your "
+                    "directives.")
     spawn_type: Literal["senior", "exploration", ""] = Field(
         description="SPAWN only. 'exploration' is the one-shot scout for when you cannot name "
                     "a scope at all; it costs no senior slot and is capped at one per question.")
@@ -123,7 +127,7 @@ class SeniorDirective(BaseModel):
     # entry unactionable: `senior_id` for every route aimed at an existing senior
     # (COMMAND/CRITIC/CLARIFY/RETIRE); COMMAND's `decision`/`directive`; CRITIC's `basis`/
     # `flaw`/`why_it_fails`/`fix_directive`; CLARIFY's `clarify_reason`/
-    # `questions`; SPAWN's `spawn_type`/`subquestion`/(senior) `technique`;
+    # `questions`; SPAWN's `spawn_type`/`subquestion`;
     # RETIRE's `reason`; ANSWER's `value`/`source_senior`. `rationale`, SPAWN's
     # `reason`, `value_kind`, `justification` and SPAWN's `constraints` are
     # deliberately left advisory — an unscoped or unexplained spawn is a bad
@@ -156,8 +160,6 @@ class SeniorDirective(BaseModel):
                 raise ValueError("SPAWN needs spawn_type 'senior' or 'exploration'")
             if not self.subquestion.strip():
                 raise ValueError("SPAWN needs a subquestion")
-            if self.spawn_type == "senior" and self.technique not in TECHNIQUES:
-                raise ValueError(f"a senior SPAWN needs a technique from {TECHNIQUES}")
         elif r == "RETIRE":
             if not self.reason.strip():
                 raise ValueError("RETIRE needs a reason")

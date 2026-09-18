@@ -136,8 +136,8 @@ def render_opening(*, qid: str, question: str, guidance: str, points: int,
         f"{budget['rounds']} rounds, {budget['sh_turns']} turns of your own, "
         f"{budget['iters']} iterations per senior round.",
         "",
-        "Start by spawning exactly ONE senior. Name its domain constraints, its "
-        "technique, and a self-contained problem statement. A second senior needs a "
+        "Start by spawning exactly ONE senior. Name its domain constraints, whether "
+        "it is a metrics senior, and a self-contained problem statement. A second senior needs a "
         "stated reason the first one's constraints cannot cover it.",
     ]
     return "\n".join(lines)
@@ -406,7 +406,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                     continue
                 grant = state.open_senior(sid)
                 sessions[sid] = SeniorSession(
-                    sid=sid, pool=pool, qid=qid, technique=e.technique or "hunter",
+                    sid=sid, pool=pool, qid=qid, technique=e.technique,
                     subquestion=e.subquestion, brief=SENIOR_BRIEF, window=window,
                     rounds_granted=grant, idx=counter, constraints=e.constraints,
                     iters=ROUND_ITERS)

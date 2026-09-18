@@ -81,7 +81,7 @@ def test_routes_and_techniques_tuples_match_the_literals():
         entry(senior_id="s1", route=r, reason="x", directive="x", decision="continue",
               rationale="x", basis=BASES[0], flaw="f", why_it_fails="w", fix_directive="d",
               clarify_reason="unclear", questions=["q"], spawn_type="senior",
-              technique="hunter", subquestion="s", value="v", source_senior="s1",
+              technique="metrics", subquestion="s", value="v", source_senior="s1",
               justification="j")
     for t in TECHNIQUES:
         e = entry(route="SPAWN", spawn_type="senior", technique=t,
@@ -110,15 +110,27 @@ def test_clarify_needs_a_reason_and_one_to_three_questions():
               questions=["a", "b", "c", "d"])
 
 
-def test_spawn_needs_a_type_a_subquestion_and_a_technique():
+def test_spawn_needs_a_type_and_a_subquestion():
     e = entry(route="SPAWN", spawn_type="senior", technique="metrics",
               subquestion="Compute the p25/p75 of flow duration in SPL.",
               reason="The metrics rule has to be enforced at spawn time.")
     assert e.technique == "metrics"
     with pytest.raises(ValidationError):
-        entry(route="SPAWN", spawn_type="senior", technique="", subquestion="x", reason="y")
-    with pytest.raises(ValidationError):
         entry(route="SPAWN", spawn_type="exploration", subquestion="", reason="y")
+
+
+def test_a_plain_senior_spawn_needs_no_technique():
+    e = entry(route="SPAWN", spawn_type="senior", technique="", subquestion="x", reason="y")
+    assert e.technique == ""
+
+
+def test_hunter_and_content_are_no_longer_offered_to_sh():
+    # Pruned on smoke-run evidence: SH's directives already carry both rules.
+    assert TECHNIQUES == ("metrics",)
+    for gone in ("hunter", "content"):
+        with pytest.raises(ValidationError):
+            entry(route="SPAWN", spawn_type="senior", technique=gone,
+                  subquestion="x", reason="y")
 
 
 def test_retire_needs_a_target_and_a_reason():
@@ -161,7 +173,7 @@ def test_an_exploration_entry_must_not_be_graded():
 
 
 def test_spawn_entries_are_not_graded():
-    e = entry(route="SPAWN", spawn_type="senior", technique="hunter",
+    e = entry(route="SPAWN", spawn_type="senior", technique="",
               subquestion="s", reason="r")
     assert grade_violations([e], graded=set(), exploration=set()) == []
 
@@ -216,7 +228,7 @@ def test_a_fourth_spawn_is_refused():
     st = QuestionState(points=1000)
     for sid in ("s1", "s2", "s3"):
         st.open_senior(sid)
-    e = entry(route="SPAWN", spawn_type="senior", technique="hunter",
+    e = entry(route="SPAWN", spawn_type="senior", technique="",
               subquestion="s", reason="r")
     assert directive_violations([e], st) != []
 

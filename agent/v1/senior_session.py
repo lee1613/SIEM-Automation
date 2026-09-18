@@ -47,7 +47,7 @@ class SeniorSession:
         self.sid = sid
         self.pool = pool
         self.qid = qid
-        self.technique = technique or "hunter"
+        self.technique = technique or "senior"   # plain role: no SPECIALISTS prompt
         self.subquestion = subquestion
         self.brief = brief
         self.window = window

@@ -235,3 +235,11 @@ def test_the_cap_note_survives_the_fallback_report():
 def test_a_round_under_the_cap_carries_no_note():
     out = _session(_Pool(iterations=5)).work("a", rounds_remaining=7)
     assert "Iteration cap reached" not in out["report"]
+
+
+def test_a_senior_with_no_technique_gets_the_plain_graph_not_hunter():
+    # "" used to fall back to "hunter", which silently re-injected the pruned prompt.
+    pool = _Pool()
+    s = _session(pool, technique="")
+    s.work("Begin.", rounds_remaining=7)
+    assert pool.rounds[0]["technique"] == "senior"

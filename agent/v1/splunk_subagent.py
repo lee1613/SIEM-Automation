@@ -201,7 +201,7 @@ class SplunkWorkerPool:
                 "full_state": [], "iterations": 0, "cap_hit": False}
 
     def run_round(self, *, thread_id: str, message: str, qid: str, idx: int,
-                  technique: str = "hunter", max_iter: int = 8) -> dict:
+                  technique: str = "senior", max_iter: int = 8) -> dict:
         """One round of a LIVE senior: resume `thread_id` with a new directive.
 
         The thread is the whole point. `run_agent_traced` seeds `step_count: 0`
@@ -220,7 +220,7 @@ class SplunkWorkerPool:
                          max_iter=max_iter, thread_id=thread_id)
 
     def clarify(self, *, thread_id: str, qid: str, idx: int, questions: list,
-                technique: str = "hunter", max_iter: int = 8) -> str:
+                technique: str = "senior", max_iter: int = 8) -> str:
         """Answer SH's clarifying questions from the senior's existing context.
 
         No tools and no round consumed (§3.3): if the senior would have to touch

@@ -75,7 +75,7 @@ class _Pool:
 
 
 def _spawn(**kw):
-    base = dict(route="SPAWN", spawn_type="senior", technique="hunter",
+    base = dict(route="SPAWN", spawn_type="senior", technique="",
                 subquestion="Find the flow duration in cisco:nvm.",
                 reason="Only feed with a duration field.")
     base.update(kw)
