@@ -481,8 +481,8 @@ def main():
         # Net zero, for a model dependency that twice put catastrophic text on
         # the scoreboard.
         if args.loop == "conversational":
-            # run_question's `answer` is already its own fallback (best
-            # candidate across every report this question produced, or "").
+            # run_question's `answer` is SH's accepted ANSWER or its honest
+            # NO_ANSWER marker — never a senior value SH declined to submit.
             # Routing it through fallback_answer() would risk picking a
             # delegation's `answer` field, which for conversational records is
             # the whole markdown report, not a bare value — never submit that.

@@ -34,6 +34,11 @@ from senior_session import SeniorSession
 from usage_tracker import context_window
 
 MAX_PARALLEL = 6          # matches SplunkConnectionPool's default size
+# What a question submits when SH never issued an accepted ANSWER. Only SH answers:
+# the loop used to fall back to the best senior value, which submitted a value SH
+# had deliberately declined (Q217, test_20260918_113209: `pwned.jpg`). The honest
+# record is that no answer was given; end_reason says why.
+NO_ANSWER = "SH retired without answering"
 # ponytail: mirrors orchestrator.MAX_HISTORY_MSGS/_window rather than importing them —
 # importing orchestrator drags the whole v1.3.0 compiler pipeline (~8s) into this loop.
 # test_the_history_window_mirrors_the_orchestrator keeps the two from drifting.
@@ -537,18 +542,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             msgs.append(HumanMessage(content="\n\n".join([head, *scouted, *failures])))
 
     if not answer:
-        # The best BARE value or nothing — report prose is never submitted. A scout
-        # never holds a value (§2.3), and a value from a report SH graded R1 = FAIL
-        # answers a neighbouring question (§3.4's wrong-question gate).
-        off_scope = {(g["senior_id"], g["round"]) for g in grades if g["r1"] == "FAIL"}
-        ranked = [r for r in _senior_reports(all_reports)
-                  if (r.get("value") or "").strip()
-                  and (r.get("senior_id"), r.get("round")) not in off_scope]
-        if ranked:
-            ranked.sort(key=lambda r: (r.get("status") == "solved",
-                                       r.get("confidence") or 0))
-            answer = ranked[-1]["value"].strip()
-        log.note(f"question ended: {end_reason} — falling back to {answer!r}")
+        answer = NO_ANSWER
+        log.note(f"question ended: {end_reason} — no ANSWER from SH; submitting {answer!r}")
 
     if history is not None:
         history.extend(m for m in msgs[start:] if not isinstance(m, SystemMessage))

@@ -2,7 +2,7 @@
 import os
 
 from conversation import SeniorDirective, SHTurn
-from sh_loop import run_question
+from sh_loop import NO_ANSWER, run_question
 
 # Every SeniorDirective field is required under strict json_schema, so tests fill
 # the unused ones. Repeated here rather than imported from
@@ -123,13 +123,14 @@ def test_iterations_are_reported_against_the_tier_ceiling(tmp_path):
     assert out["ceiling"] == 192            # 1000pt tier: 3 x 8 x 8
 
 
-def test_an_ungrounded_answer_is_pushed_back_once_then_falls_back(tmp_path):
+def test_an_ungrounded_answer_is_pushed_back_once_then_gives_no_answer(tmp_path):
     llm = _LLM([_turn(_spawn()),
                 _turn(_answer(value="999.999")),
                 _turn(_answer(value="888.888"))])
     out = _run(llm, _Pool(), tmp_path)
     assert out["end_reason"] == "ungrounded"
-    assert out["answer"] == "1367.875", "falls back to a real candidate from the reports"
+    # Neither of SH's values was grounded; the senior's value was never SH's answer.
+    assert out["answer"] == NO_ANSWER
 
 
 def test_a_rejected_turn_is_fed_back_and_costs_a_turn(tmp_path):
@@ -144,7 +145,7 @@ def test_a_rejected_turn_is_fed_back_and_costs_a_turn(tmp_path):
         assert "REJECTED" in f.read()
 
 
-def test_running_out_of_turns_ends_the_question_on_the_best_candidate(tmp_path):
+def test_running_out_of_turns_ends_the_question_with_no_answer(tmp_path):
     # 100pt tier: 5 SH turns. Script 5 spawn-less no-op turns by clarifying forever.
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="unclear",
                     questions=["what?"], r1_scope_alignment="WEAK",
@@ -152,7 +153,7 @@ def test_running_out_of_turns_ends_the_question_on_the_best_candidate(tmp_path):
     llm = _LLM([_turn(_spawn())] + [_turn(clarify) for _ in range(6)])
     out = _run(llm, _Pool(), tmp_path, points=100)
     assert out["end_reason"] == "turns"
-    assert out["answer"] == "1367.875"
+    assert out["answer"] == NO_ANSWER
 
 
 def test_a_clarify_consumes_a_turn_but_no_wave(tmp_path):
@@ -421,22 +422,24 @@ def test_a_clarify_to_a_retired_senior_is_rejected(tmp_path):
     assert "s1 is not an active senior" in _conversation(tmp_path)
 
 
-def test_the_fallback_is_a_bare_value_or_nothing(tmp_path):
-    # M3: no report ever held a value -> report text is never submitted
+def test_no_value_anywhere_ends_with_the_honest_marker(tmp_path):
+    # report text is never submitted, and neither is an empty string
     pool = _Pool(value="", insight="NOT_FOUND")
     llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
     out = _run(llm, pool, tmp_path, points=100)
     assert out["end_reason"] == "turns"
-    assert out["answer"] == ""
+    assert out["answer"] == NO_ANSWER
 
 
-def test_the_fallback_skips_values_from_r1_fail_reports(tmp_path):
-    # M4
-    llm = _LLM([_turn(_spawn()), _turn(_retire(r1_scope_alignment="FAIL"))]
-               + [_turn() for _ in range(3)])
+def test_a_value_sh_never_answered_with_is_not_submitted(tmp_path):
+    # Q217 (test_20260918_113209): SH retired its seniors "rather than force an
+    # unsupported answer", then the old fallback submitted a senior's value anyway.
+    # The senior's report here holds a value and is graded R1 PASS.
+    llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
     out = _run(llm, _Pool(), tmp_path, points=100)
     assert out["end_reason"] == "turns"
-    assert out["answer"] == ""
+    assert out["answer"] == NO_ANSWER
+    assert out["answer"] != "1367.875"
 
 
 def test_the_stamped_rounds_remaining_counts_this_round_as_spent(tmp_path):
