@@ -226,5 +226,5 @@ def test_the_clarify_model_sends_the_token_cap_the_provider_reads():
     pool = SplunkWorkerPool(None, senior_api_key="sk-fake",
                             senior_model="zai-org/GLM-5.3",
                             senior_base_url="https://api.featherless.ai/v1")
-    assert pool._clarify_llm.extra_body == {"max_tokens": 16384}
+    assert pool._clarify_llm.extra_body == {"max_tokens": 32768}
     assert pool._clarify_llm.max_tokens is None
