@@ -579,3 +579,23 @@ def test_an_overlapping_parallel_spawn_is_rejected(tmp_path):
     _run(llm, pool, tmp_path)
     assert pool.rounds == 1, "the overlapping turn ran nothing"
     assert "overlap" in _conversation(tmp_path).lower()
+
+
+def test_a_runaway_senior_is_retired_without_pausing_the_run(tmp_path, monkeypatch):
+    # Q216 2026-09-18: a runaway reached the HITL pause and stopped the whole run.
+    import sh_loop
+    paused = []
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", lambda *a, **k: paused.append(a) or "skip")
+    llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
+    out = _run(llm, _Pool(status="runaway"), tmp_path, hitl=True, points=100)
+    assert paused == [], "a runaway is handled by the loop, not by a human"
+    assert out["answer"] == NO_ANSWER
+
+
+def test_a_provider_outage_still_asks_a_human(tmp_path, monkeypatch):
+    import sh_loop
+    paused = []
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", lambda *a, **k: paused.append(a) or "skip")
+    llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
+    _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
+    assert len(paused) == 1

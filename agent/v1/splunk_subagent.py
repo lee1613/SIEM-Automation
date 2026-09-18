@@ -31,6 +31,7 @@ from langchain_openai import ChatOpenAI
 from llm_errors import describe_llm_error, provider_of, resilient_http_client
 from specialists import SPECIALISTS, parse_specialist_tag
 from splunk_agent import MAX_ITER, iter_budget
+from usage_tracker import context_window
 from web_tool import web_lookup
 
 FINISH_INSTRUCTIONS = (
@@ -157,6 +158,7 @@ class SplunkWorkerPool:
                         extra_instructions=instructions,
                         extra_tools=[web_lookup, submit_finding],
                         max_iter=cap,
+                        context_window=context_window(self.senior_model),
                     )
         return self._graphs[key]
 
@@ -307,7 +309,7 @@ class SplunkWorkerPool:
         # answer (if any) is untrustworthy. Flag it so the executor routes to the
         # HITL interrupt rather than folding it into an ordinary reasoning failure.
         runaway = (isinstance(state, dict)
-                   and state.get("output_tokens", 0) > agent_mod.OUTPUT_TOKEN_CAP)
+                   and agent_mod.over_output_cap(state))
         # Schema B: the finding comes from the worker's terminal submit_finding
         # call, with a prose fallback when it skipped the tool (see finding.py).
         # api_failed and runaway are transport outcomes, not findings - they keep

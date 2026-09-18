@@ -46,11 +46,28 @@ SPLUNK_USER    = os.getenv("SPLUNK_USER", "admin")
 SPLUNK_PASS    = os.getenv("SPLUNK_PASS", "")
 MODEL          = "gpt-5.4"
 MAX_ITER       = 15
-# Runaway guard, NOT a working limit. A worker emits ~11-12K output tokens in
-# total across all its calls (measured over two Q216 runs), so 100K is ~8x
-# typical: reaching it means the worker is stuck, not thorough. Crossing it ends
-# the worker and routes to the HITL interrupt via status="runaway".
+# Runaway guard, NOT a working limit, counted per invoke (one round of a live
+# senior). A graph built WITHOUT a context window uses this flat cap: one-shot
+# workers emit ~11-12K output tokens in total (measured over two Q216 runs), so
+# 100K is ~8x typical. A graph built WITH one (v1.4 seniors) caps each round at
+# what the window can still hold: window minus the context the round started
+# with — see round_output_cap(). GLM-5.3 at 12 iterations spends ~16K per call,
+# so a flat 100K cut off a working senior 7 steps into its round (Q216,
+# 2026-09-18). Crossing the cap ends the worker with status="runaway".
 OUTPUT_TOKEN_CAP = 100_000
+
+
+def round_output_cap(context_window: int | None, prompt_tokens: int) -> int:
+    """The runaway cap for one round: the room left in the window after the
+    context the round started with, or the flat cap when no window is known."""
+    if not context_window:
+        return OUTPUT_TOKEN_CAP
+    return max(context_window - prompt_tokens, 1)
+
+
+def over_output_cap(state: dict) -> bool:
+    """True once this round's output passed its cap (a runaway)."""
+    return state.get("output_tokens", 0) > (state.get("output_cap") or OUTPUT_TOKEN_CAP)
 # Per-request LLM timeout / retry budget. SDK defaults are 600s and 2 retries;
 # 600s of silence on a stalled connection is the "process died but is still
 # running" symptom. Retries use the SDK's own capped-exponential backoff.
@@ -178,7 +195,8 @@ class AgentState(TypedDict):
     seen_errors:          list   # [[name, args_str], ...] calls that errored — reset per question
     seen_empty:           list   # [[name, args_str], ...] calls that returned 0 results — reset per question
     step_count:           int    # agent-node calls — reset per question
-    output_tokens:        int    # cumulative completion tokens — runaway guard
+    output_tokens:        int    # cumulative completion tokens this invoke — runaway guard
+    output_cap:           int    # this invoke's runaway cap, set on its first call (0 = unset)
     last_prompt_tokens:   int    # prompt size of the most recent call — context-window tracking
     verification_passed:  bool   # set by verify_node, read by after_verify router
     intention_retries:    int    # tracks retries for missing Intention — reset per question
@@ -478,7 +496,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
                  extra_instructions: str = "", extra_tools: list | None = None,
                  max_iter: int = MAX_ITER, temperature: float = 0,
-                 http_client=None):
+                 http_client=None, context_window: int | None = None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -610,10 +628,11 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         # size. v1.4 projects a round's growth off it to decide whether to
         # compact before working (spec §6); nothing else reads it.
         prompt_tokens = int(um.get("input_tokens", 0))
-        if out_total > OUTPUT_TOKEN_CAP:
-            print(f"[RUNAWAY] {out_total:,} output tokens > cap {OUTPUT_TOKEN_CAP:,} "
+        cap = state.get("output_cap") or round_output_cap(context_window, prompt_tokens)
+        if out_total > cap:
+            print(f"[RUNAWAY] {out_total:,} output tokens > cap {cap:,} "
                   "— stopping this worker")
-        return {"messages": [response], "step_count": step,
+        return {"messages": [response], "step_count": step, "output_cap": cap,
                 "output_tokens": out_total, "last_prompt_tokens": prompt_tokens}
 
     # ── Node: verify ───────────────────────────────────────────────────────────
@@ -711,7 +730,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         """Route agent output: to verify if tool calls present, else END."""
         if state.get("step_count", 0) > max_iter:
             return END
-        if state.get("output_tokens", 0) > OUTPUT_TOKEN_CAP:
+        if over_output_cap(state):
             return END          # runaway — _run turns this into status="runaway"
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None)
@@ -765,6 +784,7 @@ def run_agent(graph, question: str, thread_id: str = "default") -> str:
             "seen_empty":          [],
             "step_count":          0,
             "output_tokens":       0,
+            "output_cap":          0,
             "last_prompt_tokens":  0,
             "verification_passed": False,
             "intention_retries":   0,
@@ -809,6 +829,7 @@ def run_agent_traced(graph, question: str, thread_id: str = "default",
             "seen_empty":          [],
             "step_count":          0,
             "output_tokens":       0,
+            "output_cap":          0,
             "last_prompt_tokens":  0,
             "verification_passed": False,
             "intention_retries":   0,

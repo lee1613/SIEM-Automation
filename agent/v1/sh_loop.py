@@ -601,7 +601,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                         f"{result['status']}: transport failure"))
                     state.refund_spawn(sid)
                     log.note(f"{sid} {result['status']} — retired, spawn slot refunded")
-                if hitl:
+                # Only a provider outage needs a human: SH cannot replan around a
+                # dead endpoint. A runaway is already handled — the senior is
+                # retired, its slot refunded, and SH decides whether to respawn.
+                if hitl and result["status"] == "api_failed":
                     choice = resolve_interrupt(
                         [_Interrupt({"provider": result.get("provider", ""),
                                      "error": result.get("answer", "")[:400],
