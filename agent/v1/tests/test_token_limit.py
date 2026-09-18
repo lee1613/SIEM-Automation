@@ -2,9 +2,10 @@
 
 Probed 2026-09-18 against zai-org/GLM-5.3 on Featherless: `max_tokens=12000`
 produced 8211 tokens, `max_completion_tokens=12000` stopped dead at 4096. The
-code asked for 16384 via `max_tokens` (the cap is now GLM-5.3's own ceiling, 32768),
+code asked for 16384 via `max_tokens`, langchain-openai 1.3.2 rewrote it to
 `max_completion_tokens`, Featherless ignored that and applied its own 4096
-default - which truncated every GLM senior's round report mid-reasoning.
+default - which truncated every GLM senior's round report mid-reasoning. The cap
+is now GLM-5.3's own output ceiling, 32768.
 """
 
 from langchain_openai import ChatOpenAI
