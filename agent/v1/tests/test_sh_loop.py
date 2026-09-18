@@ -629,3 +629,10 @@ def test_a_report_without_a_coverage_premise_is_flagged_to_sh():
     text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
                        slots_remaining=2, turns_remaining=5)
     assert "no Coverage premise" in text
+
+
+def test_the_senior_task_leads_with_the_question_verbatim():
+    from sh_loop import verbatim_task
+    t = verbatim_task("For how many seconds?", "Round it.", "Compute the total seconds.")
+    assert t.index("For how many seconds?") < t.index("Compute the total seconds.")
+    assert "Answer format guidance: Round it." in t
