@@ -59,6 +59,29 @@ LLM_MAX_RETRIES  = 3
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 
+def token_limit_kwargs(base_url: str | None, limit: int = 16384) -> dict:
+    """ChatOpenAI kwargs that actually reach a non-OpenAI endpoint as a token cap.
+
+    langchain-openai renames `max_tokens` to `max_completion_tokens` in the
+    request body (1.3.2). OpenAI wants that name; Featherless silently ignores it
+    and applies its own 4096 default, so every GLM-5.3 senior ran at 4096 rather
+    than the 16384 this code asked for. Probed 2026-09-18 against
+    zai-org/GLM-5.3 with a prompt long enough to overrun it:
+
+        max_tokens=12000            -> 8211 completion tokens, finish "stop"
+        max_completion_tokens=12000 -> 4096 completion tokens, finish "length"
+        neither                     -> 4096 completion tokens, finish "length"
+
+    `extra_body` is passed through untouched, so it is the only way to send the
+    raw field. That cap cost the Q216 smoke runs every round report: a reasoning
+    model spends the budget on hidden chain-of-thought and is cut off before it
+    writes its `submit_finding` call, which reaches SH as a blank report.
+    Runaway generation is bounded by OUTPUT_TOKEN_CAP per worker, not here.
+    """
+    return ({"extra_body": {"max_tokens": limit}} if base_url
+            else {"max_completion_tokens": limit})
+
+
 def iter_budget(points: int) -> int:
     """Iteration cap scaled by question value. High-value (>=500pt) questions
     get a larger tool-call budget; everything else gets the base MAX_ITER."""
@@ -481,16 +504,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         tools = tools + list(extra_tools)
     tool_map = {t.name: t for t in tools}
 
-    # OpenAI's newer models require `max_completion_tokens`; NIM / open-source models
-    # (reached via base_url) expect the classic `max_tokens`. Pick the right one.
-    # 4096 was chosen for Llama 3.3, which had no hidden reasoning. Reasoning
-    # models spend this budget on chain-of-thought before writing `content`, so a
-    # tight cap returns an empty answer that reads as a failed delegation. 16384
-    # is well clear of any observed answer and is accepted by every model we might
-    # swap in (GLM-5.3's own hard ceiling is 32768). Runaway generation is bounded
-    # by OUTPUT_TOKEN_CAP per worker, not by this per-call limit.
-    token_kwargs = ({"max_tokens": 16384} if base_url
-                    else {"max_completion_tokens": 16384})
+    token_kwargs = token_limit_kwargs(base_url)
     # Explicit timeout + retries. The openai SDK's default timeout is 600s, so a
     # stalled connection sits silent for 10 minutes per attempt and looks exactly
     # like a dead-but-running process. max_retries drives the SDK's own backoff
