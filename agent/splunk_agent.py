@@ -59,7 +59,7 @@ LLM_MAX_RETRIES  = 3
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 
-def token_limit_kwargs(base_url: str | None, limit: int = 16384) -> dict:
+def token_limit_kwargs(base_url: str | None, limit: int = 32768) -> dict:
     """ChatOpenAI kwargs that actually reach a non-OpenAI endpoint as a token cap.
 
     langchain-openai renames `max_tokens` to `max_completion_tokens` in the
@@ -76,7 +76,12 @@ def token_limit_kwargs(base_url: str | None, limit: int = 16384) -> dict:
     raw field. That cap cost the Q216 smoke runs every round report: a reasoning
     model spends the budget on hidden chain-of-thought and is cut off before it
     writes its `submit_finding` call, which reaches SH as a blank report.
-    Runaway generation is bounded by OUTPUT_TOKEN_CAP per worker, not here.
+
+    The default is GLM-5.3's own output ceiling, 32768 — the model cannot be
+    given more, and this is a limit on ONE reply (reasoning + report), not on the
+    256K context it reads. Its successful calls run 47-2 667 output tokens, so
+    this is headroom rather than a working budget. Runaway generation is bounded
+    by OUTPUT_TOKEN_CAP across a worker's whole round, not here.
     """
     return ({"extra_body": {"max_tokens": limit}} if base_url
             else {"max_completion_tokens": limit})
