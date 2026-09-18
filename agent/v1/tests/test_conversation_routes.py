@@ -26,7 +26,7 @@ BLANK = {
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
-    "case_updates": [],
+    "case_updates": [], "premise_audit": [],
 }
 
 
@@ -472,3 +472,13 @@ def test_exploration_spawns_are_not_scope_checked():
     e = entry(route="SPAWN", spawn_type="exploration", subquestion="s", reason="r")
     active = {"s1": SeniorDirective.model_fields["constraints"].annotation(**_scope())}
     assert spawn_overlap_violations([e], active) == []
+
+
+def test_an_answer_without_a_premise_audit_is_rejected():
+    from conversation import premise_audit_violations, unverified_audit
+    bare = entry(route="ANSWER", value="v", source_senior="s1", justification="j")
+    assert premise_audit_violations([bare]) != []
+    audited = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+                    premise_audit=["this host and not another - UNVERIFIED", "window - VERIFIED: r2"])
+    assert premise_audit_violations([audited]) == []
+    assert unverified_audit(audited) == ["this host and not another - UNVERIFIED"]

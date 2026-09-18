@@ -26,7 +26,9 @@ from conversation import (
     effective_r2,
     grade_violations,
     open_question_violations,
+    premise_audit_violations,
     spawn_overlap_violations,
+    unverified_audit,
 )
 from conversation_log import ConversationLog
 from grounding import is_grounded
@@ -36,7 +38,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
-from senior_report import open_questions, unverified_premises
+from senior_report import has_selection_premise, open_questions, unverified_premises
 from senior_session import SeniorSession
 from usage_tracker import context_window
 
@@ -100,12 +102,15 @@ R4 is a WARNING, not a gate. Some premises genuinely cannot be verified, and an 
 
 ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected.
 
+AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. The one most often missing is the choice itself: why this entity and not another that could fit the question. Mark each VERIFIED (and where the report shows it) or UNVERIFIED. If an UNVERIFIED one could change the answer, COMMAND a round to test it instead of answering. Answering on one is allowed, but it is dangerous ground and is logged. Write 'none found' only after tracing. An ANSWER without an audit is rejected.
+
 THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
   * Wrong question: if you grade the source report R1 = FAIL, the ANSWER route is blocked. A value can be real, grounded and well-formed and still answer something adjacent to what was asked.
   * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them, then CLARIFY (costs no round) or COMMAND one more round. Then answer.
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
   * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
+  * Premise audit: an ANSWER must carry `premise_audit`, or the turn is rejected.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -127,6 +132,7 @@ NO UNTESTED ASSUMPTIONS — your report is graded hardest on this.
 Every conclusion rests on premises. A premise is a hypothesis until a query result shows it. SH grades every report on premise verification (R4), and an untested premise is dangerous ground: it is how an investigation goes off track and returns a confident wrong answer.
 VERIFY FIRST. The first thing you do each round is try to verify the premises your work depends on, before you build further on them.
 An educated guess is allowed only when a premise genuinely cannot be verified. Then say so: list it as UNVERIFIED, and state why it could not be tested.
+THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Before you compute anything, ask what else in the data could fit the question's words, and look for it. The first match you find is a candidate, not the answer. Your Assumptions must open with a Selection line: why this entity (or feed, or value) and not another, which other candidates you searched for, and the query that ruled each out.
 WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
 YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM, in this shape:
@@ -147,6 +153,8 @@ YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM,
  NOT_FOUND: what you saw instead, and why it rules this scope out.>
 
 ## Assumptions
+- Selection: <why this entity and not another; the other candidates searched for and
+  the query that ruled each out> - VERIFIED: <queries and results> | UNVERIFIED
 - <every premise your conclusion or next step rests on> - VERIFIED: <the query
   and the result that showed it> | UNVERIFIED
   <List the ones that feel obvious too — those are the ones that go unchecked.>
@@ -214,6 +222,9 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int) ->
             head += "\n!! This round ran NO new query. R2 = FAIL for it, by code, " \
                     "and you cannot grade it otherwise."
         unverified = unverified_premises(r.get("report") or "")
+        if r.get("report") and not has_selection_premise(r["report"]):
+            head += ("\n!! Its Assumptions list no Selection premise — it never said why "
+                     "this entity and not another. Treat that choice as UNVERIFIED.")
         if unverified:
             head += (f"\n!! {unverified} UNVERIFIED premise(s) in its Assumptions — "
                      "dangerous ground. Weigh them in R4.")
@@ -304,7 +315,9 @@ def _route_body(e) -> str:
                 + "\n".join(f"{i}. {q}" for i, q in enumerate(e.questions, start=1)))
     if e.route == "RETIRE":
         return e.reason
-    return f"**{e.value}** ({e.value_kind}) from {e.source_senior}\n\n{e.justification}"
+    audit = "".join(f"\n- {a}" for a in e.premise_audit)
+    return (f"**{e.value}** ({e.value_kind}) from {e.source_senior}\n\n{e.justification}"
+            f"\n\n**Premise audit (SH):**{audit}")
 
 
 def _directive_text(e) -> str:
@@ -470,7 +483,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                            for sid, r in unread.items() if kinds.get(sid) != "exploration"}
         ) + spawn_overlap_violations(
             turn.entries, {sid: s.constraints for sid, s in sessions.items()
-                           if state.is_active(sid)})
+                           if state.is_active(sid)}
+        ) + premise_audit_violations(turn.entries)
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
@@ -533,6 +547,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                     if e.r4_premise_verification == "FAIL":
                         log.note(f"answered on an unverified premise (R4 = FAIL) — "
                                  f"allowed, but dangerous ground: {e.justification}")
+                    if unverified_audit(e):
+                        log.note("answered with UNVERIFIED premises in SH's own audit — "
+                                 "allowed, but dangerous ground: "
+                                 + "; ".join(unverified_audit(e)))
                     _apply_case_updates(case_file, e.case_updates, qid)
                 else:
                     ungrounded += 1

@@ -291,3 +291,11 @@ def test_unverified_premises_counts_only_the_assumptions_section():
                       "- a - VERIFIED: q -> 3 events\n- b - UNVERIFIED\n- c - UNVERIFIED")
     assert unverified_premises(md) == 2
     assert unverified_premises(GOOD.split("## Assumptions")[0]) == 0
+
+
+def test_a_selection_line_in_assumptions_is_detected():
+    from senior_report import has_selection_premise
+    assert not has_selection_premise(GOOD)
+    md = GOOD.replace("## Assumptions\n", "## Assumptions\n- Selection: the only host with the pattern - UNVERIFIED\n")
+    assert has_selection_premise(md)
+    assert unverified_premises(md) == 2

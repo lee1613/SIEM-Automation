@@ -19,7 +19,7 @@ BLANK = {
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
-    "case_updates": [],
+    "case_updates": [], "premise_audit": [],
 }
 
 
@@ -91,6 +91,7 @@ def _spawn(**kw):
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
+                premise_audit=["none found"],
                 r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
                 r4_premise_verification="PASS")
     base.update(kw)
@@ -599,3 +600,25 @@ def test_a_provider_outage_still_asks_a_human(tmp_path, monkeypatch):
     llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
     _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
     assert len(paused) == 1
+
+
+def test_an_answer_without_a_premise_audit_is_rejected_then_accepted(tmp_path):
+    llm = _LLM([_turn(_spawn()), _turn(_answer(premise_audit=[])), _turn(_answer())])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["answer"] == "1367.875" and out["turns"] == 3
+    log = _conversation(tmp_path)
+    assert "premise_audit" in log and "Premise audit (SH)" in log
+
+
+def test_an_answer_on_an_unverified_audit_line_is_allowed_and_logged(tmp_path):
+    llm = _LLM([_turn(_spawn()),
+                _turn(_answer(premise_audit=["this endpoint and not another - UNVERIFIED"]))])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["end_reason"] == "answer"
+    assert "UNVERIFIED premises in SH's own audit" in _conversation(tmp_path)
+
+
+def test_a_report_without_a_selection_premise_is_flagged_to_sh():
+    text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
+                       slots_remaining=2, turns_remaining=5)
+    assert "no Selection premise" in text
