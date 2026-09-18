@@ -123,7 +123,9 @@ What the table shows:
   so solving them in parallel should recover most of this (`future_work.md` #6).
 
 Details, transcripts and the per-question breakdown are in
-`docs/version_architecture/v1/v1.4.0.md`.
+`docs/version_architecture/v1/v1.4.0.md`. The same table and the three insights are step 5
+of the Streamlit demo. `scripts/smoke_eval.py` generates them from the committed per-question
+rows in `datasets/evaluation/smoke/`, and CI (`smoke_eval.py --check`) fails if they drift.
 
 ## Two tiers
 
