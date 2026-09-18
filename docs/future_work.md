@@ -112,7 +112,8 @@ fixed point under the second reading and none under the first.
 
 ## 5. The Cisco NVM add-on is missing, so Q216's official answer is not reproducible here
 
-**Status:** verified against live Splunk, 2026-09-15. Not a code defect — an environment gap.
+**Status:** verified against live Splunk, 2026-09-15. **Superseded 2026-09-18, see the
+correction at the end of this item: 1666 is reachable.**
 
 Q216 asks *"According to the Cisco NVM flow logs, for how many seconds does the endpoint
 generate Monero cryptocurrency?"* Official answer: `1666`.
@@ -177,3 +178,89 @@ failure messages; run it with `SIEM_INTEGRATION=1`. Even after re-typing, 1666 n
 separate explanation — the gap to 1660 is 6 seconds and no grouping tested closes it.
 Until then Q216 is not winnable on exact match and should not be read as an
 agent-reasoning failure. Consider dropping it from the default hard set.
+
+**Correction, 2026-09-18 — 1666 is reachable. Keep Q216 in the hard set.** A threat-hunter
+review of the v1.4.0 Q216 logs found the official answer on a different endpoint than every
+run had assumed. It is not the powershell flow to `45.77.53.176`. It is the browser-based
+Coinhive miner: the websocket sessions with `dh=*coinhive*` from `chrome.exe` on
+`192.168.247.131` (BSTOLL-L), whose `fes - fss` span is `1534773920 − 1534772254 = 1666`.
+The review worked this out by hand; the agent has not yet reproduced it. The 1660 table above
+is therefore the right arithmetic on the wrong entity. The agent's failure was a premise it
+never tested ("the mining endpoint is the powershell host"), and v1.4.1's R4 premise
+verification is aimed at exactly that. The environment notes above (the syslog-typed feed,
+the `fst`/`fet` trap) still hold.
+
+---
+
+## 6. Solve questions in parallel to recover the v1.4 latency
+
+**Status:** deferred, 2026-09-18.
+
+The conversational loop is sequential by construction. SH waits for a wave, and each senior
+waits for SH's routing. On the same `gpt-5.4-mini` senior, the five-question smoke test took
+37 min against v1.3.0's 18 (98 min with GLM-5.3). Cost went *down* about 7%, so the
+latency is the price of the design, not waste.
+
+**What is missing:** the runner solves questions one after another. Questions share no
+senior, so they could run concurrently: N questions at once, each with its own
+`QuestionState` and conversation log.
+
+**Watch out for:**
+- **Splunk connections.** The pool holds six `SplunkClient`s, and concurrent questions compete
+  for them. Size parallelism so that questions × running seniors ≤ 6.
+- **The case file.** SH carries cross-question memory, and running questions in parallel means
+  question N+1 no longer sees what question N learned. Either accept it (measure the loss), or
+  run in dependency-free batches.
+- **Provider rate limits** on Featherless and OpenAI.
+
+**Trigger:** before the first full v1.4 run. At 98 min per 5 hard questions, a 56-question
+run would take hours.
+
+---
+
+## 7. Handoffs into the case file (spec M9)
+
+**Status:** gap, 2026-09-18.
+
+A retiring senior writes `handoffs/<sid>_handoff.md`: what it ruled out, and why. The design
+(spec §7) says handoffs feed `agent/v1/case_file.py`, so that one question's dead ends reach
+the next. Nothing reads them back. Today only SH's `case_updates` on a grounded ANSWER reach
+the case file, so a question that ends without an answer teaches the next question nothing.
+
+**Trigger:** when a full run shows a later question re-treading a dead end that an earlier
+question's handoff had already recorded.
+
+---
+
+## 8. SH turn caps may bind before per-senior rounds
+
+**Status:** open question, 2026-09-18.
+
+v1.4.1 made rounds per senior: each of up to 3 seniors gets the full tier rounds. The SH
+turn caps stayed at 5 / 8 / 12, and every wave costs one SH turn. When seniors run one after
+another, 3 seniors × 8 rounds needs 24 waves, which the 12-turn cap on the 1000-pt tier cuts
+at 12. In the v1.4.0 smoke test no question ended on `turns`, but that was under the old
+per-question round clock.
+
+**Trigger:** any v1.4.1 run where `end_reason = turns` while a senior still had rounds left.
+Then raise the cap (for example to seniors × rounds) or make it per senior.
+
+---
+
+## 9. A difficulty router, so budgets transfer off BOTSv3
+
+**Status:** deferred, 2026-09-17.
+
+Every v1.4 budget (seniors, rounds, SH turns) keys off `base_points`, which BOTSv3 provides.
+Real questions have no such label, so the scheme does not transfer without something that
+classifies difficulty first. Candidates, cheapest first:
+- a feature heuristic: entity count, whether a feed is named, scalar vs list answer,
+  cross-sourcetype join needed;
+- embedding nearest-neighbour against the 56 labelled BOTSv3 questions;
+- a cheap LLM classifier that returns a tier and a rationale.
+
+The router only has to be roughly right. The tier sets a ceiling, and SH spawns on demand,
+so easy questions stay cheap even under a generous ceiling.
+
+**Trigger:** the first time the agent is pointed at questions without a points label
+(pairs with #1).

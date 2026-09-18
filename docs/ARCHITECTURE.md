@@ -1,12 +1,135 @@
 # Architecture
 
-> **Current code is v1.3.0** (`docs/version_architecture/v1/v1.3.0.md`), which is
-> **in progress and has never had a full run**. The only full-run numbers that exist are
-> **v1.2's**: 26/56, 8000 points, $31.36 (`docs/scoreboard_result/v1/v1.2.md`). v1.3.0 has
-> been exercised only on a 5-question smoke test. Nothing here extrapolates a measurement
-> from one version to another; where a claim has no measurement, it says so.
+> **Current code is v1.4.1**, the conversational SH ↔ Senior loop and the default
+> `--loop conversational` (`docs/version_architecture/v1/v1.4.0.md`, `v1.4.1.md`). v1.4.0 is
+> the architecture as smoke-tested on five hard questions. v1.4.1 adds the hardening made after
+> that test and has not yet been run. **No v1.4 version has had a full run.** The only full-run
+> numbers that exist are **v1.2's**: 26/56, 8000 points, $31.36
+> (`docs/scoreboard_result/v1/v1.2.md`). Nothing here extrapolates a measurement from one
+> version to another; where a claim has no measurement, it says so.
+>
+> The v1.3.0 plan-and-execute loop is still in the code as `--loop compiler`, the A/B control.
+> It is described below from [Two tiers](#two-tiers) on, and every deterministic guard it
+> introduced is shared by both loops.
+
+## The conversational loop (v1.4) — `agent/v1/sh_loop.py`
+
+v1.3.0 planned a DAG of one-shot workers. A joiner read their results, and a `REPLAN:` threw
+them away and briefed fresh ones from zero. v1.4 replaces that with a **bounded
+conversation**. A few question-scoped seniors keep their LangGraph thread across rounds. Each
+one files a templated report at the end of every round, and SH reads all the reports of a wave
+in **one** turn, grades them, and routes each senior.
+
+```mermaid
+flowchart TD
+    Q[BOTSv3 question] --> SH[SH — GPT-5.4<br/>strict json_schema SHTurn]
+    SH -->|SPAWN| S1[Senior s1 — GLM-5.3<br/>live thread, ROUND_ITERS=12 per round]
+    SH -.->|SPAWN, disjoint scope only| S2[Senior s2<br/>parallel, no shared sourcetype/source]
+    S1 -->|templated report<br/>runner-stamped novel_spl, rounds_remaining| W[Wave: every report in one SH turn]
+    S2 --> W
+    W --> SH
+    SH -->|COMMAND / CRITIC / CLARIFY| S1
+    SH -->|RETIRE → handoff| H[(handoffs/sid_handoff.md)]
+    SH -->|ANSWER| G{grounded and<br/>gates pass?}
+    G -->|no| SH
+    G -->|yes| F[Scoreboard submit — exact match]
+    SH -->|budget spent, no ANSWER| N["'SH retired without answering'"]
+    N --> F
+```
+
+**Six routes** in one strict `json_schema` (`agent/v1/conversation.py`):
+
+| Route | What it does |
+|---|---|
+| `SPAWN` | open a senior, either plain or `metrics` (the only technique tag left after v1.4.1's prune) |
+| `COMMAND` | continue, or change scope, with a directive for the next round |
+| `CRITIC` | name a flaw from a closed five-value `basis` enum and say how to fix it |
+| `CLARIFY` | ask the senior a question without spending a round |
+| `RETIRE` | stop a senior; it writes a handoff |
+| `ANSWER` | submit a value, citing the senior report it came from |
+
+**The report** (`agent/v1/senior_report.py`) has a fixed template: Prior rounds (rewritten each
+round, at most 6 lines), This round, **Assumptions**, Ruled out, **Open questions for SH**. The
+runner stamps `rounds_remaining` and `novel_spl_count` itself, because a self-reported progress
+number is one the senior can report favourably.
+
+**The rubric.** SH grades every report it reads:
+
+| Grade | Question | Teeth |
+|---|---|---|
+| **R1** scope | is this the question that was asked? | FAIL blocks ANSWER |
+| **R2** progress | did the round learn something new? | code overrides: `novel_spl == 0` is FAIL; two FAILs in a row force a change |
+| **R3** readiness | is a value ready to submit? | advisory |
+| **R4** premise verification | are the premises the conclusion rests on verified? | **warning only** (v1.4.1): UNVERIFIED premises are flagged in the wave, and the senior's next directive opens with "verify these first" |
+
+**Gates**, all deterministic, all in `conversation.py`, and a rejected turn goes back to SH
+with the reason:
+- **Anti-thrash:** no plain `continue` after two R2 FAILs in a row.
+- **Wrong question:** R1 = FAIL blocks ANSWER.
+- **Cut-off:** a report that hit the iteration cap cannot back an ANSWER.
+- **Open questions:** SH must answer every one of the senior's open questions. The answers
+  travel with its next directive.
+- **Parallel scope (v1.4.1):** a second concurrent senior must share no sourcetype/source with
+  any running one.
+
+**Budgets** (`agent/v1/question_state.py`), keyed off the question's points:
+
+| Tier | Seniors | Rounds **per senior** | SH turns | Iterations per round | Ceiling |
+|---|---|---|---|---|---|
+| 1000 pt | 3 | 8 | 12 | 12 | 288 |
+| 500 pt | 2 | 5 | 8 | 12 | 120 |
+| 100 pt | 1 | 3 | 5 | 12 | 36 |
+
+SH normally runs one senior. It opens a second in parallel only when it has a competing
+suspicion that can be checked on different data. A question ends when one of these happens:
+- a grounded ANSWER passes every gate;
+- SH turns run out;
+- every spawn slot is used and no active senior has rounds left;
+- a second ANSWER fails grounding.
+
+**Only SH answers.** If the budget runs out without an accepted ANSWER, the submission is the
+literal `SH retired without answering`. It is scored wrong, and no senior value is ever
+submitted behind SH's back.
+
+**Artifacts** (`agent/v1/conversation_log.py`), per question: `conversation.md` (every turn,
+grade, directive and rejection), each senior's round reports, and `handoffs/`.
+`agent/v1/grade_report.py` builds the grade distribution (R1–R4, and R2 as SH graded it vs
+as it took effect).
+
+## Measured: v1.4.0 five-question smoke test (2026-09-18)
+
+The five hard questions are Q216, Q217, Q224, Q328 and Q329. Every one survived two full runs,
+and v1.2 got all five wrong. Cost is priced by the tracker (`PRICES_PER_1M`), not
+provider-billed, and is broken out by role.
+
+| | v1.3.0, mini senior | v1.4.0, GLM-5.3 senior | v1.4.0, mini senior |
+|---|---|---|---|
+| Score | 0/5 | **2/5** (Q224, Q328) | 0/5 |
+| Cost | $1.36 (SH $0.29 / senior $1.07) | $6.45 (SH $0.39 / senior $6.06) | $1.26 (SH $0.57 / senior $0.69) |
+| Per question | $0.27 | $1.29 | $0.25 |
+| Latency, 5 questions | 18 min | 98 min | 37 min |
+
+What the table shows:
+- **The new design costs less.** On the same `gpt-5.4-mini` senior, the conversational loop
+  cost about 7% less than the plan-and-execute loop ($1.26 vs $1.36). The senior's share fell
+  from $1.07 to $0.69, because live seniors stop re-briefing replacements from zero. SH's share
+  rose, because it now reads and grades every round.
+- **GLM-5.3 is the reliable senior.** It solved two questions that v1.2 and v1.3.0 never had,
+  Q224 and Q328. The same loop with a mini senior solved none, so the score came from the
+  senior model. GLM-5.3 has not been run on the v1.3.0 loop, so how much of the 2/5 is due to
+  the loop itself is unmeasured.
+- **Latency roughly doubled** (18 → 37 min on the same senior), because the conversation is
+  sequential: SH waits for each wave and each senior waits for SH. Questions are independent,
+  so solving them in parallel should recover most of this (`future_work.md` #6).
+
+Details, transcripts and the per-question breakdown are in
+`docs/version_architecture/v1/v1.4.0.md`.
 
 ## Two tiers
+
+*(The compiler loop, `--loop compiler`: v1.3.0's plan-and-execute architecture, kept as the
+A/B control. The worker pool, grounding gate, submit guard, manifest and connection pool
+below are shared with v1.4.)*
 
 ### SH orchestrator — `agent/v1/orchestrator.py`
 
@@ -213,9 +336,13 @@ outcome split, structured-vs-prose rate, and solved-rate by SH confidence decile
 
 ## Known limitations
 
-- **The 1000-point tier is unsolved.** v1.2 solved 2 of 9. The v1.3.0 smoke test on five of
-  the survivors scored 0/5 — expected, since none has ever been solved, but it means none of
-  v1.3.0's changes has yet been shown to recover a point.
+- **The 1000-point tier is mostly unsolved.** v1.2 solved 2 of 9. On five of the survivors,
+  v1.3.0 scored 0/5 and v1.4.0 with a GLM-5.3 senior scored 2/5 (Q224, Q328). That is a smoke
+  test, not a full run.
+- **The conversational loop is sequential.** Latency is about 2× v1.3.0 on the same senior.
+  Questions are independent, but the runner solves them one at a time. `future_work.md` #6.
+- **The SH turn caps (5 / 8 / 12) can bind before per-senior rounds** when seniors run one
+  after another. Watch for `end_reason = turns` on v1.4.1 runs. `future_work.md` #8.
 - **Confidence is recorded but uncalibrated, and not even monotonic** — 90–99 → 0/3 while
   30–39 → 1/1 across 25 spawns. Nothing routes on it. `future_work.md` #4.
 - **NIM models are priced at zero**, so every reported cost is OpenAI-only. The architecture
@@ -223,10 +350,13 @@ outcome split, structured-vs-prose rate, and solved-rate by SH confidence decile
   strategy succeeds. `future_work.md` #2.
 - **The joiner's LLM synthesis step has never been isolated.** The deterministic guard around
   it has receipts; the call itself does not. `future_work.md` #3.
-- **Cross-worker findings are collected and discarded.** Workers reported 52 `ruled_out`
-  notes in the smoke test; no planner or worker ever reads them, so each replan round can
-  re-tread the previous round's dead ends.
-- **Q216 is not winnable in this environment.** The Cisco NVM add-on is installed but inert
-  (it binds `[cisco:nvm:flowdata]`; the events are indexed as `syslog`), it defines no
-  `duration` field, and the official answer 1666 is not reachable from the data by any
-  grouping tested — the closest is 1660. `future_work.md` #5.
+- **Cross-question findings are partly discarded.** In v1.4 a senior's dead ends survive
+  within a question, because its thread is live and its report has "Ruled out". The
+  `handoffs/` written at retirement are never read back into the case file, though, so the
+  next question starts without them. `future_work.md` #7.
+- **Q216 was thought unwinnable here, and it is not.** The Cisco NVM add-on is inert (the
+  events are indexed as `syslog`), and the powershell mining flows top out at 1660. The
+  2026-09-18 threat-hunter review of the Q216 logs found that the official 1666 is on a
+  different endpoint: the Coinhive websocket sessions from `chrome.exe` on BSTOLL-L
+  (1534773920 − 1534772254). The agent's miss was a wrong-entity premise it never tested,
+  which is what R4 now targets. `future_work.md` #5.
