@@ -228,3 +228,14 @@ def test_the_clarify_model_sends_the_token_cap_the_provider_reads():
                             senior_base_url="https://api.featherless.ai/v1")
     assert pool._clarify_llm.extra_body == {"max_tokens": 32768}
     assert pool._clarify_llm.max_tokens is None
+
+
+def test_truncated_calls_reads_cut_short_tool_results():
+    from langchain_core.messages import AIMessage, ToolMessage
+    from splunk_subagent import truncated_calls
+    msgs = [AIMessage(content="", tool_calls=[
+                {"id": "a", "name": "run_splunk_search", "args": {"query": "q1"}},
+                {"id": "b", "name": "run_splunk_search", "args": {"query": "q2"}}]),
+            ToolMessage(content='{"meta": {"truncated": "showing 50 of 1573 rows"}}', tool_call_id="a"),
+            ToolMessage(content='{"meta": {}}', tool_call_id="b")]
+    assert truncated_calls({"messages": msgs}) == ["`run_splunk_search: q1` (50 of 1573 rows seen)"]

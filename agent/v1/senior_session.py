@@ -34,6 +34,18 @@ COMPACT_AT = 0.80    # projected context share that triggers a compaction
 ALERT_AT   = 0.70    # current context share that prints an operator alert
 
 
+def unseen_rows_note(truncated: list[str]) -> str:
+    """The runner's record of results this round that were cut short. The senior
+    got the tool's warning each time; this makes the gap impossible to report away."""
+    if not truncated:
+        return ""
+    shown = "; ".join(truncated[:6]) + (f"; +{len(truncated) - 6} more" if len(truncated) > 6 else "")
+    return (f"_Unseen rows (runner): {len(truncated)} result(s) this round showed only "
+            "part of their rows — " + shown + ". Nothing is absent from "
+            "the unseen rows until a query that filters for it says so; any Coverage "
+            "resting on these results is UNVERIFIED._")
+
+
 def should_compact(current_context: int, *, mean_per_iter: int, window: int,
                    iters: int = ROUND_ITERS) -> bool:
     """Would a full round of growth push this thread past 80% of its window?"""
@@ -127,7 +139,9 @@ class SeniorSession:
             # capped round's report is where the budget ran out, not a conclusion.
             body = (body.rstrip() + f"\n\n_Iteration cap reached: {self.iters}/{self.iters} "
                     "iterations used this round — cut off, not finished._\n")
-        self.coverage_note = "" if failed else self._coverage_check(body)
+        notes = [] if failed else [self._coverage_check(body),
+                                   unseen_rows_note(result.get("truncated") or [])]
+        self.coverage_note = "\n\n".join(n for n in notes if n)
         if self.coverage_note:
             body = body.rstrip() + f"\n\n{self.coverage_note}\n"
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,

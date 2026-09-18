@@ -19,6 +19,7 @@ LANGCHAIN_TRACING_V2. Each worker is tagged with its role, parent qid, and seque
 index so traces are filterable in the LangSmith UI.
 """
 
+import json
 import re
 import threading
 import uuid
@@ -85,6 +86,23 @@ def extract_spl_and_sourcetypes(state: dict) -> tuple[list, list]:
                 if mt:
                     sts.add(mt.group(1).strip('"\''))
     return spls, sorted(sts)
+
+
+def truncated_calls(state: dict) -> list[str]:
+    """Every tool call this round whose result was cut short, with how much went
+    unseen — read from the tool results, so a senior cannot report it away."""
+    calls = {tc["id"]: tc for m in state.get("messages", [])
+             for tc in (getattr(m, "tool_calls", None) or [])}
+    out = []
+    for m in state.get("messages", []):
+        if not isinstance(m, ToolMessage):
+            continue
+        cut = re.search(r"showing (\d+) of (\d+) rows", str(m.content))
+        tc = calls.get(m.tool_call_id)
+        if cut and tc:
+            args = tc["args"].get("query") or json.dumps(tc["args"], sort_keys=True)
+            out.append(f"`{tc['name']}: {args}` ({cut.group(1)} of {cut.group(2)} rows seen)")
+    return out
 
 
 def _classify(answer: str) -> str:
@@ -358,6 +376,7 @@ class SplunkWorkerPool:
             "spl_used":    spl_used,
             "sourcetypes": sourcetypes,
             "full_state":  serialize_messages(round_state),
+            "truncated":   truncated_calls(round_state),
             "iterations":  steps,
             "cap_hit":     cap_hit,
             "last_prompt_tokens": (int(state.get("last_prompt_tokens", 0))

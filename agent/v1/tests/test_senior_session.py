@@ -272,3 +272,13 @@ def test_runner_flags_scope_fields_missing_from_coverage_and_relays_them():
 def test_no_coverage_note_without_a_scope_or_a_splunk_client():
     s = _session(_Pool())
     assert "Coverage check" not in s.work("Begin.", rounds_remaining=7)["report"]
+
+
+def test_cut_short_results_are_recorded_in_the_report_and_relayed():
+    pool = _Pool(truncated=["`run_splunk_search: q` (50 of 1573 rows seen)"])
+    s = _session(pool)
+    r = s.work("Begin.", rounds_remaining=7)
+    assert "Unseen rows (runner): 1 result(s)" in r["report"]
+    assert "(50 of 1573 rows seen)" in r["report"]
+    s.work("continue", rounds_remaining=6)
+    assert pool.rounds[1]["message"].startswith("_Unseen rows (runner)")
