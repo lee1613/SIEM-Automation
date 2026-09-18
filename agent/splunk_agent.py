@@ -174,16 +174,23 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
             {k: v for k, v in row.items() if k not in strip_set}
             for row in result["results"]
         ]
-        payload = json.dumps({"results": cleaned, "meta": result.get("_meta", {})})
+        meta = dict(result.get("_meta", {}))
+        total = int(meta.get("total_event_count") or 0)
+        if total > len(cleaned):
+            # A row cap is silent otherwise: the top-N of a sorted listing reads as
+            # the whole set, and the rare value being hunted sits in the unseen rest.
+            meta["truncated"] = (f"showing {len(cleaned)} of {total} rows — the other "
+                                 f"{total - len(cleaned)} were NOT seen. Nothing is absent "
+                                 "from them until a query that filters for it says so.")
+        payload = json.dumps({"results": cleaned, "meta": meta})
         if len(payload) > 12_000:
             # Drop whole rows so the payload stays valid JSON (a raw byte slice
             # breaks both the model's evidence and the error/empty dedup guard).
-            meta = dict(result.get("_meta", {}))
             kept = list(cleaned)
             while kept and len(payload) > 12_000:
                 kept = kept[:max(len(kept) // 2, 0)] if len(kept) > 1 else []
-                meta["truncated"] = (f"showing {len(kept)} of {len(cleaned)} rows — "
-                                     "use a more specific query")
+                meta["truncated"] = (f"showing {len(kept)} of {max(total, len(cleaned))} rows "
+                                     "— the rest were NOT seen; use a more specific query")
                 payload = json.dumps({"results": kept, "meta": meta})
         return payload
     return json.dumps(result)
