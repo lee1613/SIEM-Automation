@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The v1.3.1 artifacts (spec §5):
+The v1.4 artifacts (spec §5):
 
     log/<run>/<qid>/
       conversation.md                     every message, in order

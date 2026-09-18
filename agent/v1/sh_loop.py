@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The v1.3.1 conversational loop: prompts, wave rendering, and run_question().
+The v1.4 conversational loop: prompts, wave rendering, and run_question().
 
 Replaces planner -> parallel executor -> joiner -> REPLAN with a bounded
 conversation. SH keeps a small number of seniors alive for the life of a
@@ -365,7 +365,7 @@ def _record(sid: str, qid: str, subq: str, result: dict) -> dict:
         "spawn_type": result.get("spawn_type", "senior"),
         "search_space": result.get("search_space") or {},
         "prior_info": "", "confidence": None,
-        # v1.3.1 additions — what the grade report reads.
+        # v1.4 additions — what the grade report reads.
         "insight": result.get("insight", "NOT_FOUND"),
         "novel_spl_count": result.get("novel_spl_count", 0),
         "round": result.get("round", 0),

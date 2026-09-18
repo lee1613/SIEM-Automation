@@ -607,7 +607,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         um = getattr(response, "usage_metadata", None) or {}
         out_total = state.get("output_tokens", 0) + wasted_out + int(um.get("output_tokens", 0))
         # The prompt size of the call just made IS this thread's current context
-        # size. v1.3.1 projects a round's growth off it to decide whether to
+        # size. v1.4 projects a round's growth off it to decide whether to
         # compact before working (spec §6); nothing else reads it.
         prompt_tokens = int(um.get("input_tokens", 0))
         if out_total > OUTPUT_TOKEN_CAP:

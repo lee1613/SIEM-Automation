@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The SH <-> Senior data contract for v1.3.1 (spec §3.2, §3.4).
+The SH <-> Senior data contract for v1.4 (spec §3.2, §3.4).
 
 SH emits one route per senior per wave as strict structured output. The six
 routes share ONE flat model rather than a discriminated union, for the same

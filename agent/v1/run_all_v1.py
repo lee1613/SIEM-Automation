@@ -234,7 +234,7 @@ def main():
                         help="Buy official hint 1 on ungrounded >=500pt answers (cost deducted from earned points).")
     parser.add_argument("--loop", default="conversational",
                         choices=["conversational", "compiler"],
-                        help="conversational: the v1.3.1 SH<->Senior conversation "
+                        help="conversational: the v1.4 SH<->Senior conversation "
                              "(default on this branch). compiler: the v1.3.0 "
                              "planner/executor/joiner loop, kept for A/B.")
     args = parser.parse_args()

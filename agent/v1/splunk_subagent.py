@@ -119,7 +119,7 @@ class SplunkWorkerPool:
                 exploration_api_key, exploration_base_url, splunk)
 
         # Worker graphs are built on demand and cached by (role, iteration cap).
-        # v1.3.0 pre-built six (3 roles x 2 budgets); v1.3.1 adds a third cap —
+        # v1.3.0 pre-built six (3 roles x 2 budgets); v1.4 adds a third cap —
         # one round (8 iterations) — and building nine eagerly would pay for
         # graphs a given run never uses.
         self._graphs: dict = {}
