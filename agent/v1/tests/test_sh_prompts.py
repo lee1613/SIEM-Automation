@@ -29,7 +29,8 @@ def test_the_senior_brief_carries_the_report_template_and_the_reply_shapes():
                     "### What it means", "## Ruled out", "## Open questions for SH"):
         assert section in SENIOR_BRIEF
     assert "CLARIFY" in SENIOR_BRIEF and "COMMAND" in SENIOR_BRIEF
-    assert "400" in SENIOR_BRIEF
+    from senior_report import REPORT_WORD_CAP
+    assert str(REPORT_WORD_CAP) in SENIOR_BRIEF
 
 
 def test_the_senior_is_told_intent_not_the_rubric():

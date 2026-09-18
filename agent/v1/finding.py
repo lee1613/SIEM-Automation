@@ -131,7 +131,7 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
       reads first: FOUND means you hold a candidate for the question as asked;
       NOT_FOUND means this scope does not contain it, and you can say why.
     - report: your round report in markdown, following the template you were given
-      at spawn. ~400 words maximum. REWRITE the "Prior rounds" section each round
+      at spawn. ~600 words maximum. REWRITE the "Prior rounds" section each round
       instead of appending to it - six lines total, covering every prior round.
     """
     return "Finding recorded. Stop here - do not call any further tools."

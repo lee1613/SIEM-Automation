@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 
-REPORT_WORD_CAP = 400
+REPORT_WORD_CAP = 600   # per-field Coverage pushed real reports past 400 (Q216 r5-r7)
 PRIOR_ROUNDS_MAX_LINES = 6
 
 REQUIRED_SECTIONS = (
@@ -47,12 +47,37 @@ def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
     return len(new), seen | fresh
 
 
+# Trimmed first when a report is over the cap: narrative SH can do without. The
+# sections SH grades and must answer (Assumptions, Ruled out, Open questions) sit
+# at the END of the template, so a plain tail cut lost exactly those (Q216 r5-r7).
+_TRIM_ORDER = ("### What I ran", "### What it means", "## Prior rounds")
+_TRIM_MARK = "_[trimmed by the runner to fit the word cap]_"
+
+
+def _words(text: str) -> int:
+    return len(re.findall(r"\S+", text))
+
+
 def truncate_words(text: str, cap: int = REPORT_WORD_CAP) -> tuple[str, bool]:
-    """Cut a report at the word cap. `value`/`confidence` are separate schema
-    fields, so truncating the prose never touches the answer (§8)."""
-    m = list(re.finditer(r"\S+", text or ""))
-    if len(m) <= cap:
-        return text or "", False
+    """Fit a report to the word cap, trimming the narrative sections before the
+    ones SH needs; a tail cut only when that is not enough. `value`/`confidence`
+    are separate schema fields, so trimming the prose never touches the answer (§8)."""
+    text = text or ""
+    if _words(text) <= cap:
+        return text, False
+    for head in _TRIM_ORDER:
+        m = re.search(rf"^{re.escape(head)}[^\n]*\n(.*?)(?=^#{{1,3}} |\Z)", text,
+                      re.MULTILINE | re.DOTALL)
+        if not m:
+            continue
+        body = m.group(1)
+        words = list(re.finditer(r"\S+", body))
+        keep = max(len(words) - (_words(text) - cap) - _words(_TRIM_MARK), 0)
+        kept = body[:words[keep - 1].end()] + "\n" if keep else ""
+        text = text[:m.start(1)] + kept + _TRIM_MARK + "\n\n" + text[m.end(1):]
+        if _words(text) <= cap:
+            return text, True
+    m = list(re.finditer(r"\S+", text))
     return text[:m[cap - 1].end()] + f"\n\n_[truncated at {cap} words]_", True
 
 

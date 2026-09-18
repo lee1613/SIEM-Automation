@@ -39,6 +39,7 @@ from llm_errors import describe_llm_error
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
 from senior_report import (
+    REPORT_WORD_CAP,
     has_coverage_premise,
     has_selection_premise,
     open_questions,
@@ -142,7 +143,7 @@ WHEN THE ANSWER IS A MEASUREMENT, ITS DEFINITION IS A PREMISE. Take it from the 
 THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your Assumptions follow Coverage with a Selection line: why this entity (or feed, or value) and not the other candidates Coverage found, and the query that ruled each out.
 WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
-YOUR REPORT — put it in `submit_finding`'s `report` field, ~400 WORDS MAXIMUM, in this shape:
+YOUR REPORT — put it in `submit_finding`'s `report` field, ~{REPORT_WORD_CAP} WORDS MAXIMUM (over that, the runner trims your narrative sections), in this shape:
 
 **Scope:** sourcetype=<...> | source=<...> | fields=<...>
 **Insight:** FOUND | NOT_FOUND

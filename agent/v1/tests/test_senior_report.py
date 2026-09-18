@@ -328,3 +328,16 @@ def test_uncovered_fields_lists_real_fields_the_coverage_line_skips():
     # dh and fss are never named; Splunk bookkeeping fields are never demanded;
     # fields named only in the Scope line or in Selection do not count.
     assert uncovered_fields(SCOPED, fields) == ["dh", "fss"]
+
+
+def test_an_over_cap_report_trims_its_narrative_and_keeps_what_sh_needs():
+    long_ran = GOOD.replace("### What I ran\n",
+                            "### What I ran\n" + "- query -> rows\n" * (REPORT_WORD_CAP // 2))
+    out, cut = truncate_words(long_ran)
+    assert cut is True
+    assert len(out.split()) <= REPORT_WORD_CAP
+    assert "trimmed by the runner" in out and "[truncated at" not in out
+    # the tail sections survive whole: Assumptions, Ruled out, Open questions
+    tail = GOOD[GOOD.index("## Assumptions"):]
+    assert out.endswith(tail) or tail.strip() in out
+    assert open_questions(out) == open_questions(GOOD)
