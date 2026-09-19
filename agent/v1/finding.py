@@ -83,20 +83,21 @@ def answer_shaped(value: str) -> bool:
 
 
 @tool
-def submit_finding(status: str, value: str = "", value_kind: str = "",
+def submit_finding(insight: str, value: str = "", value_kind: str = "",
                    evidence: str = "", confidence: int = 50,
                    sourcetypes_used: str = "", sources_used: str = "",
                    ruled_out: str = "", notes: str = "",
-                   insight: str = "", report: str = "") -> str:
+                   report: str = "") -> str:
     """Finish the task. Call this EXACTLY ONCE, as your final action.
 
     Every other tool gathers evidence; this one reports it. Do not write a prose
     answer instead - a value typed into a sentence gets mangled on the way to the
     scoreboard, which is scored on an exact string match.
 
-    - status: "solved" if you are confident in `value`; "partial" if you have
-      something useful but not a confirmed answer; "too_big" if the task needs
-      narrowing; "failed" if you found nothing usable.
+    - insight: "FOUND" or "NOT_FOUND" — your one outcome. FOUND only when `value`
+      holds a candidate for the question as asked AND its records show the act
+      the question names. Otherwise NOT_FOUND, with `value` empty and what you
+      learned in `notes`.
     - value: THE ANSWER ALONE, or EMPTY. Nothing downstream edits it - it is
       submitted for exact-match scoring exactly as you write it. So it carries
       no label, no units unless the question asks for them, no sentence around
@@ -106,7 +107,7 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
       IF YOU CANNOT STATE THE ANSWER ALONE, LEAVE `value` EMPTY and put what
       you found in `notes`. An empty `value` with strong `notes` is a useful
       result that shapes the next round; a paragraph in `value` is a wasted
-      one. Always empty for status "failed" or "too_big".
+      one. Always empty for NOT_FOUND.
     - value_kind: what `value` is - e.g. "count", "duration_seconds", "hostname",
       "username", "ip", "filename", "hash", "cve", "list". If the only honest
       kind you could write is "summary", "finding" or "analysis", then it is
@@ -114,22 +115,17 @@ def submit_finding(status: str, value: str = "", value_kind: str = "",
     - evidence: the SPL that produced `value`, then what it returned, including
       the event count you saw.
     - confidence: 0-100, how sure you are of `value`. Be honest; a low number is
-      more useful than a wrong high one. It must agree with `status`: below 50
-      you are not confident, so the status is "partial", not "solved". Reporting
-      "solved" at low confidence is read as "partial" regardless.
-      If the question names a specific feed and you did not query that feed,
-      you are not solved - whatever you found somewhere else is corroboration.
+      more useful than a wrong high one. If the question names a specific feed
+      and you did not query that feed, whatever you found somewhere else is
+      corroboration, not the answer.
     - sourcetypes_used / sources_used: comma-separated feeds you actually queried.
     - ruled_out: feeds or hypotheses you CHECKED and eliminated, with why - e.g.
       "cisco:asa - carries no flow-duration field". This is worth nearly as much
       as an answer: it is what stops the next round re-treading your dead ends.
     - notes: what you learned that is NOT the answer - a field you discovered, a
       time window you narrowed, a host worth pivoting on, why a candidate could
-      not be confirmed. A "partial" with no clean value belongs here, and the
-      orchestrator reads it to plan the next round.
-    - insight: "FOUND" or "NOT_FOUND". This is the routing enum your orchestrator
-      reads first: FOUND means you hold a candidate for the question as asked;
-      NOT_FOUND means this scope does not contain it, and you can say why.
+      not be confirmed. A NOT_FOUND belongs here, and the orchestrator reads it
+      to plan the next round.
     - report: your round report in markdown, following the template you were given
       at spawn. ~600 words maximum. REWRITE the "Prior rounds" section each round
       instead of appending to it - six lines total, covering every prior round.
@@ -204,11 +200,15 @@ def parse_finding(messages: list, answer: str) -> dict:
     if args is None:
         return empty_finding(_classify_prose(answer))
 
+    # `insight` is the one outcome the worker reports; `status` is derived from it
+    # for the ledger and the v1.3 compiler loop. A worker that still sends a legal
+    # `status` (older transcripts, test fixtures) keeps it.
     status = str(args.get("status", "")).strip().lower()
     if status not in VALID_STATUS:
-        # A worker that reported an unknown status still did the work. Infer from
-        # whether it committed to a value rather than discarding the result.
-        status = "partial" if str(args.get("value", "")).strip() else "failed"
+        found = re.sub(r"[\s_-]+", "", str(args.get("insight") or "").upper()) == "FOUND"
+        has_value = bool(str(args.get("value", "")).strip())
+        status = ("solved" if found and has_value else
+                  "partial" if has_value or str(args.get("notes", "")).strip() else "failed")
 
     try:
         confidence = max(0, min(100, int(args.get("confidence", 50))))

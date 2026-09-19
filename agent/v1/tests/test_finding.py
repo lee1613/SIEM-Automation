@@ -107,7 +107,7 @@ def test_grounding_accepts_a_value_that_never_appears_in_prose():
 
 
 def test_submit_finding_tool_is_callable_and_terminal():
-    out = submit_finding.invoke({"status": "solved", "value": "2059"})
+    out = submit_finding.invoke({"insight": "FOUND", "value": "2059"})
     assert "do not call any further tools" in out.lower()
 
 
@@ -116,3 +116,14 @@ def test_finalize_answer_no_longer_strips_labels():
                "answer": "", "spl_used": []}]
     assert finalize_answer("2059", delegs) == "2059"
     assert finalize_answer("UF = 2059", delegs) == "UF = 2059"
+
+
+def test_status_is_derived_from_insight_when_the_worker_sends_none():
+    # insight is the worker's one outcome scale; status is derived for the ledger.
+    from langchain_core.messages import AIMessage
+    def call(**args):
+        return [AIMessage(content="", tool_calls=[{"name": "submit_finding", "args": args,
+                                                    "id": "c1", "type": "tool_call"}])]
+    assert parse_finding(call(insight="FOUND", value="1666", confidence=80), "")["status"] == "solved"
+    assert parse_finding(call(insight="NOT_FOUND", notes="lead ruled out"), "")["status"] == "partial"
+    assert parse_finding(call(insight="NOT_FOUND"), "")["status"] == "failed"
