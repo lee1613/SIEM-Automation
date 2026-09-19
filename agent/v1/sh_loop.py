@@ -82,6 +82,9 @@ PARALLEL SENIORS — allowed, when justified. Two seniors working at once finish
   (c) `reason` states that suspicion and why it is worth a spawn slot now.
 If you cannot state all three, do not spawn in parallel: one senior at a time is the default.
 
+ALTERNATIVE SENIOR — when you are not confident, get a second opinion; do not push the same senior again.
+If a senior's candidate is still UNVERIFIED, or it keeps returning to the same narrowed lead without settling it, RETIRE it and SPAWN an alternative in the same turn (a hand-over, not a parallel run). Brief the alternative with the question as asked, and use its `subquestion` and `constraints` to point it at a different area: the feeds, entities or readings of the question the first senior never tested and may have overlooked. Do not hand it the first senior's candidate to confirm; it must reach its own answer. Two seniors reaching the same value independently is verification; one senior repeating itself is not.
+
 YOUR SIX ROUTES
   SPAWN    — another senior. Only with a stated reason the current senior's constraints cannot cover. In parallel only under the PARALLEL SENIORS rule above. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope; it costs no senior slot and is capped at one per question.
   COMMAND  — `continue` (direction is right, go further) or `retry` (the approach was wrong; same question, different angle). `rationale` is 1-2 sentences from the CASE's perspective. `directive` states a GOAL in a few sentences — not a menu of the leads already held: "decide whether A or B" confines the senior to A and B when the lead that failed means the answer may be neither.
@@ -123,9 +126,10 @@ THE GATES YOU MUST RESPECT
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
   * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
   * Premise audit: an ANSWER must carry `premise_audit`, opening with a Coverage line, or the turn is rejected.
-  * Unverified premises: an ANSWER whose audit has any UNVERIFIED line is rejected while the source senior has rounds left.
+  * Unverified premises: an ANSWER whose audit has any UNVERIFIED line is rejected while the source senior has rounds left OR a senior slot is free.
   * Quoted evidence: every VERIFIED audit line must quote the senior's report word for word, or the ANSWER is rejected.
-  * The senior's own doubts: while the source senior has rounds left, an ANSWER is rejected if its latest report's Assumptions still flag something unsettled (UNVERIFIED, not verifiable, partial, rows not returned). COMMAND it to settle them.
+  * The senior's own doubts: an ANSWER is rejected while its latest report's Assumptions still flag something unsettled (UNVERIFIED, not verifiable, partial, rows not returned) and the source senior has rounds left or a senior slot is free. Settle them, or spawn an alternative (ALTERNATIVE SENIOR).
+  * RETIRE only an active senior; a retired one is already gone.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -621,6 +625,16 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if clarified:
             msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
         if not pending:
+            if isinstance(msgs[-1], AIMessage):
+                # Nothing ran, so nothing new arrives — without this SH re-reads its own
+                # last turn and repeats it (Q217 smoke5_r1: RETIRE s2, ten times).
+                active = [s for s in sessions if state.is_active(s)]
+                msgs.append(HumanMessage(content=(
+                    f"APPLIED: {', '.join(f'{e.route} {e.senior_id}'.strip() for e in turn.entries)}. "
+                    f"No senior is working now. Active: {', '.join(active) or 'none'}; "
+                    f"{state.slots_remaining} senior slot(s) and {state.turns_remaining} "
+                    f"turn(s) left. Route next: COMMAND an active senior, SPAWN a new one, "
+                    f"or ANSWER.")))
             continue
 
         wave = _run_wave(pending, max_parallel=max_parallel)

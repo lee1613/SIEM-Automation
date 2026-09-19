@@ -208,6 +208,17 @@ def repair_tool_calls(response, tools: list):
     return response.model_copy(update={"tool_calls": fixed})
 
 
+CLIP_CHARS = 1_500
+
+
+def _clip(v):
+    if isinstance(v, list):
+        return [_clip(x) for x in v]
+    if isinstance(v, str) and len(v) > CLIP_CHARS:
+        return f"{v[:CLIP_CHARS]}…[{len(v) - CLIP_CHARS} more chars cut]"
+    return v
+
+
 def _format_result(result: dict, keep_raw: bool = False) -> str:
     strip_set = _STRIP if keep_raw else (_STRIP | {"_raw"})
     if "results" in result:
@@ -226,6 +237,15 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
                                  "reach what you need among them, don't page: narrow the "
                                  "query with what the question tells you.")
         payload = json.dumps({"results": cleaned, "meta": meta})
+        if len(payload) > 12_000:
+            # One mail or HTTP event can outgrow the whole budget alone, and halving
+            # rows then returns none (Q217 smoke5_r1: "0 of 10 rows" on stream:smtp,
+            # so the senior never saw attach_filename{}). Clip long values first:
+            # every row keeps its field names and the start of each value.
+            cleaned = [{k: _clip(v) for k, v in row.items()} for row in cleaned]
+            meta["clipped"] = (f"values longer than {CLIP_CHARS} chars are cut; "
+                               "extract what you need with rex/eval to read the rest")
+            payload = json.dumps({"results": cleaned, "meta": meta})
         if len(payload) > 12_000:
             # Drop whole rows so the payload stays valid JSON (a raw byte slice
             # breaks both the model's evidence and the error/empty dedup guard).

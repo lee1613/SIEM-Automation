@@ -288,6 +288,10 @@ def spawn_overlap_violations(entries: list[SeniorDirective], active: dict) -> li
     if any(e.route == "ANSWER" for e in entries):
         return []
     spawns = [e for e in entries if e.route == "SPAWN" and e.spawn_type == "senior"]
+    # RETIRE s2 + SPAWN a replacement in one turn is a hand-over, not a parallel run
+    # (Q217 smoke5_r1: rejecting it left SH retiring s2 alone, ten times over).
+    retiring = {e.senior_id for e in entries if e.route == "RETIRE"}
+    active = {sid: sc for sid, sc in active.items() if sid not in retiring}
     scopes = list(active.items()) + [(f"new SPAWN #{i}", e.constraints)
                                      for i, e in enumerate(spawns, start=1)]
     if not spawns or len(scopes) < 2:
@@ -342,6 +346,25 @@ def unverified_audit(entry) -> list[str]:
     return [a.render() for a in entry.premise_audit if a.status == "UNVERIFIED"]
 
 
+def unsure_remedy(state: QuestionState, src: str) -> str:
+    """What SH must do instead of answering on unsettled ground; '' when nothing is
+    left to try. A senior still holding rounds may be told to verify, but a senior
+    that keeps circling one narrowed lead is better replaced than pushed again — so
+    a free slot is always offered. Once the source senior is spent, a free slot is
+    the only way forward (Q216 smoke5_r1: s1 spent 8 rounds on one lead and SH
+    answered it UNVERIFIED with two senior slots unused)."""
+    alt = ("RETIRE it if it is circling the same lead and SPAWN an alternative senior "
+           "on a different area, constrained to where it may have overlooked")
+    if state.rounds_left_for(src) > 0:
+        return (f"COMMAND {src} to settle them, or {alt}" if state.can_spawn_senior()
+                else f"COMMAND {src} to settle them")
+    if state.can_spawn_senior():
+        return (f"{src} has no rounds left and a senior slot is free — "
+                f"SPAWN an alternative senior on a different area, constrained to where "
+                f"{src} may have overlooked")
+    return ""
+
+
 def evidence_violations(entries: list, *, reports_of, last_report_of,
                         state: QuestionState) -> list[str]:
     """Checks an ANSWER against the senior's own words, which SH cannot relabel.
@@ -369,10 +392,11 @@ def evidence_violations(entries: list, *, reports_of, last_report_of,
                            f"in {src}'s reports — copy the query, result or finding that "
                            "shows it word for word, or mark the line UNVERIFIED")
         doubts = open_doubts(last_report_of(src))
-        if doubts and state.rounds_left_for(src) > 0:
+        fix = unsure_remedy(state, src) if doubts else ""
+        if fix:
             out.append(f"ANSWER is blocked: {src}'s latest report still flags "
-                       f"{len(doubts)} unsettled premise(s) in its own Assumptions — COMMAND "
-                       "it to settle them first: " + " | ".join(d[:160] for d in doubts))
+                       f"{len(doubts)} unsettled premise(s) in its own Assumptions — {fix}: "
+                       + " | ".join(d[:160] for d in doubts))
     return out
 
 
@@ -439,7 +463,7 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
             out.append(f"{sid} got more than one route this turn — exactly one per senior")
 
     for e in entries:
-        if e.route == "CLARIFY" and not state.is_active(e.senior_id):
+        if e.route in ("CLARIFY", "RETIRE") and not state.is_active(e.senior_id):
             out.append(f"{e.senior_id} is not an active senior")
         if e.route in ("COMMAND", "CRITIC"):
             if not state.is_active(e.senior_id):
@@ -457,12 +481,12 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
         # a FOUND report carrying the runner's cap line and two unanswered questions
         # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
         # CLARIFY costs no round, so the cheap move is always available.
-        if (e.route == "ANSWER" and unverified_audit(e)
-                and state.rounds_left_for(e.source_senior) > 0):
-            out.append(f"ANSWER is blocked: your premise audit marks "
-                       f"{len(unverified_audit(e))} premise(s) UNVERIFIED and "
-                       f"{e.source_senior} still has rounds — COMMAND it to verify them first: "
-                       + "; ".join(unverified_audit(e)))
+        if e.route == "ANSWER" and unverified_audit(e):
+            fix = unsure_remedy(state, e.source_senior)
+            if fix:
+                out.append(f"ANSWER is blocked: your premise audit marks "
+                           f"{len(unverified_audit(e))} premise(s) UNVERIFIED — {fix}: "
+                           + "; ".join(unverified_audit(e)))
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
                        "at the iteration cap — CLARIFY it (costs no round) or COMMAND "

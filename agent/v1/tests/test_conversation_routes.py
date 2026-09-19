@@ -500,10 +500,12 @@ _R = ("## This round\n### What I ran\n- `dp=3333 | stats count` -> 1 event\n\n"
       "## Assumptions\n- Coverage: dp - full 22-value listing - VERIFIED\n")
 
 
-def _evidence(e, report, rounds_left=True):
+def _evidence(e, report, rounds_left=True, slots_left=True):
     from conversation import evidence_violations
     st = QuestionState(points=1000)
     st.open_senior("s1")
+    if not slots_left:
+        st.spawns_used = st.budget["seniors"]
     if not rounds_left:
         while st.rounds_left_for("s1") > 0:
             st.record_round("s1")
@@ -526,4 +528,29 @@ def test_the_seniors_own_doubts_block_the_answer_while_rounds_remain():
     doubtful = _R + "- Port 3333 = Monero stratum - not verifiable in-feed\n"
     e = _audited("dp=3333 | stats count -> 1 event")
     assert any("unsettled" in v for v in _evidence(e, doubtful))
-    assert _evidence(e, doubtful, rounds_left=False) == []
+    assert _evidence(e, doubtful, rounds_left=False, slots_left=False) == []
+
+
+def test_a_spent_senior_with_doubts_calls_for_an_alternative_senior():
+    # Q216 smoke5_r1: s1 spent its rounds on one lead; two slots were still free.
+    doubtful = _R + "- Port 3333 = Monero stratum - not verifiable in-feed\n"
+    v =_evidence(_audited("dp=3333 | stats count -> 1 event"), doubtful, rounds_left=False)
+    assert any("SPAWN an alternative senior" in x for x in v)
+
+
+def test_retire_and_replace_in_one_turn_is_not_an_overlap():
+    from conversation import spawn_overlap_violations
+    sc = {"sourcetypes": ["stream:http"], "sources": [], "fields": []}
+    turn = [entry(route="RETIRE", senior_id="s2", reason="r"),
+            entry(route="SPAWN", spawn_type="senior", subquestion="q", reason="r",
+                  technique="", constraints=sc)]
+    active = {"s2": turn[1].constraints}
+    assert spawn_overlap_violations(turn, active) == []
+
+
+def test_retiring_a_retired_senior_is_rejected():
+    st = QuestionState(points=1000)
+    st.open_senior("s2")
+    st.retire("s2")
+    v = directive_violations([entry(route="RETIRE", senior_id="s2", reason="r")], st)
+    assert any("not an active senior" in x for x in v)
