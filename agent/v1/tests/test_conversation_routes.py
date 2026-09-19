@@ -490,3 +490,20 @@ def test_an_audit_without_a_coverage_line_is_rejected():
     e = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
               premise_audit=["this host and not another - VERIFIED: r2"])
     assert any("Coverage" in p for p in premise_audit_violations([e]))
+
+
+# ── the NOT_FOUND gate ──────────────────────────────────────────────────────────
+# Q216 r10: the senior's own round-1 question said the only :3333 flow looked like a
+# download; SH answered it anyway because "the feed shows only one record". A lead
+# that fails the behaviour check is NOT_FOUND, and SH cannot answer from that.
+
+def test_answer_is_blocked_when_its_source_report_is_not_found():
+    st = QuestionState(points=1000)
+    st.open_senior("s1")
+    st.record_round("s1", found=False)
+    e = entry(route="ANSWER", value="112", value_kind="count", source_senior="s1",
+              justification="the only record in the feed",
+              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
+    assert any("NOT_FOUND" in v for v in directive_violations([e], st))
+    st.record_round("s1", found=True)
+    assert directive_violations([e], st) == []

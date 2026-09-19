@@ -371,6 +371,10 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
         # a FOUND report carrying the runner's cap line and two unanswered questions
         # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
         # CLARIFY costs no round, so the cheap move is always available.
+        if e.route == "ANSWER" and not state.last_round_found(e.source_senior):
+            out.append(f"ANSWER is blocked: {e.source_senior}'s last report is NOT_FOUND — "
+                       "it holds no candidate that shows the act the question names. "
+                       "COMMAND it to open up the search, or SPAWN another scope")
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
                        "at the iteration cap — CLARIFY it (costs no round) or COMMAND "
