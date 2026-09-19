@@ -577,7 +577,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                  extra_instructions: str = "", extra_tools: list | None = None,
                  max_iter: int = MAX_ITER, temperature: float = 0,
                  http_client=None, context_window: int | None = None,
-                 fallback: dict | None = None):
+                 fallback: dict | None = None, price_as: str | None = None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -610,7 +610,8 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         tools = tools + list(extra_tools)
     tool_map = {t.name: t for t in tools}
 
-    llm = chat_llm(api_key, model, base_url, temperature=temperature, http_client=http_client)
+    llm = chat_llm(api_key, model, base_url, temperature=temperature, http_client=http_client,
+                   price_as=price_as)
     fb  = (chat_llm(fallback["api_key"], fallback["model"], fallback["base_url"],
                     temperature=temperature, http_client=http_client,
                     price_as=fallback.get("price_as")) if fallback else None)

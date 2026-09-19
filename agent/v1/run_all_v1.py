@@ -57,15 +57,19 @@ from usage_tracker import UsageTracker
 
 # ── Models ───────────────────────────────────────────────────────────────────────
 SH_MODEL         = "gpt-5.4"
-# The Senior default is GLM-5.3 on Featherless. The three values move together:
-# changing the model alone would send `zai-org/GLM-5.3` to OpenAI.
-SENIOR_MODEL       = "zai-org/GLM-5.3"
-SENIOR_BASE_URL    = "https://api.featherless.ai/v1"
-SENIOR_API_KEY_ENV = "FEATHERLESS_API_KEY"
-# Same GLM-5.3 on AI&: takes any senior call Featherless refuses (out of credit,
-# persistent 5xx) - see splunk_agent.with_fallback. AI& replies under the name
-# zai-org/GLM-5.3 whatever id it is sent, so its calls are billed by tag
-# (price_as) under their own PRICES_PER_1M row, not by the model name.
+# The Senior default is GLM-5.3 on AI& since Featherless ran out of credit
+# (2026-09-19, HTTP 402 mid-run in Q216 r11). The values move together:
+# changing the model alone would send `zai-org/glm-5.3` to OpenAI. AI& replies
+# under the name zai-org/GLM-5.3 whatever id it is sent — the same name
+# Featherless reports — so its calls are billed by tag (price_as) under their
+# own PRICES_PER_1M row, not by the model name.
+SENIOR_MODEL       = "zai-org/glm-5.3"
+SENIOR_BASE_URL    = "https://api.aiand.com/v1"
+SENIOR_API_KEY_ENV = "AI_AND_API_KEY"
+PRICE_AS_BY_BASE_URL = {"https://api.aiand.com/v1": "aiand:GLM-5.3"}
+# A second provider that takes any senior call the first refuses (out of credit,
+# persistent 5xx) - see splunk_agent.with_fallback. AI& was Featherless's
+# fallback; with AI& now primary there is none (no other GLM-5.3 key on file).
 SENIOR_FALLBACK_MODEL       = "zai-org/glm-5.3"
 SENIOR_FALLBACK_PRICE_AS    = "aiand:GLM-5.3"
 SENIOR_FALLBACK_BASE_URL    = "https://api.aiand.com/v1"
@@ -333,6 +337,7 @@ def main():
                                  exploration_base_url=NIM_BASE_URL,
                                  tracker=tracker,
                                  senior_fallback=senior_fallback,
+                                 senior_price_as=PRICE_AS_BY_BASE_URL.get(senior_base_url),
                                  )
     ctx       = DelegationContext(pool, logger, case_file=case_file)
     # SQLite-backed so cross-question memory survives a killed/resumed process
