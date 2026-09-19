@@ -57,7 +57,6 @@ class QuestionState:
     r2_streak: dict = field(default_factory=dict)    # sid -> consecutive R2 FAILs
     retired: set = field(default_factory=set)
     capped: dict = field(default_factory=dict)       # sid -> last round ran out of iterations
-    found: dict = field(default_factory=dict)        # sid -> last report's insight was FOUND
 
     def __post_init__(self) -> None:
         self.budget = tier_budget(self.points)
@@ -121,17 +120,9 @@ class QuestionState:
         self.retire(sid)
 
     # ── per-senior rounds ─────────────────────────────────────────────────────
-    def record_round(self, sid: str, *, capped: bool = False, found: bool = True) -> None:
+    def record_round(self, sid: str, *, capped: bool = False) -> None:
         self.used[sid] = self.used.get(sid, 0) + 1
         self.capped[sid] = bool(capped)
-        self.found[sid] = bool(found)
-
-    def last_round_found(self, sid: str) -> bool:
-        """Did this senior's most recent report hold a candidate (insight FOUND)?
-        A lead that failed the behaviour check is NOT_FOUND, and an ANSWER from a
-        NOT_FOUND report is blocked (Q216 r10: 'it is the only record' answered a
-        flow the senior itself called a download)."""
-        return bool(self.found.get(sid, True))
 
     def last_round_capped(self, sid: str) -> bool:
         """Did this senior's most recent round run out of iterations? A capped

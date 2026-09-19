@@ -76,14 +76,14 @@ def test_openai_nested_cached_tokens_still_wins():
     assert t.by_question()["Q216"]["sh"]["cached_tokens"] == 640
 
 
-def test_glm_5_3_priced_from_featherless_billing():
-    # Reproduces a real billed Featherless call: 28,745 in / 28,563 cached /
-    # 588 out was invoiced at $0.010268.
+def test_glm_5_3_priced_at_ai_and_rates():
+    # AI& GLM-5.3: $1.00 input, $0.30 cached, $4.00 output per 1M.
+    # 28,745 in / 28,563 cached / 588 out = 182*1.00 + 28,563*0.30 + 588*4.00 per 1M.
     t = UsageTracker()
     t.on_llm_end(SimpleNamespace(
         llm_output={"model_name": "zai-org/GLM-5.3", "token_usage":
                     {"prompt_tokens": 28745, "completion_tokens": 588,
-                     "cached_tokens": 28563}},
+                     "prompt_tokens_details": {"cached_tokens": 28563}}},
         generations=[[]],
     ), tags=["senior", "Q216"])
-    assert abs(t.by_question()["Q216"]["senior"]["estimated_usd"] - 0.010268) < 5e-7
+    assert abs(t.by_question()["Q216"]["senior"]["estimated_usd"] - 0.0111029) < 5e-7

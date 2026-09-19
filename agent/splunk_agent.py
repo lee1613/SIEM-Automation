@@ -28,7 +28,6 @@ import threading
 import uuid
 from typing import Annotated, TypedDict
 
-import openai
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -107,12 +106,8 @@ def token_limit_kwargs(base_url: str | None, limit: int = 32768) -> dict:
 
 
 def chat_llm(api_key: str, model: str, base_url: str | None, *,
-             temperature: float = 0, http_client=None,
-             price_as: str | None = None) -> ChatOpenAI:
+             temperature: float = 0, http_client=None) -> ChatOpenAI:
     """A worker ChatOpenAI with the project's timeout, retries and token field.
-    `price_as` names the PRICES_PER_1M row to bill it under, for a provider whose
-    replies carry another provider's model name (AI& answers as zai-org/GLM-5.3,
-    exactly like Featherless); it rides on the calls as a `price_as:` tag.
     Explicit timeout + retries: the SDK default is 600s, so a stalled connection
     sits silent for 10 minutes per attempt and looks like a dead-but-running
     process. max_retries drives the SDK's own backoff - we add none of our own."""
@@ -122,26 +117,8 @@ def chat_llm(api_key: str, model: str, base_url: str | None, *,
         # Optional: see llm_errors.resilient_http_client - upgrades a
         # 200-with-error-body into a 5xx so the SDK's retry engine fires.
         **({"http_client": http_client} if http_client else {}),
-        **({"tags": [f"price_as:{price_as}"]} if price_as else {}),
         **token_limit_kwargs(base_url),
     )
-
-
-def with_fallback(primary, backup):
-    """`primary`, re-sent to `backup` when the provider refuses the call.
-
-    Added for Featherless running out of credit mid-run: the same GLM-5.3 on a
-    second provider (AI&) takes the call instead of the run pausing. Per call,
-    not per thread, so a senior's conversation (in the graph's checkpointer)
-    survives the swap untouched. APIStatusError covers a 402/quota refusal and a
-    5xx still failing after the SDK's retries; a connection error is not a
-    provider refusing, so it is not caught.
-    # ponytail: once Featherless is dry every call pays one refused round trip
-    # first; make the swap sticky if that latency ever shows up.
-    """
-    if backup is None:
-        return primary
-    return primary.with_fallbacks([backup], exceptions_to_handle=(openai.APIStatusError,))
 
 
 def iter_budget(points: int) -> int:
@@ -417,77 +394,17 @@ def make_tools(splunk: SplunkClient) -> list:
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """CRITICAL RULE — READ FIRST: You MUST write an "Intention:" line before EVERY tool call. NEVER call a tool without first stating your reasoning. Your tool call WILL BE REJECTED if you do not include "Intention:" in your message. Example:
-  Intention: I need to see all available sourcetypes to find where DNS data lives.
-  → call get_source_types()
+SYSTEM_PROMPT = """You are a SIEM analyst on the BOTSv3 dataset (August 2018 APT attack against Frothly), querying Splunk Enterprise. All data is in index=botsv3; every SPL query starts with `index=botsv3`.
 
-You are a SIEM analyst agent on the BOTSv3 dataset (August 2018 APT attack against Frothly). You are running inside Splunk Enterprise.
+Before every tool call, write one line stating why you are making it and what you expect to learn:
+  Intention: <reason>
+A call without it is rejected.
 
-MANDATORY: Every SPL query MUST begin with `index=botsv3`. All BOTSv3 data lives in this index.
+FINDING THE FEED. Data is addressed on two axes, `sourcetype` and `source`. A generic sourcetype can hold several distinct feeds, each reachable only by its `source=` value, so when no sourcetype matches what the question names, look along the source axis with get_sources before concluding the data is absent. Search only a feed you have confirmed exists (get_source_types / get_sources). Before querying an unfamiliar feed, learn its fields and value formats with get_sourcetype_fields and sample_events.
 
-Always aggregate SPL results with | stats, | top, or | rare. Use dot-notation for nested fields and {} for multi-value arrays. Never return raw event streams. Max 50 results per query.
+SPL. Aggregate with | stats (the search tool rejects unaggregated queries); use IN for several literal values; filter after aggregation with | search; only trailing wildcards (value*), never leading ones; prefer exact tokens to substring wildcards. When the answer is text inside an event (an email body, a command line, a script), read it with get_raw_events instead of aggregating.
 
-SPL rules:
-- Use IN for multiple literal values
-- Filter after aggregation with | search
-- Boolean precedence in base search: NOT -> OR -> AND
-- Never use leading wildcards (=*value) — always trailing wildcards (value*)
-- Match exact tokens over substring wildcards
-
-DATA IS ADDRESSED ON TWO AXES: `sourcetype` and `source`. A sourcetype can hide
-many distinct feeds — in this dataset sourcetype=syslog contains Cisco NVM flow
-data reachable only as source="cisconvmflowdata". If a sourcetype looks too
-coarse, or no sourcetype name matches what the question describes, that does NOT
-mean the data is absent: call get_sources to look along the other axis.
-
-run_splunk_search rules — only invoke when you are certain the feed you are
-filtering on exists. To be certain: confirm it first with get_source_types (for a
-sourcetype) or get_sources (for a source), then run the search. Every search must
-be scoped to at least one confirmed feed; a `source=` filter alone is valid.
-
-Use sample_events to inspect the raw structure of events inside a sourcetype or source before searching. This reveals actual field names, value formats, and keywords that can lead you to the answer. Call this whenever you are unsure what a feed contains or what fields to search on.
-
-ALWAYS state your reasoning before acting. The format is:
-  Intention: <why you are making this call and what you expect to learn or confirm>
-  → tool call
-
-Example investigation flow:
-  Intention: Understand what sourcetypes are available to narrow down where destination IP data might live.
-  → call get_source_types()
-
-  Intention: stream:udp looked relevant; check what fields it exposes to see if destination IP is present.
-  → call get_sourcetype_fields(sourcetype="stream:udp")
-
-  Intention: No useful dest field in stream:udp; search the manifest for any sourcetype containing a 'dest' field.
-  → call search_keyword(keyword="dest")
-
-  Intention: stream:ip has a 'dest' field; sample a raw event to confirm the field format before querying.
-  → call sample_events(sourcetype="stream:ip")
-
-  Intention: Field confirmed. Run aggregation to find the top destination IP in stream:ip traffic.
-  → call run_splunk_search(query="index=botsv3 sourcetype=stream:ip | top limit=20 dest")
-
-When no sourcetype matches what the question names, pivot to the source axis
-instead of concluding the data is missing:
-
-  Intention: No sourcetype mentions Cisco NVM; check whether it exists as a source instead.
-  → call get_sources(keyword="cisco")
-
-  Intention: cisconvmflowdata exists under sourcetype=syslog; list its fields before querying.
-  → call get_sourcetype_fields(source="cisconvmflowdata")
-
-  Intention: Fields confirmed. Compute the flow duration from that source.
-  → call run_splunk_search(query="index=botsv3 source=cisconvmflowdata | stats min(fss), max(fes)")
-
-Reading content: when the answer is text inside an event (an email body, a
-command line, a script, an uploaded file's content), use get_raw_events to read
-the raw events rather than forcing an aggregation.
-
-Never exclude a process, file, or host from suspicion just because its name looks
-benign or "known-good". Suspicion comes from behavior (unusual parent, network,
-timing), not from a name blocklist. Do not add NOT match(...) filters that drop
-candidate answers by name.
-
+SUSPICION COMES FROM BEHAVIOUR, NOT NAMES. Never exclude a process, file or host because its name looks benign or well known, and do not add NOT filters that drop candidates by name. An unusual parent, network destination, volume or timing is what makes something suspicious.
 """
 # ── Verification helpers ───────────────────────────────────────────────────────
 
@@ -576,8 +493,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
                  extra_instructions: str = "", extra_tools: list | None = None,
                  max_iter: int = MAX_ITER, temperature: float = 0,
-                 http_client=None, context_window: int | None = None,
-                 fallback: dict | None = None, price_as: str | None = None):
+                 http_client=None, context_window: int | None = None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -602,35 +518,21 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         temperature:        sampling temperature (default 0 — deterministic;
                             the v1 pool passes 0.3 for self-consistency
                             sampling of metrics tasks).
-        fallback:           {"api_key", "model", "base_url", "price_as"?} of a second provider
-                            that takes any call the first refuses (see with_fallback).
     """
     tools    = make_tools(splunk)
     if extra_tools:
         tools = tools + list(extra_tools)
     tool_map = {t.name: t for t in tools}
 
-    llm = chat_llm(api_key, model, base_url, temperature=temperature, http_client=http_client,
-                   price_as=price_as)
-    fb  = (chat_llm(fallback["api_key"], fallback["model"], fallback["base_url"],
-                    temperature=temperature, http_client=http_client,
-                    price_as=fallback.get("price_as")) if fallback else None)
-
-    def _bind(ts):
-        """`ts` bound on the primary model, with the fallback bound the same way."""
-        if not ts:
-            return with_fallback(llm, fb)
-        bound = lambda m: m.bind_tools(ts, parallel_tool_calls=False)
-        return with_fallback(bound(llm), bound(fb) if fb else None)
-
-    model_with_tools = _bind(tools)
+    llm = chat_llm(api_key, model, base_url, temperature=temperature, http_client=http_client)
+    model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
     # Used when the iteration cap is hit. Search tools are withdrawn so the
     # worker cannot start another hunt, but any TERMINAL tool the caller
     # supplied stays bound - otherwise a capped worker has no way to report
     # except prose, and prose is exactly what the structured contract exists to
     # avoid. v0 passes no extra_tools, so for it this is still a bare model.
     _terminal  = [t for t in (extra_tools or []) if getattr(t, "name", "") == "submit_finding"]
-    model_bare = _bind(_terminal)
+    model_bare = llm.bind_tools(_terminal, parallel_tool_calls=False) if _terminal else llm
 
     prompt_text = SYSTEM_PROMPT
     if extra_instructions:

@@ -91,7 +91,7 @@ def _spawn(**kw):
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
-                premise_audit=["Coverage - VERIFIED: every way searched"],
+                premise_audit=["Coverage - VERIFIED: search x -> 3 events"],
                 r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
                 r4_premise_verification="PASS")
     base.update(kw)
@@ -613,7 +613,7 @@ def test_an_answer_without_a_premise_audit_is_rejected_then_accepted(tmp_path):
 def test_an_answer_on_an_unverified_audit_line_is_blocked_while_rounds_remain(tmp_path):
     # Q216 r10 answered over two UNVERIFIED audit lines that decided the value.
     llm = _LLM([_turn(_spawn()),
-                _turn(_answer(premise_audit=["Coverage - VERIFIED: every way searched",
+                _turn(_answer(premise_audit=["Coverage - VERIFIED: search x -> 3 events",
                                              "this endpoint and not another - UNVERIFIED"])),
                 _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)

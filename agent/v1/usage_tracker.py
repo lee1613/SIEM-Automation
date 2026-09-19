@@ -49,17 +49,11 @@ PRICES_PER_1M: dict[str, dict] = {
     "GLM-5.2-fp8": {
         "short": {"input": 0.85,  "cached_input": None,   "output": 3.10},
     },
-    # AI& (api.aiand.com), same GLM-5.3 - its /models page lists these prices.
-    # AI& replies under the model name zai-org/GLM-5.3, same as Featherless, so
-    # its calls carry a `price_as:aiand:GLM-5.3` tag (splunk_agent.chat_llm) and
-    # are billed and bucketed under this key instead.
-    "aiand:GLM-5.3": {
-        "short": {"input": 1.00,  "cached_input": 0.30,   "output": 4.00},
-    },
-    # Featherless. Verified against ten billed calls on the Featherless usage
-    # page: cost = (input - cached)*1.4 + cached*0.26 + output*4.4, per 1M.
+    # AI& (api.aiand.com) - its /models page lists these prices (user-confirmed
+    # 2026-09-19). AI& replies under the name zai-org/GLM-5.3 whatever id it is
+    # sent, so this key matches its calls.
     "zai-org/GLM-5.3": {
-        "short": {"input": 1.40,  "cached_input": 0.26,   "output": 4.40},
+        "short": {"input": 1.00,  "cached_input": 0.30,   "output": 4.00},
     },
     # ── NIM (build.nvidia.com) ────────────────────────────────────────────────
     # Every NIM model is priced at 0 by decision - see CLAUDE.md. NIM carries the
@@ -103,8 +97,8 @@ _NORMALIZED_PRICES = {_normalize_model_name(k): v for k, v in PRICES_PER_1M.item
 # PRICES_PER_1M — one table to check, not two places to forget.
 #
 # THE RULE: record the window the PROVIDER SERVES, not the one the model card
-# declares. Featherless serves zai-org/GLM-5.3 at 256K against a checkpoint that
-# declares 1 048 576; tools that read the checkpoint value instead of the served
+# declares. (Featherless, the first GLM-5.3 host, served 256K against a checkpoint that
+# declares 1 048 576.) Tools that read the checkpoint value instead of the served
 # one are a known class of bug.
 #
 # ROUND DOWN when unsure. The failure is asymmetric: a window set too low
@@ -115,7 +109,7 @@ _NORMALIZED_PRICES = {_normalize_model_name(k): v for k, v in PRICES_PER_1M.item
 # same moment CLAUDE.md already requires asking for its price. One lookup, two
 # numbers, one table.
 CONTEXT_WINDOW_PER_MODEL: dict[str, int] = {
-    "zai-org/GLM-5.3": 256_000,   # Featherless; checkpoint declares 1 048 576
+    "zai-org/GLM-5.3": 256_000,   # AI& serves 1 048 576; kept at the 256K the loop was tuned on
     "gpt-5.4":         272_000,   # OpenAI-served input window, per the user (2026-09-17)
 }
 
@@ -215,10 +209,7 @@ class UsageTracker(BaseCallbackHandler):
             or usage.get("cached_tokens", 0)
         )
         tags   = kwargs.get("tags") or []
-        # A provider billed apart from the model name it reports (see chat_llm).
-        model  = next((tg[len("price_as:"):] for tg in tags
-                       if isinstance(tg, str) and tg.startswith("price_as:")),
-                      lo.get("model_name", "unknown"))
+        model  = lo.get("model_name", "unknown")
 
         if not (inp or out):
             return

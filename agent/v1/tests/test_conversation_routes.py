@@ -492,18 +492,38 @@ def test_an_audit_without_a_coverage_line_is_rejected():
     assert any("Coverage" in p for p in premise_audit_violations([e]))
 
 
-# ── the NOT_FOUND gate ──────────────────────────────────────────────────────────
-# Q216 r10: the senior's own round-1 question said the only :3333 flow looked like a
-# download; SH answered it anyway because "the feed shows only one record". A lead
-# that fails the behaviour check is NOT_FOUND, and SH cannot answer from that.
+# ── evidence the SH cannot relabel ──────────────────────────────────────────────
+# Q216 r11: SH audited every premise VERIFIED over a report whose own Assumptions
+# said "not verifiable in-feed" and "the 2,365 unreturned rows".
 
-def test_answer_is_blocked_when_its_source_report_is_not_found():
+_R = ("## This round\n### What I ran\n- `dp=3333 | stats count` -> 1 event\n\n"
+      "## Assumptions\n- Coverage: dp - full 22-value listing - VERIFIED\n")
+
+
+def _evidence(e, report, rounds_left=True):
+    from conversation import evidence_violations
     st = QuestionState(points=1000)
     st.open_senior("s1")
-    st.record_round("s1", found=False)
-    e = entry(route="ANSWER", value="112", value_kind="count", source_senior="s1",
-              justification="the only record in the feed",
-              r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS")
-    assert any("NOT_FOUND" in v for v in directive_violations([e], st))
-    st.record_round("s1", found=True)
-    assert directive_violations([e], st) == []
+    if not rounds_left:
+        while st.rounds_left_for("s1") > 0:
+            st.record_round("s1")
+    return evidence_violations([e], reports_of=lambda s: report,
+                               last_report_of=lambda s: report, state=st)
+
+
+def _audited(quote):
+    return entry(route="ANSWER", value="112", source_senior="s1", justification="j",
+                 premise_audit=[{"premise": "Coverage: port", "status": "VERIFIED",
+                                 "source": "s1 round 1", "quote": quote, "evidence": "e"}])
+
+
+def test_a_verified_line_must_quote_the_senior_word_for_word():
+    assert _evidence(_audited("dp=3333 | stats count -> 1 event"), _R) == []
+    assert any("quote is not" in v for v in _evidence(_audited("3333 is the stratum port"), _R))
+
+
+def test_the_seniors_own_doubts_block_the_answer_while_rounds_remain():
+    doubtful = _R + "- Port 3333 = Monero stratum - not verifiable in-feed\n"
+    e = _audited("dp=3333 | stats count -> 1 event")
+    assert any("unsettled" in v for v in _evidence(e, doubtful))
+    assert _evidence(e, doubtful, rounds_left=False) == []

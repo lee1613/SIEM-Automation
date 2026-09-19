@@ -117,6 +117,24 @@ def open_questions(md: str) -> list[str]:
     return out
 
 
+# Words a senior uses when it knows a premise is not settled. Q216 r11: "not
+# verifiable in-feed" and "the 2,365 unreturned rows" sat in a report SH answered
+# from with an all-VERIFIED audit.
+_DOUBT = re.compile(r"UNVERIFIED|not\s+verifiable|unverifiable|cannot\s+be\s+verified|"
+                    r"could\s+not\s+be\s+verified|not\s+verified|unreturned|not\s+returned|"
+                    r"rows?\s+not\s+seen|partial", re.IGNORECASE)
+
+
+def open_doubts(md: str) -> list[str]:
+    """The senior's own "## Assumptions" lines that still flag something unsettled —
+    an unverified premise or a result it did not read in full."""
+    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_|\Z)",
+                  md or "", re.MULTILINE | re.DOTALL)
+    if not m:
+        return []
+    return [ln.strip() for ln in m.group(1).splitlines() if _DOUBT.search(ln)]
+
+
 def unverified_premises(md: str) -> int:
     """How many lines of the "## Assumptions" section are marked UNVERIFIED —
     surfaced to SH as a warning, never a gate (R4 is soft by design)."""

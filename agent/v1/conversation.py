@@ -25,6 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
+from senior_report import open_doubts
 
 GRADES = ("PASS", "WEAK", "FAIL")
 NA = "NA"
@@ -62,11 +63,26 @@ class AuditLine(BaseModel):
                                      "premise starts with 'Coverage'.")
     status: Literal["VERIFIED", "UNVERIFIED"] = Field(
         description="VERIFIED only when a result in a report, read in full, shows it.")
-    evidence: str = Field(description="VERIFIED: the query and result that show it, and "
-                                      "where. UNVERIFIED: what would test it.")
+    source: str = Field(description="VERIFIED: which senior report holds the evidence, "
+                                    "e.g. 's1 round 2'. UNVERIFIED: empty.")
+    quote: str = Field(description="VERIFIED: the senior's query, result or finding that "
+                                   "shows it, copied WORD FOR WORD from that report (the "
+                                   "runner checks it is there). UNVERIFIED: empty.")
+    evidence: str = Field(description="VERIFIED: why that quote establishes the premise. "
+                                      "UNVERIFIED: what would test it.")
 
     def render(self) -> str:
-        return f"{self.premise} - {self.status}" + (f": {self.evidence}" if self.evidence else "")
+        cite = f" [{self.source}: \"{self.quote}\"]" if self.quote else ""
+        return (f"{self.premise} - {self.status}" + cite
+                + (f": {self.evidence}" if self.evidence else ""))
+
+
+def _norm(text: str) -> str:
+    """Whitespace-, case- and markdown-insensitive form, so a faithful quote matches."""
+    return re.sub(r"\s+", " ", re.sub(r"[`*_]", "", text or "")).strip().lower()
+
+
+MIN_QUOTE_CHARS = 12   # shorter than this, a "quote" matches almost any report
 
 
 _AUDIT_TEXT = re.compile(r"^(.*?)\s*(?:-|\u2013|\u2014)\s*(UNVERIFIED|VERIFIED)(?![A-Z])\s*:?\s*(.*)$", re.S)
@@ -184,8 +200,10 @@ class SeniorDirective(BaseModel):
                 if not a.strip():
                     continue
                 m = _AUDIT_TEXT.match(a.strip())
-                a = ({"premise": m.group(1), "status": m.group(2), "evidence": m.group(3)} if m
-                     else {"premise": a.strip(), "status": "UNVERIFIED", "evidence": ""})
+                a = ({"premise": m.group(1), "status": m.group(2), "source": "",
+                      "quote": m.group(3), "evidence": m.group(3)} if m
+                     else {"premise": a.strip(), "status": "UNVERIFIED", "source": "",
+                           "quote": "", "evidence": ""})
             out.append(a)
         return out
 
@@ -324,6 +342,40 @@ def unverified_audit(entry) -> list[str]:
     return [a.render() for a in entry.premise_audit if a.status == "UNVERIFIED"]
 
 
+def evidence_violations(entries: list, *, reports_of, last_report_of,
+                        state: QuestionState) -> list[str]:
+    """Checks an ANSWER against the senior's own words, which SH cannot relabel.
+
+    * Every VERIFIED audit line must quote, word for word, the senior's query,
+      result or finding that shows it — and the quote must be in that senior's
+      reports. A VERIFIED with nothing behind it is SH's opinion, not evidence.
+    * While the source senior has rounds left, its latest report must not still
+      flag a doubt in its own Assumptions (an unverified premise, rows it did not
+      read). Q216 r11: SH audited everything VERIFIED over a report that said
+      "not verifiable in-feed" and "the 2,365 unreturned rows".
+    """
+    out = []
+    for e in entries:
+        if e.route != "ANSWER":
+            continue
+        src = e.source_senior
+        text = _norm(reports_of(src))
+        for a in e.premise_audit:
+            if a.status != "VERIFIED":
+                continue
+            q = _norm(a.quote)
+            if len(q) < MIN_QUOTE_CHARS or q not in text:
+                out.append(f"audit line '{a.premise[:80]}' is VERIFIED but its quote is not "
+                           f"in {src}'s reports — copy the query, result or finding that "
+                           "shows it word for word, or mark the line UNVERIFIED")
+        doubts = open_doubts(last_report_of(src))
+        if doubts and state.rounds_left_for(src) > 0:
+            out.append(f"ANSWER is blocked: {src}'s latest report still flags "
+                       f"{len(doubts)} unsettled premise(s) in its own Assumptions — COMMAND "
+                       "it to settle them first: " + " | ".join(d[:160] for d in doubts))
+    return out
+
+
 def open_question_violations(entries: list[SeniorDirective], asked: dict) -> list[str]:
     """SH answers every open question a senior put to it. `asked` maps each senior
     whose report was just read to how many questions it asked (see
@@ -411,10 +463,6 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                        f"{len(unverified_audit(e))} premise(s) UNVERIFIED and "
                        f"{e.source_senior} still has rounds — COMMAND it to verify them first: "
                        + "; ".join(unverified_audit(e)))
-        if e.route == "ANSWER" and not state.last_round_found(e.source_senior):
-            out.append(f"ANSWER is blocked: {e.source_senior}'s last report is NOT_FOUND — "
-                       "it holds no candidate that shows the act the question names. "
-                       "COMMAND it to open up the search, or SPAWN another scope")
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
                        "at the iteration cap — CLARIFY it (costs no round) or COMMAND "
