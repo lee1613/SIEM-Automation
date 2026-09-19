@@ -246,8 +246,8 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
             meta["truncated"] = (f"showing {len(cleaned)} of {total} rows, in the query's "
                                  f"own order — the other {total - len(cleaned)} were not "
                                  "returned, so this result says nothing about them. To "
-                                 "reach what you need among them, don't page: filter for "
-                                 "it, group into coarser units, or rank rarest first.")
+                                 "reach what you need among them, don't page: narrow the "
+                                 "query with what the question tells you.")
         payload = json.dumps({"results": cleaned, "meta": meta})
         if len(payload) > 12_000:
             # Drop whole rows so the payload stays valid JSON (a raw byte slice
@@ -256,8 +256,8 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
             while kept and len(payload) > 12_000:
                 kept = kept[:max(len(kept) // 2, 0)] if len(kept) > 1 else []
                 meta["truncated"] = (f"showing {len(kept)} of {max(total, len(cleaned))} rows "
-                                     "— the rest were not returned (too large); filter, "
-                                     "group or rank rarest first to get a shorter answer")
+                                     "— the rest were not returned (too large); narrow "
+                                     "the query to get a shorter answer")
                 payload = json.dumps({"results": kept, "meta": meta})
         return payload
     return json.dumps(result)
@@ -356,8 +356,8 @@ def make_tools(splunk: SplunkClient) -> list:
         When that exceeds `top_n`, the rest were not returned — and they are the
         rarer values, which is often where the thing you are hunting sits.
         Use it to see what a field looks like. To find something specific among
-        many values, use run_splunk_search: filter for it, group values into
-        coarser units, or rank rarest first (`| sort count`)."""
+        many values, use run_splunk_search and narrow with what the question
+        tells you — filter on it, or group values into coarser units."""
         result = splunk.get_field_values(
             field=field, index=index, top_n=int(top_n), sourcetype=sourcetype,
             source=source
@@ -386,7 +386,7 @@ def make_tools(splunk: SplunkClient) -> list:
         filter alone is valid and is sometimes the only way to reach the data.
         Must aggregate with | stats, | top, or | rare.
         No leading wildcards. Max 50 results — shape the query so its whole
-        answer fits: filter, group into coarser units, or rank rarest first."""
+        answer fits: filter on the question's clues, or group into coarser units."""
         result = splunk.search(
             query=query, earliest="0", latest="now", max_results=int(max_results)
         )

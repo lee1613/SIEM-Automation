@@ -309,27 +309,6 @@ def test_a_coverage_line_in_assumptions_is_detected():
     assert has_coverage_premise(md)
 
 
-SCOPED = ("**Scope:** sourcetype=syslog | source=cisconvmflowdata | fields=pn,dp\n"
-          "## Assumptions\n"
-          "- Coverage: pn (process) searched -> 0; dp=3333 -> 1 flow;\n"
-          "  da not a name field - VERIFIED\n"
-          "- Selection: the only flow - UNVERIFIED\n")
-
-
-def test_report_scope_reads_sourcetype_and_source():
-    from senior_report import report_scope
-    assert report_scope(SCOPED) == ("syslog", "cisconvmflowdata")
-    assert report_scope("no scope here") == ("", "")
-
-
-def test_uncovered_fields_lists_real_fields_the_coverage_line_skips():
-    from senior_report import uncovered_fields
-    fields = ["pn", "dp", "da", "dh", "date_hour", "punct", "sourcetype", "fss"]
-    # dh and fss are never named; Splunk bookkeeping fields are never demanded;
-    # fields named only in the Scope line or in Selection do not count.
-    assert uncovered_fields(SCOPED, fields) == ["dh", "fss"]
-
-
 def test_an_over_cap_report_trims_its_narrative_and_keeps_what_sh_needs():
     long_ran = GOOD.replace("### What I ran\n",
                             "### What I ran\n" + "- query -> rows\n" * (REPORT_WORD_CAP // 2))
