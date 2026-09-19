@@ -278,7 +278,7 @@ def test_cut_short_results_are_recorded_in_the_report_and_relayed():
     pool = _Pool(truncated=["`run_splunk_search: q` (50 of 1573 rows seen)"])
     s = _session(pool)
     r = s.work("Begin.", rounds_remaining=7)
-    assert "Unseen rows (runner): 1 result(s)" in r["report"]
+    assert "Partial results (runner): 1 result(s)" in r["report"]
     assert "(50 of 1573 rows seen)" in r["report"]
     s.work("continue", rounds_remaining=6)
-    assert pool.rounds[1]["message"].startswith("_Unseen rows (runner)")
+    assert pool.rounds[1]["message"].startswith("_Partial results (runner)")

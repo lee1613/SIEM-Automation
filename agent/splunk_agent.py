@@ -243,9 +243,11 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
         if total > len(cleaned):
             # A row cap is silent otherwise: the top-N of a sorted listing reads as
             # the whole set, and the rare value being hunted sits in the unseen rest.
-            meta["truncated"] = (f"showing {len(cleaned)} of {total} rows — the other "
-                                 f"{total - len(cleaned)} were NOT seen. Nothing is absent "
-                                 "from them until a query that filters for it says so.")
+            meta["truncated"] = (f"showing {len(cleaned)} of {total} rows, in the query's "
+                                 f"own order — the other {total - len(cleaned)} were not "
+                                 "returned, so this result says nothing about them. To "
+                                 "reach what you need among them, don't page: filter for "
+                                 "it, group into coarser units, or rank rarest first.")
         payload = json.dumps({"results": cleaned, "meta": meta})
         if len(payload) > 12_000:
             # Drop whole rows so the payload stays valid JSON (a raw byte slice
@@ -254,7 +256,8 @@ def _format_result(result: dict, keep_raw: bool = False) -> str:
             while kept and len(payload) > 12_000:
                 kept = kept[:max(len(kept) // 2, 0)] if len(kept) > 1 else []
                 meta["truncated"] = (f"showing {len(kept)} of {max(total, len(cleaned))} rows "
-                                     "— the rest were NOT seen; use a more specific query")
+                                     "— the rest were not returned (too large); filter, "
+                                     "group or rank rarest first to get a shorter answer")
                 payload = json.dumps({"results": kept, "meta": meta})
         return payload
     return json.dumps(result)
@@ -347,9 +350,14 @@ def make_tools(splunk: SplunkClient) -> list:
     def get_field_values(field: str, index: str = "botsv3",
                          sourcetype: str = "", top_n: int = 20,
                          source: str = "") -> str:
-        """Get the top distinct values for a field, optionally scoped to a
-        sourcetype and/or a source.
-        Use to enumerate the range of values a field contains before filtering on it."""
+        """Count every distinct value of a field (optionally scoped to a sourcetype
+        and/or a source) and return the `top_n` MOST FREQUENT, each with its count
+        and percent. meta.total_event_count is how many distinct values exist.
+        When that exceeds `top_n`, the rest were not returned — and they are the
+        rarer values, which is often where the thing you are hunting sits.
+        Use it to see what a field looks like. To find something specific among
+        many values, use run_splunk_search: filter for it, group values into
+        coarser units, or rank rarest first (`| sort count`)."""
         result = splunk.get_field_values(
             field=field, index=index, top_n=int(top_n), sourcetype=sourcetype,
             source=source
@@ -377,7 +385,8 @@ def make_tools(splunk: SplunkClient) -> list:
         from get_source_types, a `source=` from get_sources, or both. A source
         filter alone is valid and is sometimes the only way to reach the data.
         Must aggregate with | stats, | top, or | rare.
-        No leading wildcards. Max 50 results."""
+        No leading wildcards. Max 50 results — shape the query so its whole
+        answer fits: filter, group into coarser units, or rank rarest first."""
         result = splunk.search(
             query=query, earliest="0", latest="now", max_results=int(max_results)
         )

@@ -9,7 +9,7 @@ def test_a_row_capped_result_says_how_many_rows_went_unseen():
     out = json.loads(_format_result({"results": rows,
                                      "_meta": {"total_event_count": 1573, "returned": 50}}))
     assert "showing 50 of 1573 rows" in out["meta"]["truncated"]
-    assert "1523 were NOT seen" in out["meta"]["truncated"]
+    assert "other 1523 were not returned" in out["meta"]["truncated"]
 
 
 def test_a_complete_result_carries_no_truncation_note():

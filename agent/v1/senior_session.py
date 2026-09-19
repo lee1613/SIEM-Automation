@@ -40,10 +40,11 @@ def unseen_rows_note(truncated: list[str]) -> str:
     if not truncated:
         return ""
     shown = "; ".join(truncated[:6]) + (f"; +{len(truncated) - 6} more" if len(truncated) > 6 else "")
-    return (f"_Unseen rows (runner): {len(truncated)} result(s) this round showed only "
-            "part of their rows — " + shown + ". Nothing is absent from "
-            "the unseen rows until a query that filters for it says so; any Coverage "
-            "resting on these results is UNVERIFIED._")
+    return (f"_Partial results (runner): {len(truncated)} result(s) this round returned "
+            "only their first rows — " + shown + ". They say nothing about the rows "
+            "they did not return, so Coverage resting on them alone is UNVERIFIED. To "
+            "reach those rows, a shorter query: filter for what you need, group values "
+            "into coarser units, or rank rarest first._")
 
 
 def should_compact(current_context: int, *, mean_per_iter: int, window: int,
