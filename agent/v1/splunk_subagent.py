@@ -100,6 +100,7 @@ def truncated_calls(state: dict) -> list[str]:
         tc = calls.get(m.tool_call_id)
         if cut and tc:
             args = tc["args"].get("query") or json.dumps(tc["args"], sort_keys=True)
+            args = args if len(args) <= 90 else args[:90] + "…"   # SH needs which search, not all of it
             out.append(f"`{tc['name']}: {args}` ({cut.group(1)} of {cut.group(2)} rows seen)")
     return out
 

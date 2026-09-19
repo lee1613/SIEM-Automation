@@ -610,13 +610,15 @@ def test_an_answer_without_a_premise_audit_is_rejected_then_accepted(tmp_path):
     assert "premise_audit" in log and "Premise audit (SH)" in log
 
 
-def test_an_answer_on_an_unverified_audit_line_is_allowed_and_logged(tmp_path):
+def test_an_answer_on_an_unverified_audit_line_is_blocked_while_rounds_remain(tmp_path):
+    # Q216 r10 answered over two UNVERIFIED audit lines that decided the value.
     llm = _LLM([_turn(_spawn()),
                 _turn(_answer(premise_audit=["Coverage - VERIFIED: every way searched",
-                                             "this endpoint and not another - UNVERIFIED"]))])
+                                             "this endpoint and not another - UNVERIFIED"])),
+                _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     assert out["end_reason"] == "answer"
-    assert "UNVERIFIED premises in SH's own audit" in _conversation(tmp_path)
+    assert "premise(s) UNVERIFIED" in _conversation(tmp_path)
 
 
 def test_a_report_without_a_selection_premise_is_flagged_to_sh():

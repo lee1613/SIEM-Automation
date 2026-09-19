@@ -19,10 +19,11 @@ holds. A doubt that fits none of the five is a CLARIFY, not a critic.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
 
 GRADES = ("PASS", "WEAK", "FAIL")
@@ -53,6 +54,24 @@ class Scope(BaseModel):
         return not (self.sourcetypes or self.sources or self.fields)
 
 
+class AuditLine(BaseModel):
+    """One premise of SH's pre-ANSWER audit. Structured so code can read the verdict:
+    as free text, "could change the answer" was prose no gate could rely on."""
+
+    premise: str = Field(description="The premise the answer rests on. The first line's "
+                                     "premise starts with 'Coverage'.")
+    status: Literal["VERIFIED", "UNVERIFIED"] = Field(
+        description="VERIFIED only when a result in a report, read in full, shows it.")
+    evidence: str = Field(description="VERIFIED: the query and result that show it, and "
+                                      "where. UNVERIFIED: what would test it.")
+
+    def render(self) -> str:
+        return f"{self.premise} - {self.status}" + (f": {self.evidence}" if self.evidence else "")
+
+
+_AUDIT_TEXT = re.compile(r"^(.*?)\s*(?:-|\u2013|\u2014)\s*(UNVERIFIED|VERIFIED)(?![A-Z])\s*:?\s*(.*)$", re.S)
+
+
 class SeniorDirective(BaseModel):
     """One graded route aimed at one senior (or, for SPAWN/ANSWER, at the question)."""
 
@@ -69,8 +88,8 @@ class SeniorDirective(BaseModel):
                     "a result shown in the report? PASS: each has a query and result behind "
                     "it. WEAK: minor premises untested, the chain holds without them. FAIL: "
                     "the candidate or the direction depends on a premise nobody tested. A "
-                    "warning, not a gate: an educated guess may still be answered, but it is "
-                    "dangerous ground, and a WEAK/FAIL tells the senior to verify first.")
+                    "WEAK/FAIL tells the senior to verify first; the ANSWER gate is the "
+                    "premise audit, not this grade.")
     open_question_answers: list[str] = Field(
         description="Your answer to each bullet in the '## Open questions for SH' section of "
                     "the report this entry addresses (for ANSWER: the source senior's report), "
@@ -132,15 +151,14 @@ class SeniorDirective(BaseModel):
     value_kind: str = Field(description="ANSWER only. What the value is — count, hostname, ip, cve...")
     source_senior: str = Field(description="ANSWER only. The senior whose report the value came from.")
     justification: str = Field(description="ANSWER only. Why that report establishes this value.")
-    premise_audit: list[str] = Field(
+    premise_audit: list[AuditLine] = Field(
         description="ANSWER only. Your own audit before answering: trace the chain from the "
                     "question's words to the value and list every premise it rests on that the "
-                    "source report's Assumptions do NOT list. Open with a 'Coverage' line: every way "
-                    "the question's key concept could show up in the data and whether the seniors "
-                    "searched each. Then above all, why this entity and not "
-                    "another that could fit the question. One per line: '<premise> - VERIFIED: "
-                    "<where the report shows it>' or '<premise> - UNVERIFIED'. Write 'none found' "
-                    "only after tracing. Empty for every other route.")
+                    "source report's Assumptions do NOT list. Open with a 'Coverage' premise: "
+                    "every way the question's key concept could show up in the data and whether "
+                    "the seniors searched each. Then above all, why this entity and not another "
+                    "that could fit the question. An ANSWER with any UNVERIFIED line is rejected "
+                    "while its source senior has rounds left. Empty for every other route.")
     case_updates: list[str] = Field(
         description="ANSWER only. Durable incident facts for the case file, each in the form "
                     "'entity <type> <value>' or 'finding [verified|hypothesis] <claim> | evidence: <spl>'.")
@@ -155,6 +173,22 @@ class SeniorDirective(BaseModel):
     # deliberately left advisory — an unscoped or unexplained spawn is a bad
     # turn, not a malformed one, and it's the orchestrator's prompt, not this
     # validator, that has to push SH toward supplying them.
+    @field_validator("premise_audit", mode="before")
+    @classmethod
+    def _audit_from_text(cls, v):
+        """Accept the legacy '<premise> - VERIFIED: <where>' strings. A line with no
+        verdict reads as UNVERIFIED: an unmarked premise is an untested one."""
+        out = []
+        for a in v or []:
+            if isinstance(a, str):
+                if not a.strip():
+                    continue
+                m = _AUDIT_TEXT.match(a.strip())
+                a = ({"premise": m.group(1), "status": m.group(2), "evidence": m.group(3)} if m
+                     else {"premise": a.strip(), "status": "UNVERIFIED", "evidence": ""})
+            out.append(a)
+        return out
+
     @model_validator(mode="after")
     def _payload_matches_route(self):
         r = self.route
@@ -274,10 +308,10 @@ def premise_audit_violations(entries: list) -> list[str]:
     for e in entries:
         if e.route != "ANSWER":
             continue
-        if not any(a.strip() for a in e.premise_audit):
+        if not e.premise_audit:
             out.append(f"ANSWER from {e.source_senior} has no premise_audit — trace the chain "
                        "from the question to the value and list the premises the report did not")
-        elif not any(a.strip().lstrip("-* ").lower().startswith("coverage")
+        elif not any(a.premise.strip().lstrip("-* ").lower().startswith("coverage")
                      for a in e.premise_audit):
             out.append(f"ANSWER from {e.source_senior}: premise_audit has no Coverage line — "
                        "list every way the question's concept could show up in the data and "
@@ -287,7 +321,7 @@ def premise_audit_violations(entries: list) -> list[str]:
 
 def unverified_audit(entry) -> list[str]:
     """The audit lines SH itself marked UNVERIFIED."""
-    return [a for a in entry.premise_audit if "UNVERIFIED" in a.upper()]
+    return [a.render() for a in entry.premise_audit if a.status == "UNVERIFIED"]
 
 
 def open_question_violations(entries: list[SeniorDirective], asked: dict) -> list[str]:
@@ -371,6 +405,12 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
         # a FOUND report carrying the runner's cap line and two unanswered questions
         # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
         # CLARIFY costs no round, so the cheap move is always available.
+        if (e.route == "ANSWER" and unverified_audit(e)
+                and state.rounds_left_for(e.source_senior) > 0):
+            out.append(f"ANSWER is blocked: your premise audit marks "
+                       f"{len(unverified_audit(e))} premise(s) UNVERIFIED and "
+                       f"{e.source_senior} still has rounds — COMMAND it to verify them first: "
+                       + "; ".join(unverified_audit(e)))
         if e.route == "ANSWER" and not state.last_round_found(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last report is NOT_FOUND — "
                        "it holds no candidate that shows the act the question names. "

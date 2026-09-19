@@ -33,16 +33,14 @@ ALERT_AT   = 0.70    # current context share that prints an operator alert
 
 
 def unseen_rows_note(truncated: list[str]) -> str:
-    """The runner's record of results this round that were cut short. The senior
-    got the tool's warning each time; this makes the gap impossible to report away."""
+    """The runner's record, for SH, of results this round that were cut short. The
+    senior got the tool's warning each time; this makes the gap impossible to report away."""
     if not truncated:
         return ""
     shown = "; ".join(truncated[:6]) + (f"; +{len(truncated) - 6} more" if len(truncated) > 6 else "")
     return (f"_Partial results (runner): {len(truncated)} result(s) this round returned "
-            "only their first rows — " + shown + ". They say nothing about the rows "
-            "they did not return, so Coverage resting on them alone is UNVERIFIED. To "
-            "reach them, narrow the query with what the question tells you, or open up "
-            "one step at a time._")
+            "only their first rows — " + shown + ". A claim resting on them alone is "
+            "UNVERIFIED._")
 
 
 def should_compact(current_context: int, *, mean_per_iter: int, window: int,
@@ -86,7 +84,6 @@ class SeniorSession:
         self.last_prompt_tokens = 0
         self.status = "active"
         self.briefed = False
-        self.coverage_note = ""      # runner's partial-results note, relayed into the next round
 
     def _new_thread(self) -> str:
         return f"senior_{self.qid}_{self.sid}_{uuid.uuid4().hex[:8]}"
@@ -103,9 +100,9 @@ class SeniorSession:
     # ── one round ─────────────────────────────────────────────────────────────
     def work(self, directive: str, *, rounds_remaining: int) -> dict:
         """Resume this senior for one round and return its stamped report."""
+        # The partial-results note goes to SH in the report, not back to the senior:
+        # it already saw "showing N of M" on every one of those results.
         message = self._message_for(directive)
-        if self.coverage_note:
-            message = f"{self.coverage_note}\n\n{message}"
 
         result = self.pool.run_round(
             thread_id=self.thread_id, message=message, qid=self.qid,
@@ -137,9 +134,9 @@ class SeniorSession:
             # capped round's report is where the budget ran out, not a conclusion.
             body = (body.rstrip() + f"\n\n_Iteration cap reached: {self.iters}/{self.iters} "
                     "iterations used this round — cut off, not finished._\n")
-        self.coverage_note = "" if failed else unseen_rows_note(result.get("truncated") or [])
-        if self.coverage_note:
-            body = body.rstrip() + f"\n\n{self.coverage_note}\n"
+        note = "" if failed else unseen_rows_note(result.get("truncated") or [])
+        if note:
+            body = body.rstrip() + f"\n\n{note}\n"
         report = stamp_header(body, senior_id=self.sid, qid=self.qid,
                               round_n=self.rounds_used,
                               rounds_remaining=rounds_remaining,

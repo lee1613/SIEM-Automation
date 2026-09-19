@@ -109,11 +109,11 @@ GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
 Each is PASS, WEAK or FAIL.
-R4 is a WARNING, not a gate. Some premises genuinely cannot be verified, and an educated guess may still be answered — but it is dangerous ground. A WEAK or FAIL R4 tells the senior to verify its UNVERIFIED premises first thing next round; prefer that round over answering, and if you do answer on an unverified premise, say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
+R4 is a grade; the gate is your premise audit. A WEAK or FAIL R4 tells the senior to verify its UNVERIFIED premises first thing next round. You cannot answer past an unverified premise while the source senior has rounds left: every premise you have not seen verified goes in the audit as UNVERIFIED, and that blocks the ANSWER. Only once its rounds are spent may you answer on one — say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
 
-ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected.
+ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected. Keep each answer to a line or two: the senior reads them inside your directive, so the directive carries the substance and the answers do not restate it.
 
-AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. Open the audit with a Coverage line: name the key concept the question asks about, list every way it could show up in the data, and say whether the seniors' searches covered each. Check it against the feed's own fields, not against the senior's list — a list drawn from memory checks itself. Every result a runner "Partial results" note lists was only partly read — a claim resting on such a result is UNVERIFIED, even where the senior wrote VERIFIED. A candidate is never answerable because no rival turned up: if the senior's own evidence says its records do not behave like the act the question names (or it cannot show that they do), the absence of alternatives does not rescue it — COMMAND the search open instead. A way nobody searched is UNVERIFIED, however well the chosen candidate is verified — a candidate can only win against candidates that were looked for. Then check the choice itself: why this entity and not another that could fit the question. When the answer is a measurement, check its definition against the question's verbatim words — not against your own framing of the task, and not against a rule the senior states; a senior citing a rule is not a result. Mark each VERIFIED (and where the report shows it) or UNVERIFIED. If an UNVERIFIED one could change the answer, COMMAND a round to test it instead of answering. Answering on one is allowed, but it is dangerous ground and is logged. Write 'none found' only after tracing. An ANSWER without an audit is rejected.
+AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. Open the audit with a Coverage line: name the key concept the question asks about, list every way it could show up in the data, and say whether the seniors' searches covered each. Check it against the feed's own fields, not against the senior's list — a list drawn from memory checks itself. Every result a runner "Partial results" note lists was only partly read — a claim resting on such a result is UNVERIFIED, even where the senior wrote VERIFIED. A candidate is never answerable because no rival turned up: if the senior's own evidence says its records do not behave like the act the question names (or it cannot show that they do), the absence of alternatives does not rescue it — COMMAND the search open instead. A way nobody searched is UNVERIFIED, however well the chosen candidate is verified — a candidate can only win against candidates that were looked for. Then check the choice itself: why this entity and not another that could fit the question. When the answer is a measurement, check its definition against the question's verbatim words — not against your own framing of the task, and not against a rule the senior states; a senior citing a rule is not a result. Each audit line is a premise with a status, VERIFIED or UNVERIFIED, and its evidence. VERIFIED only when a result the senior read in full shows it; anything less is UNVERIFIED. An ANSWER with any UNVERIFIED line is rejected while its source senior has rounds left — COMMAND that senior to verify those premises first. An ANSWER without an audit is rejected.
 
 THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
@@ -122,6 +122,8 @@ THE GATES YOU MUST RESPECT
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
   * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
   * Premise audit: an ANSWER must carry `premise_audit`, opening with a Coverage line, or the turn is rejected.
+  * Unverified premises: an ANSWER whose audit has any UNVERIFIED line is rejected while the source senior has rounds left.
+  * Not found: an ANSWER from a senior whose last report is NOT_FOUND is rejected.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -360,18 +362,22 @@ def _directive_text(e) -> str:
         verify = (f"FIRST, before anything else this round: verify the UNVERIFIED premises "
                   f"in your Assumptions (SH graded premise verification "
                   f"R4 = {e.r4_premise_verification}).\n\n")
-    return _answers_note(e) + verify + _route_directive(e)
+    return verify + _route_directive(e)
 
 
 def _route_directive(e) -> str:
-    if e.route == "COMMAND":
-        scope = ("" if e.scope_change.is_empty()
-                 else f"\nYour scope is now: {e.scope_change}. Work inside it.")
-        return f"[{e.decision.upper()}] {e.rationale}\n\n{e.directive}{scope}"
+    """One block: the goal, SH's answers folded in under it, then the scope. The
+    rationale stays in conversation.md — it is SH's case view, and sent to the
+    senior it restated the directive a second time (Q216 r10)."""
+    answers = [a.strip() for a in e.open_question_answers if a.strip()]
+    answers = ("\n\nOn your open questions:\n"
+               + "\n".join(f"{i}. {a}" for i, a in enumerate(answers, start=1))) if answers else ""
     scope = ("" if e.scope_change.is_empty()
-             else f"\nYour scope is now: {e.scope_change}. Work inside it.")
+             else f"\n\nYour scope is now: {e.scope_change}. Work inside it.")
+    if e.route == "COMMAND":
+        return f"[{e.decision.upper()}] {e.directive}{answers}{scope}"
     return (f"[CRITIC — {e.basis}] {e.flaw}\n{e.why_it_fails}\n\n"
-            f"{e.fix_directive}{scope}")
+            f"{e.fix_directive}{answers}{scope}")
 
 
 def _apply_case_updates(case_file, lines: list, qid: str) -> int:
@@ -628,7 +634,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 state.record_round(
                     sid, capped=(bool(result.get("cap_hit"))
                                  or int(result.get("iterations", 0)) >= ROUND_ITERS),
-                    found=(result.get("insight") == "FOUND"))
+                    found=(result.get("insight") != "NOT_FOUND"))
             rel = log.write_report(sid, result.get("round", 0), result.get("report", ""))
             log.senior_to_sh(sid, round_n=result.get("round", 0),
                              insight=result.get("insight", "?"),
