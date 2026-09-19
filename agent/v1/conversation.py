@@ -452,8 +452,11 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                         if e.route == "SPAWN" and e.spawn_type == "senior")
     explore_spawns = sum(1 for e in entries
                          if e.route == "SPAWN" and e.spawn_type == "exploration")
-    if senior_spawns > (state.budget["seniors"] - state.spawns_used):
-        out.append(f"only {state.budget['seniors'] - state.spawns_used} senior slot(s) left")
+    if senior_spawns > state.slots_remaining:
+        out.append(f"no free senior slot for this SPAWN — only {state.slots_remaining} "
+                   f"of {state.budget['seniors']} left")
+    if senior_spawns and state.turns_remaining < 1:
+        out.append("no SH turn left to read a new senior's report — do not SPAWN")
     if explore_spawns > (MAX_EXPLORATIONS - state.explorations_used):
         out.append("exploration already used on this question")
 
@@ -463,8 +466,11 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
             out.append(f"{sid} got more than one route this turn — exactly one per senior")
 
     for e in entries:
-        if e.route in ("CLARIFY", "RETIRE") and not state.is_active(e.senior_id):
+        if e.route == "CLARIFY" and not state.is_active(e.senior_id):
             out.append(f"{e.senior_id} is not an active senior")
+        if e.route == "RETIRE" and not state.is_active(e.senior_id):
+            out.append(f"{e.senior_id} is already retired or was never spawned — "
+                       "do not RETIRE it again")
         if e.route in ("COMMAND", "CRITIC"):
             if not state.is_active(e.senior_id):
                 out.append(f"{e.senior_id} is not an active senior")

@@ -640,13 +640,11 @@ def test_the_senior_task_leads_with_the_question_verbatim():
     assert "Answer format guidance: Round it." in t
 
 
-def test_a_turn_that_runs_nothing_tells_sh_what_happened(tmp_path):
-    # Q217 smoke5_r1: after a lone RETIRE nothing new reached SH, so it re-read its
-    # own last turn and retired the same senior ten times.
+def test_retiring_a_retired_senior_again_gets_a_reminder(tmp_path):
+    # Q217 smoke5_r1: SH retired the same senior ten times over.
     retire = entry(senior_id="s1", route="RETIRE", reason="scope exhausted",
                    r1_scope_alignment="PASS", r2_progress="WEAK",
                    r3_answer_readiness="WEAK", r4_premise_verification="PASS")
-    llm = _LLM([_turn(_spawn()), _turn(retire), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(retire), _turn(retire), _turn(_answer())])
     _run(llm, _Pool(), tmp_path)
-    last = llm.seen[2][-1].content
-    assert "APPLIED: RETIRE s1" in last and "Active: none" in last
+    assert "s1 is already retired or was never spawned" in _conversation(tmp_path)

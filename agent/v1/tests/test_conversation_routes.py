@@ -553,4 +553,12 @@ def test_retiring_a_retired_senior_is_rejected():
     st.open_senior("s2")
     st.retire("s2")
     v = directive_violations([entry(route="RETIRE", senior_id="s2", reason="r")], st)
-    assert any("not an active senior" in x for x in v)
+    assert any("already retired or was never spawned" in x for x in v)
+
+
+def test_a_spawn_without_a_free_slot_gets_a_reminder():
+    st = QuestionState(points=1000)
+    st.spawns_used = st.budget["seniors"]
+    v = directive_violations([entry(route="SPAWN", spawn_type="senior", subquestion="q",
+                                    reason="r")], st)
+    assert any("no free senior slot" in x for x in v)

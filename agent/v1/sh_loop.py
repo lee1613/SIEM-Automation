@@ -129,7 +129,6 @@ THE GATES YOU MUST RESPECT
   * Unverified premises: an ANSWER whose audit has any UNVERIFIED line is rejected while the source senior has rounds left OR a senior slot is free.
   * Quoted evidence: every VERIFIED audit line must quote the senior's report word for word, or the ANSWER is rejected.
   * The senior's own doubts: an ANSWER is rejected while its latest report's Assumptions still flag something unsettled (UNVERIFIED, not verifiable, partial, rows not returned) and the source senior has rounds left or a senior slot is free. Settle them, or spawn an alternative (ALTERNATIVE SENIOR).
-  * RETIRE only an active senior; a retired one is already gone.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -625,16 +624,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if clarified:
             msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
         if not pending:
-            if isinstance(msgs[-1], AIMessage):
-                # Nothing ran, so nothing new arrives — without this SH re-reads its own
-                # last turn and repeats it (Q217 smoke5_r1: RETIRE s2, ten times).
-                active = [s for s in sessions if state.is_active(s)]
-                msgs.append(HumanMessage(content=(
-                    f"APPLIED: {', '.join(f'{e.route} {e.senior_id}'.strip() for e in turn.entries)}. "
-                    f"No senior is working now. Active: {', '.join(active) or 'none'}; "
-                    f"{state.slots_remaining} senior slot(s) and {state.turns_remaining} "
-                    f"turn(s) left. Route next: COMMAND an active senior, SPAWN a new one, "
-                    f"or ANSWER.")))
             continue
 
         wave = _run_wave(pending, max_parallel=max_parallel)
