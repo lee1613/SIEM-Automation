@@ -49,6 +49,13 @@ PRICES_PER_1M: dict[str, dict] = {
     "GLM-5.2-fp8": {
         "short": {"input": 0.85,  "cached_input": None,   "output": 3.10},
     },
+    # AI& (api.aiand.com), same GLM-5.3 - its /models page lists these prices.
+    # AI& replies under the model name zai-org/GLM-5.3, same as Featherless, so
+    # its calls carry a `price_as:aiand:GLM-5.3` tag (splunk_agent.chat_llm) and
+    # are billed and bucketed under this key instead.
+    "aiand:GLM-5.3": {
+        "short": {"input": 1.00,  "cached_input": 0.30,   "output": 4.00},
+    },
     # Featherless. Verified against ten billed calls on the Featherless usage
     # page: cost = (input - cached)*1.4 + cached*0.26 + output*4.4, per 1M.
     "zai-org/GLM-5.3": {
@@ -207,13 +214,16 @@ class UsageTracker(BaseCallbackHandler):
             (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
             or usage.get("cached_tokens", 0)
         )
-        model  = lo.get("model_name", "unknown")
+        tags   = kwargs.get("tags") or []
+        # A provider billed apart from the model name it reports (see chat_llm).
+        model  = next((tg[len("price_as:"):] for tg in tags
+                       if isinstance(tg, str) and tg.startswith("price_as:")),
+                      lo.get("model_name", "unknown"))
 
         if not (inp or out):
             return
 
         usd  = _call_cost(model, inp, cached, out)
-        tags = kwargs.get("tags") or []
         with self._lock:
             b = self._models.setdefault(model, _empty_bucket())
             b["input_tokens"]  += inp

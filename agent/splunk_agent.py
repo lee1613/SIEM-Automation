@@ -28,6 +28,7 @@ import threading
 import uuid
 from typing import Annotated, TypedDict
 
+import openai
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -103,6 +104,44 @@ def token_limit_kwargs(base_url: str | None, limit: int = 32768) -> dict:
     """
     return ({"extra_body": {"max_tokens": limit}} if base_url
             else {"max_completion_tokens": limit})
+
+
+def chat_llm(api_key: str, model: str, base_url: str | None, *,
+             temperature: float = 0, http_client=None,
+             price_as: str | None = None) -> ChatOpenAI:
+    """A worker ChatOpenAI with the project's timeout, retries and token field.
+    `price_as` names the PRICES_PER_1M row to bill it under, for a provider whose
+    replies carry another provider's model name (AI& answers as zai-org/GLM-5.3,
+    exactly like Featherless); it rides on the calls as a `price_as:` tag.
+    Explicit timeout + retries: the SDK default is 600s, so a stalled connection
+    sits silent for 10 minutes per attempt and looks like a dead-but-running
+    process. max_retries drives the SDK's own backoff - we add none of our own."""
+    return ChatOpenAI(
+        api_key=api_key, model=model, base_url=base_url, temperature=temperature,
+        timeout=LLM_TIMEOUT_S, max_retries=LLM_MAX_RETRIES,
+        # Optional: see llm_errors.resilient_http_client - upgrades a
+        # 200-with-error-body into a 5xx so the SDK's retry engine fires.
+        **({"http_client": http_client} if http_client else {}),
+        **({"tags": [f"price_as:{price_as}"]} if price_as else {}),
+        **token_limit_kwargs(base_url),
+    )
+
+
+def with_fallback(primary, backup):
+    """`primary`, re-sent to `backup` when the provider refuses the call.
+
+    Added for Featherless running out of credit mid-run: the same GLM-5.3 on a
+    second provider (AI&) takes the call instead of the run pausing. Per call,
+    not per thread, so a senior's conversation (in the graph's checkpointer)
+    survives the swap untouched. APIStatusError covers a 402/quota refusal and a
+    5xx still failing after the SDK's retries; a connection error is not a
+    provider refusing, so it is not caught.
+    # ponytail: once Featherless is dry every call pays one refused round trip
+    # first; make the swap sticky if that latency ever shows up.
+    """
+    if backup is None:
+        return primary
+    return primary.with_fallbacks([backup], exceptions_to_handle=(openai.APIStatusError,))
 
 
 def iter_budget(points: int) -> int:
@@ -528,7 +567,8 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
                  model: str = MODEL, base_url: str | None = None,
                  extra_instructions: str = "", extra_tools: list | None = None,
                  max_iter: int = MAX_ITER, temperature: float = 0,
-                 http_client=None, context_window: int | None = None):
+                 http_client=None, context_window: int | None = None,
+                 fallback: dict | None = None):
     """Build and compile the LangGraph agent. Returns (graph, checkpointer).
 
     Graph topology:
@@ -553,38 +593,34 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         temperature:        sampling temperature (default 0 — deterministic;
                             the v1 pool passes 0.3 for self-consistency
                             sampling of metrics tasks).
+        fallback:           {"api_key", "model", "base_url", "price_as"?} of a second provider
+                            that takes any call the first refuses (see with_fallback).
     """
     tools    = make_tools(splunk)
     if extra_tools:
         tools = tools + list(extra_tools)
     tool_map = {t.name: t for t in tools}
 
-    token_kwargs = token_limit_kwargs(base_url)
-    # Explicit timeout + retries. The openai SDK's default timeout is 600s, so a
-    # stalled connection sits silent for 10 minutes per attempt and looks exactly
-    # like a dead-but-running process. max_retries drives the SDK's own backoff
-    # (0.5s doubling, capped 8s, jitter, honours Retry-After) - we add none of
-    # our own here. Tune these if the endpoint is genuinely slow.
-    llm = ChatOpenAI(
-        api_key=api_key,
-        model=model,
-        base_url=base_url,
-        temperature=temperature,
-        timeout=LLM_TIMEOUT_S,
-        max_retries=LLM_MAX_RETRIES,
-        # Optional: see llm_errors.resilient_http_client - upgrades a
-        # 200-with-error-body into a 5xx so the SDK's retry engine fires.
-        **({"http_client": http_client} if http_client else {}),
-        **token_kwargs,
-    )
-    model_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+    llm = chat_llm(api_key, model, base_url, temperature=temperature, http_client=http_client)
+    fb  = (chat_llm(fallback["api_key"], fallback["model"], fallback["base_url"],
+                    temperature=temperature, http_client=http_client,
+                    price_as=fallback.get("price_as")) if fallback else None)
+
+    def _bind(ts):
+        """`ts` bound on the primary model, with the fallback bound the same way."""
+        if not ts:
+            return with_fallback(llm, fb)
+        bound = lambda m: m.bind_tools(ts, parallel_tool_calls=False)
+        return with_fallback(bound(llm), bound(fb) if fb else None)
+
+    model_with_tools = _bind(tools)
     # Used when the iteration cap is hit. Search tools are withdrawn so the
     # worker cannot start another hunt, but any TERMINAL tool the caller
     # supplied stays bound - otherwise a capped worker has no way to report
     # except prose, and prose is exactly what the structured contract exists to
     # avoid. v0 passes no extra_tools, so for it this is still a bare model.
     _terminal  = [t for t in (extra_tools or []) if getattr(t, "name", "") == "submit_finding"]
-    model_bare = llm.bind_tools(_terminal, parallel_tool_calls=False) if _terminal else llm
+    model_bare = _bind(_terminal)
 
     prompt_text = SYSTEM_PROMPT
     if extra_instructions:

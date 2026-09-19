@@ -28,7 +28,6 @@ import splunk_agent as agent_mod
 from exploration import EXPLORATION_MODEL, build_exploration_agent, render_report, run_exploration
 from finding import _classify_prose, empty_finding, parse_finding, submit_finding
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from llm_errors import describe_llm_error, provider_of, resilient_http_client
 from specialists import SPECIALISTS, parse_specialist_tag
 from splunk_agent import MAX_ITER, iter_budget
@@ -118,8 +117,12 @@ class SplunkWorkerPool:
     def __init__(self, splunk, *, senior_api_key: str, senior_model: str = "gpt-5.4",
                  senior_base_url: str | None = None, tracker=None,
                  exploration_api_key: str | None = None,
-                 exploration_base_url: str | None = None):
+                 exploration_base_url: str | None = None,
+                 senior_fallback: dict | None = None):
         self.splunk  = splunk
+        # {"api_key", "model", "base_url"} of the provider that takes a senior
+        # call the primary refuses (Featherless out of credit -> AI&).
+        self.senior_fallback = senior_fallback
         self.tracker = tracker
         self.senior_model = senior_model
         self.senior_base_url = senior_base_url
@@ -154,12 +157,14 @@ class SplunkWorkerPool:
         # and transport settings as a worker graph's own LLM (see create_agent)
         # — a reasoning model (GLM-5.3 is the default senior) can spend a
         # tighter budget entirely on hidden reasoning and return "".
-        self._clarify_llm = ChatOpenAI(
-            api_key=senior_api_key, model=senior_model, base_url=senior_base_url,
-            temperature=0, http_client=self._http,
-            timeout=agent_mod.LLM_TIMEOUT_S, max_retries=agent_mod.LLM_MAX_RETRIES,
-            # Same field trap as the worker graph - see token_limit_kwargs.
-            **agent_mod.token_limit_kwargs(senior_base_url))
+        # Same field trap as the worker graph - see token_limit_kwargs.
+        fb = senior_fallback
+        self._clarify_llm = agent_mod.with_fallback(
+            agent_mod.chat_llm(senior_api_key, senior_model, senior_base_url,
+                               http_client=self._http),
+            agent_mod.chat_llm(fb["api_key"], fb["model"], fb["base_url"],
+                               http_client=self._http,
+                               price_as=fb.get("price_as")) if fb else None)
 
     def _graph_for(self, role: str, cap: int):
         """The worker graph for this specialist role at this iteration cap."""
@@ -177,6 +182,7 @@ class SplunkWorkerPool:
                         extra_tools=[web_lookup, submit_finding],
                         max_iter=cap,
                         context_window=context_window(self.senior_model),
+                        fallback=self.senior_fallback,
                     )
         return self._graphs[key]
 

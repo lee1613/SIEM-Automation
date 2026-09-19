@@ -207,10 +207,24 @@ def test_clarify_llm_uses_the_full_worker_token_budget_and_transport_settings():
 
     The budget is now sent through token_limit_kwargs — the plain field never
     reached Featherless, which capped it at 4096 (see test_token_limit.py)."""
-    src = inspect.getsource(SplunkWorkerPool.__init__)
-    assert "token_limit_kwargs(senior_base_url)" in src
-    assert "timeout=agent_mod.LLM_TIMEOUT_S" in src
-    assert "max_retries=agent_mod.LLM_MAX_RETRIES" in src
+    import splunk_agent as agent_mod
+    pool = SplunkWorkerPool(None, senior_api_key="sk-fake", senior_model="m",
+                            senior_base_url="https://api.featherless.ai/v1")
+    llm = pool._clarify_llm
+    assert llm.request_timeout == agent_mod.LLM_TIMEOUT_S
+    assert llm.max_retries == agent_mod.LLM_MAX_RETRIES
+    assert llm.extra_body == {"max_tokens": 32768}
+
+
+def test_the_clarify_fallback_gets_the_same_token_cap():
+    from splunk_subagent import SplunkWorkerPool
+    pool = SplunkWorkerPool(None, senior_api_key="sk-fake", senior_model="zai-org/GLM-5.3",
+                            senior_base_url="https://api.featherless.ai/v1",
+                            senior_fallback={"api_key": "sk-fake", "model": "zai-org/glm-5.3",
+                                             "base_url": "https://api.aiand.com/v1"})
+    backup = pool._clarify_llm.fallbacks[0]
+    assert backup.model_name == "zai-org/glm-5.3"
+    assert backup.extra_body == {"max_tokens": 32768}
 
 
 def test_high_value_threshold_constant_is_gone():
