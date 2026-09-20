@@ -92,3 +92,73 @@ class OpenQuestion(BaseModel):
     text: str
     answer: str = ""
     round_asked: int = 0
+
+
+class PremiseLedger:
+    """Every premise on one question, for every author. One instance per question.
+
+    Ids are global to the question, not per senior: cross-author verification is
+    allowed (a sibling senior may settle a premise another filed), so an id has
+    to mean the same thing to everyone reading it.
+    """
+
+    def __init__(self):
+        self.premises: dict[str, Premise] = {}
+        self.questions: dict[str, OpenQuestion] = {}
+        self.candidates: dict[str, dict[int, str]] = {}   # author -> round -> value
+        self._n = 0
+        self._qn = 0
+
+    # -- filing ---------------------------------------------------------------
+    def add(self, drafts: list, author: str, round_n: int) -> list[Premise]:
+        """File new premises. The runner assigns ids and stamps the round."""
+        out = []
+        for d in drafts or []:
+            self._n += 1
+            p = Premise(id=f"p{self._n}", author=author, kind=d.kind, text=d.text,
+                        load_bearing=bool(d.load_bearing), round_first_seen=round_n,
+                        history=[{"round": round_n, "status": "UNVERIFIED",
+                                  "by": author, "quote": ""}])
+            self.premises[p.id] = p
+            out.append(p)
+        return out
+
+    def ask(self, texts: list, author: str, round_n: int) -> list[OpenQuestion]:
+        """File a senior's open questions, each addressable by id."""
+        out = []
+        for t in texts or []:
+            if not str(t).strip():
+                continue
+            self._qn += 1
+            q = OpenQuestion(id=f"q{self._qn}", author=author, text=str(t).strip(),
+                             round_asked=round_n)
+            self.questions[q.id] = q
+            out.append(q)
+        return out
+
+    def record_candidate(self, author: str, round_n: int, value: str) -> None:
+        """What this author's candidate was at this round.
+
+        Spec 2's trigger is "load-bearing premise unverified for N rounds AND the
+        candidate unchanged", which is unrecoverable from the reports afterwards.
+        Recorded here so the ledger dump can answer it.
+        """
+        self.candidates.setdefault(author, {})[round_n] = value or ""
+
+    # -- reading --------------------------------------------------------------
+    def unresolved_for(self, author: str) -> list[Premise]:
+        """This author's premises that are not VERIFIED, oldest first."""
+        return [p for p in self.premises.values()
+                if p.author == author and p.status != "VERIFIED"]
+
+    def blocking(self) -> list[Premise]:
+        """Load-bearing premises that are not VERIFIED - the ones that gate an ANSWER."""
+        return [p for p in self.premises.values()
+                if p.load_bearing and p.status != "VERIFIED"]
+
+    def refuted(self) -> list[Premise]:
+        return [p for p in self.premises.values() if p.status == "REFUTED"]
+
+    def open_questions_for(self, author: str) -> list[OpenQuestion]:
+        return [q for q in self.questions.values()
+                if q.author == author and not q.answer.strip()]
