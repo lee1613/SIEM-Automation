@@ -270,3 +270,34 @@ class PremiseLedger:
         lines.append("\nA line of reasoning that needs one of these to be true is "
                      "already known wrong.")
         return "\n".join(lines)
+
+    def to_records(self, qid: str) -> list[dict]:
+        """One JSON-serialisable record per premise, for `premise_ledger.json`.
+
+        The HISTORY is the point, not the end state. Spec 2's validation-agent
+        trigger is "load-bearing, UNVERIFIED for N rounds, candidate unchanged" -
+        a report shows only where a premise finished, so without this the single
+        reading that decides whether that trigger is aimed correctly is lost.
+        """
+        return [{
+            "qid": qid,
+            "senior": p.author,
+            "id": p.id,
+            "kind": p.kind,
+            "text": p.text,
+            "load_bearing": p.load_bearing,
+            "round_first_seen": p.round_first_seen,
+            "status": p.status,
+            "verified_by": p.verified_by,
+            "history": list(p.history),
+            "candidate_at_each_round": {str(r): v for r, v
+                                        in sorted(self.candidates
+                                                  .get(p.author, {}).items())},
+        } for p in self.premises.values()]
+
+
+def dump_ledgers(path: str, ledgers: dict) -> None:
+    """Write every question's ledger to one file. `ledgers` maps qid -> PremiseLedger."""
+    records = [r for qid, led in ledgers.items() for r in led.to_records(qid)]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(records, fh, indent=2, ensure_ascii=False)

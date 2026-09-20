@@ -215,3 +215,25 @@ def test_the_refuted_block_carries_the_evidence_that_killed_it():
               author="s2", corpus=CORPUS, round_n=2)
     block = led.render_refuted()
     assert "the flow is submission" in block and "ibc=5782875" in block
+
+
+import json
+
+
+def test_the_dump_carries_history_and_the_per_round_candidate():
+    led = PremiseLedger()
+    led.add([_draft("The 3333 flow is submission")], author="s1", round_n=1)
+    led.record_candidate("s1", 1, "112")
+    led.record_candidate("s1", 2, "112")
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
+              author="v1", corpus=CORPUS, round_n=2)
+
+    rec = led.to_records("216")[0]
+    assert rec["qid"] == "216" and rec["id"] == "p1" and rec["load_bearing"] is True
+    assert [h["status"] for h in rec["history"]] == ["UNVERIFIED", "REFUTED"]
+    assert rec["candidate_at_each_round"] == {"1": "112", "2": "112"}
+    json.dumps(rec)   # must be serialisable
+
+
+def test_the_dump_is_empty_for_an_empty_ledger():
+    assert PremiseLedger().to_records("216") == []
