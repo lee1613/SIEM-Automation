@@ -702,3 +702,38 @@ def test_render_wave_still_works_with_an_empty_ledger():
                               "novel_spl_count": 1, "rounds_left": 3}},
                       slots_remaining=1, turns_remaining=4, ledger=PremiseLedger())
     assert "no premises filed yet" in out.lower()
+
+
+# ── SH's own ledger writes land before the gates (v1.5) ───────────────────────
+# The runner assigns premise ids, so SH cannot cite a premise it is filing this
+# turn. With the writes after the gates, such an ANSWER was rejected for citing an
+# id that did not exist yet - a rejection SH has no way to act on, which is the
+# failure class this version exists to delete.
+
+SH_COVERAGE = PremiseDraft(text="SH traced a way the concept could show up",
+                           kind="coverage", load_bearing=True)
+
+
+def test_sh_can_file_a_premise_and_cite_it_in_the_same_answer_turn(tmp_path):
+    """The ANSWER is still blocked - but for the RIGHT reason."""
+    llm = _LLM([_turn(_spawn()),
+                _turn(_answer(new_premises=[SH_COVERAGE], answer_premise_ids=[])),
+                _turn(_answer())])
+    _run(llm, _Pool(), tmp_path)
+    rejection = "\n".join(
+        m.content for m in llm.seen[-1]
+        if isinstance(getattr(m, "content", ""), str) and "TURN REJECTED" in m.content)
+    # Not "p3 is not a premise on this question" - the id was linked by the runner.
+    assert "not a premise on this question" not in rejection
+    assert "UNVERIFIED" in rejection
+
+
+def test_a_premise_sh_filed_survives_the_turn_that_was_rejected(tmp_path):
+    """Writing from a rejected turn is safe and deliberate: add() dedupes, so the
+    re-issued turn refiles nothing, and SH does not lose the tracing it did."""
+    llm = _LLM([_turn(_spawn()),
+                _turn(_answer(new_premises=[SH_COVERAGE], answer_premise_ids=[])),
+                _turn(_answer())])
+    out = _run(llm, _Pool(), tmp_path)
+    sh_filed = [p for p in out["ledger"].premises.values() if p.author == "sh"]
+    assert [p.text for p in sh_filed] == [SH_COVERAGE.text]

@@ -509,6 +509,37 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                              "basis": e.basis, "novel_spl_count": novel})
                 state.record_r2(src, failed=(r2 == "FAIL"))
 
+        # SH's ledger writes land BEFORE the gates, so the gates judge the ledger this
+        # turn is actually asking for. The runner assigns premise ids, so SH cannot
+        # know the id of a premise it is filing now - with the writes after the gates,
+        # an ANSWER that filed its Coverage premise and cited it was rejected for
+        # citing an id that did not exist yet, and settling a premise and answering
+        # from it in one turn was impossible too. That is the failure class this whole
+        # version exists to remove: a gate refusing a turn for a reason SH cannot act on.
+        #
+        # Writing from a turn that is then rejected is safe. `add` dedupes on
+        # (author, text), so a re-issued turn refiles nothing; `apply` runs its own
+        # quote check and keeps the old status when it fails; and a premise only ever
+        # enters UNVERIFIED, which blocks rather than permits. SH's quotes come from
+        # reports, not tool output - it has no Splunk access and never will.
+        sh_corpus = ([r.get("report", "") for r in all_reports]
+                     + sum(clarify_text.values(), []))
+        for e in turn.entries:
+            filed = ledger.add(e.new_premises, author="sh", round_n=state.turns_used)
+            # SH cannot cite what it has just filed - the runner owns the ids - so the
+            # runner links them. Without this an ANSWER that files its own Coverage
+            # premise is rejected for "citing an id that is not a premise", which SH
+            # cannot act on; with it, the rejection is the true one: that premise is
+            # UNVERIFIED, go and settle it. Same words, opposite usefulness.
+            if e.route == "ANSWER":
+                e.answer_premise_ids = list(e.answer_premise_ids) + [
+                    p.id for p in filed if p.id not in e.answer_premise_ids]
+            ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
+                         round_n=state.turns_used)
+            for a in e.open_question_answers:
+                if a.answer.strip():
+                    ledger.answer(a.id, a.answer)
+
         problems = grade_violations(
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
@@ -534,18 +565,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             continue
         grades.extend(rows)
         unread = {}
-
-        # SH's own ledger writes. Its quotes come from reports, not tool output - it
-        # has no Splunk access and never will.
-        sh_corpus = ([r.get("report", "") for r in all_reports]
-                     + sum(clarify_text.values(), []))
-        for e in turn.entries:
-            ledger.add(e.new_premises, author="sh", round_n=state.turns_used)
-            ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
-                         round_n=state.turns_used)
-            for a in e.open_question_answers:
-                if a.answer.strip():
-                    ledger.answer(a.id, a.answer)
 
         unread_clarify = False
         pending, clarified = {}, []
