@@ -548,6 +548,16 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                                  round_n=state.turns_used)
             ledger_notes.extend(notes)
 
+        # v1.4.3: an ANSWER's cited premises are validated BEFORE the gates read the
+        # ledger, so a verdict reached on this turn is what the gates see.
+        answer_cited = {i for e in turn.entries if e.route == "ANSWER"
+                        for i in e.answer_premise_ids}
+        if answer_cited:
+            ledger_notes.extend(_run_validators(
+                pool, ledger, None, qid=qid, log=log, spent=validators,
+                round_n=state.turns_used, max_parallel=max_parallel,
+                cited=answer_cited))
+
         problems = grade_violations(
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
@@ -810,8 +820,8 @@ def _timed(run) -> dict:
     return {**result, "duration_s": round(time.perf_counter() - t0, 3)}
 
 
-def _run_validators(pool, ledger, pre_status: dict, *, qid: str, log,
-                    spent: list, round_n: int, max_parallel: int) -> list[str]:
+def _run_validators(pool, ledger, pre_status, *, qid: str, log, spent: list,
+                    round_n: int, max_parallel: int, cited=()) -> list[str]:
     """Spec 2 §3.1, settle-time trigger: validate every load-bearing premise at the
     moment it stops being UNVERIFIED, before that status is allowed to stick.
 
@@ -828,9 +838,19 @@ def _run_validators(pool, ledger, pre_status: dict, *, qid: str, log,
     Returns one line per verdict for SH's next turn, or [] when nothing qualified.
     """
     done = {v["premise_id"] for v in spent}
-    due = [p for pid, p in ledger.premises.items()
-           if p.load_bearing and p.status in ("VERIFIED", "REFUTED")
-           and pre_status.get(pid) != p.status and pid not in done]
+    if pre_status is None:
+        # ANSWER turn: validate what the answer CITES, whatever wave settled it.
+        # Validators normally run after a wave, and no wave follows an ANSWER - so in
+        # Q216 v1.4.3 r1 the two premises SH settled on its answering turn (one of them
+        # filed and verified in that same turn) were never seen by a validator, which
+        # is how a chain a validator had already refuted reached the scoreboard.
+        due = [p for pid, p in ledger.premises.items()
+               if p.load_bearing and p.status == "VERIFIED" and pid in cited
+               and pid not in done]
+    else:
+        due = [p for pid, p in ledger.premises.items()
+               if p.load_bearing and p.status in ("VERIFIED", "REFUTED")
+               and pre_status.get(pid) != p.status and pid not in done]
     room = MAX_VALIDATORS_PER_QUESTION - len(spent)
     if not due or room <= 0:
         if due:

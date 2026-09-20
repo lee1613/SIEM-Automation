@@ -23,7 +23,7 @@ from collections import Counter
 from typing import Literal
 
 from premise import CIRCULAR as _CIRCULAR
-from premise import PremiseDraft, PremiseUpdate, quote_supported
+from premise import PremiseDraft, PremiseUpdate, is_validator, quote_supported
 from pydantic import BaseModel, Field, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
 
@@ -364,6 +364,24 @@ def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:
                        + ". A refuted premise is not unsettled, it is false: this "
                        "value cannot be answered from. RETIRE and work a direction "
                        "that does not need it.")
+        # A validator's refutation is not escaped by no longer citing the premise.
+        # Q216 v1.4.3 r1: v1 refuted SH's coverage premise p1, SH filed p6 - a fresh
+        # coverage premise, self-verified on the ANSWER turn, where no wave follows and
+        # so no validator ever saw it - cited p6 instead of p1, and answered. Each move
+        # was legal; the combination put a known-broken chain on the scoreboard.
+        overruled = [p for p in ledger.premises.values()
+                     if p.load_bearing and p.status == "REFUTED" and is_validator(p.verified_by)]
+        for p in overruled:
+            replaced = any(q.kind == p.kind and q.status == "VERIFIED"
+                           and is_validator(q.verified_by)
+                           for q in ledger.premises.values())
+            if not replaced:
+                out.append(
+                    f'ANSWER is blocked: an independent validator REFUTED {p.id} '
+                    f'"{p.text[:80]}", which was filed load-bearing. Not citing it does '
+                    "not answer it. Either work the gap the validator found, or file a "
+                    f"replacement {p.kind} premise and let it be validated - one you "
+                    "verify yourself does not clear this.")
         open_ = [p for p in cited if p.load_bearing and p.status == "UNVERIFIED"]
         fix = unsure_remedy(state, e.source_senior) if open_ else ""
         if fix:

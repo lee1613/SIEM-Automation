@@ -46,6 +46,18 @@ CIRCULAR = re.compile(r"\b(established|confirmed|settled|told|instructed)\b"
                       re.IGNORECASE)
 
 
+def is_validator(author: str) -> bool:
+    """Was this verdict reached by an independent validator (v1.4.3)?
+
+    The distinction the ANSWER gate turns on. An author refuting its own premise is
+    healthy investigation - Q216 r1's s1 filed the iexeplorer.exe lead and killed it
+    itself the next round. A VALIDATOR's refutation means the party that wanted the
+    answer was overruled by one that wanted nothing, and the chain is broken until
+    something independent says otherwise.
+    """
+    return bool(re.fullmatch(r"v\d+", author or ""))
+
+
 def _match_form(text: str) -> str:
     """Alphanumeric runs only, lowercased, single-spaced.
 

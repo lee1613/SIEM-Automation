@@ -812,3 +812,21 @@ def test_a_premise_is_validated_once_not_every_wave(tmp_path):
                 _turn(_answer())])
     _run(llm, pool, tmp_path)
     assert len(pool.validator_messages) == 1
+
+
+def test_a_premise_sh_settles_on_the_answer_turn_is_still_validated(tmp_path):
+    """Q216 v1.4.3 r1's second move. Validators run after a wave and no wave follows an
+    ANSWER, so the premises SH filed and verified on its answering turn - one of them in
+    that single turn - were never seen by a validator. The answer's cited premises are
+    now validated before the gates read the ledger."""
+    pool = _Validating()
+    late = _answer(new_premises=[PremiseDraft(
+        text="coverage: the duration is the whole of it", kind="coverage",
+        load_bearing=True, quote="The duration is 1367.875.",
+        evidence="s1's report states it")])
+    llm = _LLM([_turn(_spawn()), _turn(late), _turn(_answer()), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+
+    briefed = "\n".join(pool.validator_messages)
+    assert "coverage: the duration is the whole of it" in briefed, (
+        "a premise settled on the ANSWER turn escaped validation")
