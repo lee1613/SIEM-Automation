@@ -77,7 +77,7 @@ LLM_MAX_RETRIES  = 3
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
 
-def token_limit_kwargs(base_url: str | None, limit: int = 32768) -> dict:
+def token_limit_kwargs(base_url: str | None, limit: int = 65536) -> dict:
     """ChatOpenAI kwargs that actually reach a non-OpenAI endpoint as a token cap.
 
     langchain-openai renames `max_tokens` to `max_completion_tokens` in the
@@ -95,9 +95,12 @@ def token_limit_kwargs(base_url: str | None, limit: int = 32768) -> dict:
     model spends the budget on hidden chain-of-thought and is cut off before it
     writes its `submit_finding` call, which reaches SH as a blank report.
 
-    The default is GLM-5.3's own output ceiling, 32768 — the model cannot be
-    given more, and this is a limit on ONE reply (reasoning + report), not on the
-    256K context it reads. Its successful calls run 47-2 667 output tokens, so
+    The default was 32768, GLM-5.3's ceiling as probed on Featherless. v1.4.2
+    raises it to 65536: AI& accepts 65536 and 131072 without error (probed
+    2026-09-20), and 32768 was being spent in full on hidden reasoning — two
+    smoke3_r2 rounds came back finish_reason=length with 32768 output tokens and
+    no tool call at all. This is a limit on ONE reply (reasoning + report), not on
+    the 256K context it reads. Its successful calls run 47-2 667 output tokens, so
     this is headroom rather than a working budget. Runaway generation is bounded
     by OUTPUT_TOKEN_CAP across a worker's whole round, not here.
     """

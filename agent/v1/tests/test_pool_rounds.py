@@ -213,7 +213,7 @@ def test_clarify_llm_uses_the_full_worker_token_budget_and_transport_settings():
     llm = pool._clarify_llm
     assert llm.request_timeout == agent_mod.LLM_TIMEOUT_S
     assert llm.max_retries == agent_mod.LLM_MAX_RETRIES
-    assert llm.extra_body == {"max_tokens": 32768}
+    assert llm.extra_body == {"max_tokens": 65536}
 
 
 def test_high_value_threshold_constant_is_gone():
@@ -229,7 +229,7 @@ def test_the_clarify_model_sends_the_token_cap_the_provider_reads():
     pool = SplunkWorkerPool(None, senior_api_key="sk-fake",
                             senior_model="zai-org/GLM-5.3",
                             senior_base_url="https://api.featherless.ai/v1")
-    assert pool._clarify_llm.extra_body == {"max_tokens": 32768}
+    assert pool._clarify_llm.extra_body == {"max_tokens": 65536}
     assert pool._clarify_llm.max_tokens is None
 
 

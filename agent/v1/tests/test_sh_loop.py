@@ -128,7 +128,7 @@ def test_iterations_are_reported_against_the_tier_ceiling(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     assert out["senior_iterations"] == 6
-    assert out["ceiling"] == 360            # 1000pt tier: 3 seniors x 10 rounds x 12
+    assert out["ceiling"] == 240            # 1000pt tier: 3 seniors x 8 rounds x 10
 
 
 def test_an_ungrounded_answer_is_pushed_back_once_then_gives_no_answer(tmp_path):

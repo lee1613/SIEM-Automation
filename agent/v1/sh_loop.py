@@ -84,7 +84,7 @@ If you cannot state all three, do not spawn in parallel: one senior at a time is
 
 ALTERNATIVE SENIOR — when you are not confident, get a second opinion; do not push the same senior again.
 RETIRE and SPAWN in the SAME turn (a hand-over, not a parallel run) as soon as any of these is true:
-  * the senior's own report shows its current constraints cannot hold the answer — the feed carries no such field, no content, no coverage of the window or entity. That is proved, not suspected: do not spend another round confirming a dead scope;
+  * the senior's own report shows its current constraints cannot hold the answer — the feed carries no such field, no content, no coverage of the window or entity. A round spent establishing that is a round well spent; what must not follow it is another round inside the same dead scope. Hand over as soon as the evidence is in;
   * its candidate is still UNVERIFIED after a round aimed at verifying it;
   * it keeps returning to the same narrowed lead without settling it.
 Brief the replacement on the question as asked, then state the deviation you want. The new direction must not re-walk the retired senior's path: name fields, feeds or entities it did not touch, and say where evidence of the ACT the question names would sit if the first reading was wrong. The deviation can be small — the same feed read through a different field is a different direction; the same field re-read is not. Say what to avoid ("do not re-test <retired scope>") as well as what to try. Do not hand over the retired senior's candidate to confirm: it must reach its own answer, and two seniors arriving at the same value independently is verification, while one senior repeating itself is not.
