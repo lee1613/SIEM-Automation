@@ -3,11 +3,9 @@ from senior_report import (
     PRIOR_ROUNDS_MAX_LINES,
     REPORT_WORD_CAP,
     novel_spl,
-    open_questions,
     report_violations,
     stamp_header,
     truncate_words,
-    unverified_premises,
 )
 
 GOOD = """# Senior #1 - Q216 - Round 1
@@ -256,59 +254,6 @@ result
     assert any("Prior rounds" in v for v in violations)
 
 
-def test_a_report_without_an_assumptions_section_is_a_violation():
-    assert report_violations(GOOD.replace("## Assumptions", "## Notes")) != []
-
-
-def test_open_questions_are_the_bullets_of_that_section():
-    assert open_questions(GOOD) == [
-        "Is the window you gave me the incident window, or the whole index?"]
-
-
-def test_none_is_not_an_open_question():
-    for blank in ("- none", "- None.", "- n/a", "- (none)", "none"):
-        md = GOOD.split("## Open questions for SH")[0] + "## Open questions for SH\n" + blank
-        assert open_questions(md) == [], blank
-
-
-def test_open_questions_stop_at_the_next_heading_and_at_the_cap_line():
-    md = (GOOD + "- Should I widen to the whole feed?\n\n"
-          "_Iteration cap reached: 8/8 iterations used this round — cut off, not finished._\n")
-    assert open_questions(md) == [
-        "Is the window you gave me the incident window, or the whole index?",
-        "Should I widen to the whole feed?"]
-    later = GOOD + "\n## Something else\n- not a question for SH\n"
-    assert len(open_questions(later)) == 1
-
-
-def test_no_open_questions_section_means_none():
-    assert open_questions(GOOD.split("## Open questions for SH")[0]) == []
-
-
-def test_unverified_premises_counts_only_the_assumptions_section():
-    assert unverified_premises(GOOD) == 1
-    md = GOOD.replace("- The window SH gave me is the incident window - UNVERIFIED",
-                      "- a - VERIFIED: q -> 3 events\n- b - UNVERIFIED\n- c - UNVERIFIED")
-    assert unverified_premises(md) == 2
-    assert unverified_premises(GOOD.split("## Assumptions")[0]) == 0
-
-
-def test_a_selection_line_in_assumptions_is_detected():
-    from senior_report import has_selection_premise
-    assert not has_selection_premise(GOOD)
-    md = GOOD.replace("## Assumptions\n", "## Assumptions\n- Selection: the only host with the pattern - UNVERIFIED\n")
-    assert has_selection_premise(md)
-    assert unverified_premises(md) == 2
-
-
-def test_a_coverage_line_in_assumptions_is_detected():
-    from senior_report import has_coverage_premise
-    assert not has_coverage_premise(GOOD)
-    md = GOOD.replace("## Assumptions\n",
-                      "## Assumptions\n- Coverage: two kinds of evidence, one searched - UNVERIFIED\n")
-    assert has_coverage_premise(md)
-
-
 def test_an_over_cap_report_trims_its_narrative_and_keeps_what_sh_needs():
     long_ran = GOOD.replace("### What I ran\n",
                             "### What I ran\n" + "- query -> rows\n" * (REPORT_WORD_CAP // 2))
@@ -319,26 +264,3 @@ def test_an_over_cap_report_trims_its_narrative_and_keeps_what_sh_needs():
     # the tail sections survive whole: Assumptions, Ruled out, Open questions
     tail = GOOD[GOOD.index("## Assumptions"):]
     assert out.endswith(tail) or tail.strip() in out
-    assert open_questions(out) == open_questions(GOOD)
-
-
-def test_a_none_bullet_with_a_reason_is_not_a_question():
-    md = GOOD.split("## Open questions for SH")[0] + (
-        "## Open questions for SH\n- None — the definition is anchored.\n")
-    assert open_questions(md) == []
-    md2 = md.replace("- None — the definition is anchored.", "- Does the window include setup?")
-    assert open_questions(md2) == ["Does the window include setup?"]
-
-
-def test_a_doubt_survives_a_report_that_simply_stops_mentioning_it():
-    # v1.4.2 Q216: s1 r1 flagged the byte profile UNVERIFIED; after a restate-only
-    # round, r3's Assumptions no longer mentioned it and the gate saw a clean report.
-    from senior_report import carry_doubts
-    r1 = ("## Assumptions\n- Definition premise: the byte profile is download-like, "
-          "so the record does not show the act - UNVERIFIED\n")
-    r3 = "## Assumptions\n- Selection: only endpoint with pool-port contact - VERIFIED\n"
-    doubts = carry_doubts([], r1)
-    assert len(doubts) == 1
-    assert carry_doubts(doubts, r3) == doubts            # dropped, not settled
-    settled = "## Assumptions\n- Definition premise: byte profile explained - VERIFIED\n"
-    assert carry_doubts(doubts, settled) == []           # named and settled

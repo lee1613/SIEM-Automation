@@ -26,9 +26,7 @@ REQUIRED_SECTIONS = (
     "## This round",
     "### What I ran",
     "### What it means",
-    "## Assumptions",
     "## Ruled out",
-    "## Open questions for SH",
 )
 
 
@@ -47,9 +45,9 @@ def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
     return len(new), seen | fresh
 
 
-# Trimmed first when a report is over the cap: narrative SH can do without. The
-# sections SH grades and must answer (Assumptions, Ruled out, Open questions) sit
-# at the END of the template, so a plain tail cut lost exactly those (Q216 r5-r7).
+# Trimmed first when a report is over the cap: narrative SH can do without. Premises
+# and open questions left the report in v1.5 (they are schema fields on the ledger
+# now), so a tail cut can no longer eat the sections SH grades on.
 _TRIM_ORDER = ("### What I ran", "### What it means", "## Prior rounds")
 _TRIM_MARK = "_[trimmed by the runner to fit the word cap]_"
 
@@ -93,99 +91,6 @@ def report_violations(md: str) -> list[str]:
             out.append(f"Prior rounds has {len(lines)} lines "
                        f"(cap {PRIOR_ROUNDS_MAX_LINES})")
     return out
-
-
-_NOT_A_QUESTION = {"", "none", "n/a", "na", "(none)", "nothing", "no"}
-
-
-def open_questions(md: str) -> list[str]:
-    """The senior's "## Open questions for SH" bullets. SH must answer each one
-    (conversation.open_question_violations), so a bullet saying "none" is not a
-    question. The section ends at the next heading or the runner's cap line."""
-    m = re.search(r"^## Open questions for SH[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
-                  md or "", re.MULTILINE | re.DOTALL)
-    if not m:
-        return []
-    out = []
-    for ln in m.group(1).splitlines():
-        b = re.match(r"^\s*(?:[-*]|\d+[.)])\s+(.*)$", ln)
-        # "None — the definition is anchored" is still no question (Q216 r9: the
-        # gate rejected SH's ANSWER twice over it), so judge the first word alone.
-        lead = re.split(r"\s*[—–:;,(-]\s*|\s{2,}", b.group(1).strip(), maxsplit=1)[0] if b else ""
-        if b and lead.strip().strip(".").lower() not in _NOT_A_QUESTION:
-            out.append(b.group(1).strip())
-    return out
-
-
-# Words a senior uses when it knows a premise is not settled. Q216 r11: "not
-# verifiable in-feed" and "the 2,365 unreturned rows" sat in a report SH answered
-# from with an all-VERIFIED audit.
-_DOUBT = re.compile(r"UNVERIFIED|not\s+verifiable|unverifiable|cannot\s+be\s+verified|"
-                    r"could\s+not\s+be\s+verified|not\s+verified|unreturned|not\s+returned|"
-                    r"rows?\s+not\s+seen|partial", re.IGNORECASE)
-
-
-def open_doubts(md: str) -> list[str]:
-    """The senior's own "## Assumptions" lines that still flag something unsettled —
-    an unverified premise or a result it did not read in full."""
-    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_|\Z)",
-                  md or "", re.MULTILINE | re.DOTALL)
-    if not m:
-        return []
-    return [ln.strip() for ln in m.group(1).splitlines() if _DOUBT.search(ln)]
-
-
-def _label(line: str) -> str:
-    """The premise a doubt line is about: its text up to the first colon, else its
-    first four words. Used to tell "this doubt was settled" from "it was dropped"."""
-    head = (line.split(":", 1)[0] if ":" in line else " ".join(line.split()[:4]))
-    return re.sub(r"[^a-z0-9 ]", "", head.lower()).strip(" -")
-
-
-def carry_doubts(prev: list[str], report: str) -> list[str]:
-    """A senior's open doubts after this report: the ones it carried in, minus the
-    ones this report marks VERIFIED, plus whatever new it flags.
-
-    A doubt leaves the list only when the senior says it is settled. Dropping it
-    silently is not settling it — v1.4.2 Q216: s1 r1 wrote "the 3333 record's byte
-    profile (5.7MB in / 177B out) is download-like, so the record does not positively
-    show the act - UNVERIFIED", SH then commanded a restate-only round, and r3 came
-    back with that line simply gone. The gate reads the latest report, so the doubt
-    that should have blocked the answer had vanished from view.
-    """
-    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_|\Z)",
-                  report or "", re.MULTILINE | re.DOTALL)
-    settled = {_label(ln) for ln in (m.group(1).splitlines() if m else [])
-               if "VERIFIED" in ln and not _DOUBT.search(ln)}
-    kept = [d for d in prev if _label(d) not in settled]
-    return kept + [d for d in open_doubts(report) if d not in kept]
-
-
-def unverified_premises(md: str) -> int:
-    """How many lines of the "## Assumptions" section are marked UNVERIFIED —
-    surfaced to SH as a warning, never a gate (R4 is soft by design)."""
-    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
-                  md or "", re.MULTILINE | re.DOTALL)
-    return sum(1 for ln in (m.group(1).splitlines() if m else []) if "UNVERIFIED" in ln)
-
-
-def _has_assumption(md: str, label: str) -> bool:
-    """Whether "## Assumptions" has a bullet opening with `label`."""
-    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_Iteration cap|\Z)",
-                  md or "", re.MULTILINE | re.DOTALL)
-    return bool(m and re.search(rf"^\s*[-*]\s*\**{label}", m.group(1),
-                                re.MULTILINE | re.IGNORECASE))
-
-
-def has_selection_premise(md: str) -> bool:
-    """Whether the report says why this entity and not another (a 'Selection' line)."""
-    return _has_assumption(md, "Selection")
-
-
-def has_coverage_premise(md: str) -> bool:
-    """Whether the report lists the ways the question's concept could show up in the
-    data and what searched each (a 'Coverage' line) — the set Selection chooses from."""
-    return _has_assumption(md, "Coverage")
 
 
 def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
