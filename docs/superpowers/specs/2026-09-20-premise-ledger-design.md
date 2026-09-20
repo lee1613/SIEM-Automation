@@ -275,11 +275,32 @@ settled with evidence or still blocking the answer.
 Spec 2 (`2026-09-20-validation-agent-design.md`) is written and depends on every
 field below. Recorded here so implementation does not break it.
 
-**This run is also spec 2's calibration data.** Spec 2 §8.1 lists five parameters
-that are deliberately unset until the Q216 smoke run measures them — premises per
-report, the share marked `load_bearing`, and how often the validator trigger *would*
-have fired. Those are reads of this spec's ledger and cost nothing extra, so the
-run must log the ledger in full, not just its effect on the gates.
+**This run is also spec 2's calibration data.** Spec 2 §7 lists five parameters that
+are deliberately unset until the Q216 smoke run measures them — premises per report,
+the share marked `load_bearing`, and how often the validator trigger *would* have
+fired. Those are reads of this spec's ledger and cost nothing extra.
+
+**Requirement on this spec, not spec 2:** the run must emit
+`log/temp/<run>/premise_ledger.json` — every premise with its **full status
+history**, not just its end state. A report shows only where a premise finished;
+spec 2's trigger is about how long one sat UNVERIFIED while the candidate held
+still, which is unrecoverable from the reports alone. Spec 2 §8 says to re-run
+rather than estimate if this file is absent, so emitting it is cheaper than
+skipping it.
+
+Suggested shape, one entry per premise:
+
+```json
+{"qid": "216", "senior": "s1", "id": "p1", "kind": "other",
+ "text": "The 3333 record's byte profile is download-like...",
+ "load_bearing": true, "round_first_seen": 1,
+ "history": [{"round": 1, "status": "UNVERIFIED", "by": "s1", "quote": ""},
+             {"round": 3, "status": "VERIFIED", "by": "s1", "quote": "ibc=5782875"}],
+ "candidate_at_each_round": ["112", "112", "112"]}
+```
+
+`candidate_at_each_round` is what makes spec 2's "candidate unchanged" condition
+measurable after the fact.
 
 - `load_bearing` + `round_first_seen` + `status` are the validation agent's trigger:
   a load-bearing premise still UNVERIFIED after ≥2 rounds with the senior's candidate
@@ -297,7 +318,7 @@ run must log the ledger in full, not just its effect on the gates.
 
 | File | Change |
 |---|---|
-| `agent/v1/premise.py` | **new** — models, ledger, transitions, quote check, rendering |
+| `agent/v1/premise.py` | **new** — models, ledger, transitions, quote check, rendering, `premise_ledger.json` dump (§7) |
 | `agent/v1/finding.py` | `submit_finding` gains `new_premises`, `premise_updates`, `open_questions` |
 | `agent/v1/senior_report.py` | regex layer deleted; `open_questions` reads the schema |
 | `agent/v1/conversation.py` | `AuditLine` folded into `Premise`; gates rewired |

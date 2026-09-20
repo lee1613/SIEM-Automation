@@ -246,6 +246,11 @@ retired senior's, or that its reasoning avoids a refuted premise. Both are
 
 ## 7. Open parameters — set these from data, not from judgement
 
+**Every value in this table is provisional and none of it is a design decision.**
+The numbers came from the user's initial sketch, not from evidence. Before
+implementing §3, read `log/temp/<run>/premise_ledger.json` from spec 1's Q216 run
+and set them per §8 — which also says what to do if that file is missing.
+
 | | Parameter | Provisional | What decides it |
 |---|---|---|---|
 | 7.1 | `MAX_VALIDATORS_PER_SENIOR` | 3 | How many load-bearing UNVERIFIED premises a real question actually produces. If the median is 1, 3 is dead weight; if it is 6, 3 validates an arbitrary third |
@@ -258,9 +263,29 @@ retired senior's, or that its reasoning avoids a refuted premise. Both are
 
 ## 8. How the first run sets §7
 
+> **Do not start implementing §3 until §8.1 has been read off a real spec 1 run.**
+> Every parameter in §7 is a guess until then, and one of the readings can
+> invalidate §3.1 outright.
+
 The Q216 smoke run that validates spec 1 produces every number above, **before any
 of this spec is implemented**. It costs nothing extra: the ledger is already being
 measured, and these are reads of the same data.
+
+### Where to read it
+
+Spec 1's Q216 run is a smoke run, so under the project's logging rules it lands in
+`log/temp/<run name>/` (not `log/v1/`, and not cost-tracked). The artifacts:
+
+| Artifact | Holds |
+|---|---|
+| `log/temp/<run>/premise_ledger.json` | the full ledger per question, every premise with its status history. **Spec 1 must emit this** — see spec 1 §7 |
+| `log/temp/<run>/<qid>/reports/s*_round_*.md` | the per-round reports |
+| `log/temp/<run>/run_summary.json` | delegations, grades, per-worker state |
+| `log/temp/<run>/<qid>/conversation.md` | SH's turns, routes and rejections |
+
+If `premise_ledger.json` is absent, the run did not log what this spec needs and the
+numbers below cannot be taken from the reports alone — the ledger's status *history*
+is the point, and a report shows only its end state. Re-run rather than estimate.
 
 **8.1 — from the spec 1 Q216 run, no code from this spec required:**
 
