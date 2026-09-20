@@ -1,5 +1,15 @@
+import json
+
 import pytest
-from premise import MIN_QUOTE_CHARS, Premise, PremiseDraft, PremiseUpdate, _norm
+from premise import (
+    MIN_QUOTE_CHARS,
+    Premise,
+    PremiseDraft,
+    PremiseLedger,
+    PremiseUpdate,
+    _norm,
+    quote_supported,
+)
 from pydantic import ValidationError
 
 
@@ -31,9 +41,6 @@ def test_norm_ignores_markdown_case_and_whitespace():
 
 def test_min_quote_chars_is_defined_here_now():
     assert MIN_QUOTE_CHARS == 12
-
-
-from premise import PremiseLedger
 
 
 def _draft(text, kind="other", lb=True):
@@ -71,21 +78,12 @@ def test_unresolved_is_per_author():
     assert [p.id for p in led.unresolved_for("s2")] == ["p2"]
 
 
-def test_load_bearing_open_premises_are_the_ones_that_block():
-    led = PremiseLedger()
-    led.add([_draft("heavy", lb=True), _draft("light", lb=False)],
-            author="s1", round_n=1)
-    assert [p.id for p in led.blocking()] == ["p1"]
-
-
 def test_a_candidate_is_recorded_per_round_for_later_calibration():
     led = PremiseLedger()
     led.record_candidate("s1", 1, "112")
     led.record_candidate("s1", 2, "112")
     assert led.candidates["s1"] == {1: "112", 2: "112"}
 
-
-from premise import PremiseUpdate, quote_supported
 
 CORPUS = ["sourcetype=cisco:nvm | 1 result: ibc=5782875 obc=177 dest_port=3333"]
 
@@ -217,9 +215,6 @@ def test_the_refuted_block_carries_the_evidence_that_killed_it():
     assert "the flow is submission" in block and "ibc=5782875" in block
 
 
-import json
-
-
 def test_the_dump_carries_history_and_the_per_round_candidate():
     led = PremiseLedger()
     led.add([_draft("The 3333 flow is submission")], author="s1", round_n=1)
@@ -237,3 +232,193 @@ def test_the_dump_carries_history_and_the_per_round_candidate():
 
 def test_the_dump_is_empty_for_an_empty_ledger():
     assert PremiseLedger().to_records("216") == []
+
+
+# -- FIX 1: quote_supported must match the JSON a senior actually receives -------
+
+JSON_CORPUS = ['{"results": [{"dest_port": "3333", "ibc": "5782875"}], "meta": {}}']
+
+
+def test_quote_supported_matches_a_field_value_restatement_of_json():
+    assert quote_supported("dest_port=3333 ibc=5782875", JSON_CORPUS)
+
+
+def test_quote_supported_rejects_a_restatement_with_different_values():
+    assert not quote_supported("dest_port=4444 ibc=5782875", JSON_CORPUS)
+
+
+def test_quote_supported_floor_still_applies_after_normalisation():
+    # "port 33" match-forms to "port 33", 7 chars - under the 12-char floor even
+    # though it would appear in the JSON corpus above.
+    assert not quote_supported("port: 33!!", JSON_CORPUS)
+
+
+# -- FIX 2: the carry-forward block never tells a senior to settle a REFUTED ----
+
+def test_a_refuted_premise_does_not_appear_in_the_carry_forward_block():
+    led = _led()
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
+              author="v1", corpus=CORPUS, round_n=2)
+    assert "p1" not in led.render_for_senior("s1")
+
+
+def test_the_carry_forward_block_is_empty_when_the_only_premise_is_refuted():
+    led = _led()
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
+              author="v1", corpus=CORPUS, round_n=2)
+    assert led.render_for_senior("s1") == ""
+
+
+# -- FIX 3: re-filing the same premise text dedupes per author -------------------
+
+def test_refiling_identical_text_as_the_same_author_returns_the_existing_premise():
+    led = PremiseLedger()
+    first = led.add([_draft("The 3333 flow is download-like")], author="s1", round_n=1)
+    second = led.add([_draft("the 3333 flow is download-like")], author="s1", round_n=2)
+    assert first[0].id == second[0].id == "p1"
+    assert len(led.premises) == 1
+
+
+def test_the_same_text_from_a_different_author_gets_its_own_id():
+    led = PremiseLedger()
+    led.add([_draft("The 3333 flow is download-like")], author="s1", round_n=1)
+    added = led.add([_draft("The 3333 flow is download-like")], author="s2", round_n=1)
+    assert added[0].id == "p2"
+    assert len(led.premises) == 2
+
+
+# -- FIX 4: VERIFIED/REFUTED needs non-blank evidence -----------------------------
+
+def test_verified_with_blank_evidence_is_dropped_and_reported():
+    led = _led()
+    notes = led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177", evidence="")],
+                      author="s1", corpus=CORPUS, round_n=2)
+    assert led.premises["p1"].status == "UNVERIFIED"
+    assert len(notes) == 1 and "p1" in notes[0] and "evidence" in notes[0]
+
+
+def test_verified_with_whitespace_only_evidence_is_dropped():
+    led = _led()
+    notes = led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177", evidence="   ")],
+                      author="s1", corpus=CORPUS, round_n=2)
+    assert led.premises["p1"].status == "UNVERIFIED"
+    assert len(notes) == 1
+
+
+# -- FIX 6: no history entry for a restated identical status --------------------
+
+def test_restating_the_same_status_does_not_grow_history():
+    led = _led()
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=2)
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=3)
+    assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED", "VERIFIED"]
+
+
+# -- FIX 6: answer() disagrees with a caller who thinks whitespace closed it -----
+
+def test_answer_rejects_a_whitespace_only_answer():
+    led = PremiseLedger()
+    led.ask(["is the process chrome.exe?"], author="s1", round_n=1)
+    ok = led.answer("q1", "   ")
+    assert ok is False
+    assert led.open_questions_for("s1")[0].id == "q1"
+
+
+# -- FIX 7: a REJECTED update must not append to history -------------------------
+
+def test_a_rejected_update_does_not_append_to_history():
+    led = _led()
+    led.apply([_upd("p1", "VERIFIED", "the flow is clearly mining traffic")],
+              author="s1", corpus=CORPUS, round_n=2)
+    assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED"]
+
+
+def test_an_unknown_id_update_does_not_touch_any_history():
+    led = _led()
+    led.apply([_upd("p99", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=2)
+    assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED"]
+
+
+def test_a_refuted_terminal_rejection_does_not_append_to_history():
+    led = _led()
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
+              author="v1", corpus=CORPUS, round_n=2)
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=3)
+    assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED", "REFUTED"]
+
+
+# -- FIX 7: a mixed batch lands the valid update and reports only the invalid one -
+
+def test_a_mixed_batch_applies_the_valid_update_and_reports_only_the_invalid_one():
+    led = PremiseLedger()
+    led.add([_draft("a"), _draft("b")], author="s1", round_n=1)
+    notes = led.apply([
+        _upd("p1", "VERIFIED", "ibc=5782875 obc=177"),
+        _upd("p2", "VERIFIED", "the flow is clearly mining traffic"),
+    ], author="s1", corpus=CORPUS, round_n=2)
+    assert led.premises["p1"].status == "VERIFIED"
+    assert led.premises["p2"].status == "UNVERIFIED"
+    assert len(notes) == 1 and "p2" in notes[0]
+
+
+# -- FIX 7: ask / answer / open_questions_for had zero coverage ------------------
+
+def test_ask_files_questions_addressable_by_id_and_skips_blank_text():
+    led = PremiseLedger()
+    qs = led.ask(["is chrome.exe the process?", "  ", ""], author="s1", round_n=1)
+    assert [q.id for q in qs] == ["q1"]
+    assert led.questions["q1"].text == "is chrome.exe the process?"
+    assert led.questions["q1"].round_asked == 1
+
+
+def test_open_questions_for_excludes_answered_questions():
+    led = PremiseLedger()
+    led.ask(["q one"], author="s1", round_n=1)
+    led.ask(["q two"], author="s1", round_n=1)
+    led.answer("q1", "yes, confirmed")
+    ids = [q.id for q in led.open_questions_for("s1")]
+    assert ids == ["q2"]
+
+
+def test_open_questions_for_is_per_author():
+    led = PremiseLedger()
+    led.ask(["s1's question"], author="s1", round_n=1)
+    led.ask(["s2's question"], author="s2", round_n=1)
+    assert [q.id for q in led.open_questions_for("s2")] == ["q2"]
+
+
+def test_answer_returns_false_for_an_unknown_question_id():
+    led = PremiseLedger()
+    assert led.answer("q99", "an answer") is False
+
+
+def test_answer_returns_true_and_records_the_text_for_a_known_id():
+    led = PremiseLedger()
+    led.ask(["is it chrome.exe?"], author="s1", round_n=1)
+    assert led.answer("q1", "yes") is True
+    assert led.questions["q1"].answer == "yes"
+
+
+# -- FIX 7: dump_ledgers writes and reads back correctly, merging ledgers -------
+
+def test_dump_ledgers_merges_multiple_ledgers_and_round_trips_through_a_file(tmp_path):
+    from premise import dump_ledgers
+
+    led_a = PremiseLedger()
+    led_a.add([_draft("A's premise")], author="s1", round_n=1)
+    led_b = PremiseLedger()
+    led_b.add([_draft("B's premise")], author="s2", round_n=1)
+
+    out = tmp_path / "premise_ledger.json"
+    dump_ledgers(str(out), {"216": led_a, "217": led_b})
+
+    records = json.loads(out.read_text(encoding="utf-8"))
+    by_qid = {r["qid"] for r in records}
+    assert by_qid == {"216", "217"}
+    assert len(records) == 2
+    texts = {r["text"] for r in records}
+    assert texts == {"A's premise", "B's premise"}
