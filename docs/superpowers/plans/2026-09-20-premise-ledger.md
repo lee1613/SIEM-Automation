@@ -1449,6 +1449,14 @@ Delete: `class AuditLine` (58-77), `_norm` (80-82), `MIN_QUOTE_CHARS` (85), `_AU
 (88), and the `_audit_from_text` validator (197-213). `field_validator` and
 `senior_report`'s `open_doubts` re-export go with them.
 
+> **Note (post-review correction).** Do NOT import `_norm` or `MIN_QUOTE_CHARS` from
+> `premise`. `premise._norm` was deleted during the Tasks 1-5 review: a senior's tool
+> output is JSON (`splunk_agent._format_result` returns `json.dumps(...)`) while a
+> senior restates it as `dest_port=3333`, so markdown-only normalization matched
+> nothing and would have rejected every honest VERIFIED. `quote_supported` now uses
+> `premise._match_form` (alphanumeric runs only) internally, and it is the only entry
+> point you need — `conversation.py` never normalizes a quote itself.
+
 - [ ] **Step 4: Add `QuestionAnswer` and rewrite the three fields**
 
 Beside `Scope`:

@@ -28,18 +28,9 @@ from pydantic import BaseModel, Field
 
 KINDS = ("coverage", "selection", "definition", "other")
 
-# Shorter than this and a "quote" matches almost any text. Will move to
-# conversation.py in a later task, once conversation can import it without a cycle.
+# Shorter than this and a "quote" matches almost any text. Lives here rather than
+# in conversation.py so that module can import it without a cycle.
 MIN_QUOTE_CHARS = 12
-
-
-def _norm(text: str) -> str:
-    """Whitespace-, case- and markdown-insensitive form, so a faithful quote matches.
-
-    Exported for a later task's import - do not delete even though `quote_supported`
-    below no longer uses it.
-    """
-    return re.sub(r"\s+", " ", re.sub(r"[`*_]", "", text or "")).strip().lower()
 
 
 def _match_form(text: str) -> str:

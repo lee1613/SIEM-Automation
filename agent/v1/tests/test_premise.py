@@ -7,7 +7,6 @@ from premise import (
     PremiseDraft,
     PremiseLedger,
     PremiseUpdate,
-    _norm,
     quote_supported,
 )
 from pydantic import ValidationError
@@ -33,10 +32,6 @@ def test_a_premise_starts_unverified_with_nothing_behind_it():
     p = Premise(id="p1", author="s1", kind="coverage", text="Mining could surface as...",
                 load_bearing=True, round_first_seen=1)
     assert p.status == "UNVERIFIED" and p.verified_by == "" and p.quote == ""
-
-
-def test_norm_ignores_markdown_case_and_whitespace():
-    assert _norm("  **ibc=5782875**\n obc=177 ") == _norm("ibc=5782875 obc=177")
 
 
 def test_min_quote_chars_is_defined_here_now():
