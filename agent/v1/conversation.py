@@ -93,8 +93,13 @@ class SeniorDirective(BaseModel):
 
     senior_id: str = Field(description="The senior this route addresses. Empty for SPAWN and ANSWER.")
     r1_scope_alignment: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
-        description="Did the senior work inside its constraints and address THIS problem "
-                    "statement? 'NA' only for SPAWN or an exploration worker.")
+        description="Did this round contribute anything toward identifying an entity the "
+                    "answer depends on — a host, account, process, file, feed or field? "
+                    "PASS: it did, even if the value itself is still missing and even if "
+                    "the finding came from a different angle than the one you set. WEAK: "
+                    "it worked the problem but established nothing new. FAIL: it answered "
+                    "a different question, or its work cannot bear on this one at all. "
+                    "'NA' only for SPAWN or an exploration worker.")
     r2_progress: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
         description="Did this round produce information the prior rounds did not have?")
     r3_answer_readiness: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
@@ -495,6 +500,7 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                            + "; ".join(unverified_audit(e)))
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
-                       "at the iteration cap — CLARIFY it (costs no round) or COMMAND "
-                       "one more round before answering from it")
+                       "at the iteration cap — CLARIFY it (costs no round; its reply "
+                       "clears this block) or COMMAND one more round before answering "
+                       "from it")
     return out

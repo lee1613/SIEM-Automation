@@ -29,7 +29,7 @@ MAX_EXPLORATIONS = 1     # §2.3 — a second scout means the first failed
 # rounds one after another (a turn per wave plus its spawn turn) and a final ANSWER
 # (v1.4.1: was 12 / 8 / 5, which cut sequential seniors short on the upper tiers).
 TIERS: dict[int, dict] = {
-    1000: {"seniors": 3, "rounds": 8, "sh_turns": 28},
+    1000: {"seniors": 3, "rounds": 10, "sh_turns": 34},
     500:  {"seniors": 2, "rounds": 5, "sh_turns": 13},
     100:  {"seniors": 1, "rounds": 3, "sh_turns": 5},
 }
@@ -123,6 +123,12 @@ class QuestionState:
     def record_round(self, sid: str, *, capped: bool = False) -> None:
         self.used[sid] = self.used.get(sid, 0) + 1
         self.capped[sid] = bool(capped)
+
+    def clear_cap(self, sid: str) -> None:
+        """A CLARIFY reply settles what the cut-off left open: the senior answers from
+        what it already holds, which is exactly what the cut-off gate asks for. Without
+        this the gate stays shut whatever SH does (v1.4.1 Q216 burned ~5 turns on it)."""
+        self.capped[sid] = False
 
     def last_round_capped(self, sid: str) -> bool:
         """Did this senior's most recent round run out of iterations? A capped

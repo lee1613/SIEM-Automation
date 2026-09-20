@@ -191,13 +191,23 @@ class SeniorSession:
         return directive
 
     def _fallback_report(self, result: dict) -> str:
-        """A senior that skipped the `report` field still has to be readable."""
+        """A senior that skipped the `report` field still has to be readable.
+
+        It usually skipped `notes` too, and the round then reached SH with an empty
+        "What it means" (v1.4.1 Q329 s1 r2-r3). Fall back to the other fields that
+        carry what it saw, and say so plainly when every one of them is empty."""
+        meaning = next((t for t in ((result.get('notes') or '').strip(),
+                                    (result.get('evidence') or '').strip(),
+                                    (result.get('answer') or '').strip()) if t),
+                       "_No report, notes or evidence were filed this round — only the "
+                       "queries above are known. Treat it as a round that produced "
+                       "nothing._")
         return (f"**Insight:** {result.get('insight', 'NOT_FOUND')}\n"
                 f"**Candidate:** {result.get('value') or 'none'}   "
                 f"**Confidence:** {result.get('confidence')}\n\n"
                 f"## This round\n### What I ran\n"
                 + "\n".join(f"- {q}" for q in (result.get('spl_used') or [])[-4:])
-                + f"\n### What it means\n{(result.get('notes') or '').strip()[:800]}\n")
+                + f"\n### What it means\n{meaning[:800]}\n")
 
     # ── clarify (§3.3) ────────────────────────────────────────────────────────
     def clarify(self, questions: list, preface: str = "") -> str:

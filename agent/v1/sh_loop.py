@@ -83,7 +83,12 @@ PARALLEL SENIORS — allowed, when justified. Two seniors working at once finish
 If you cannot state all three, do not spawn in parallel: one senior at a time is the default.
 
 ALTERNATIVE SENIOR — when you are not confident, get a second opinion; do not push the same senior again.
-If a senior's candidate is still UNVERIFIED, or it keeps returning to the same narrowed lead without settling it, RETIRE it and SPAWN an alternative in the same turn (a hand-over, not a parallel run). Brief the alternative with the question as asked, and use its `subquestion` and `constraints` to point it at a different area: the feeds, entities or readings of the question the first senior never tested and may have overlooked. Do not hand it the first senior's candidate to confirm; it must reach its own answer. Two seniors reaching the same value independently is verification; one senior repeating itself is not.
+RETIRE and SPAWN in the SAME turn (a hand-over, not a parallel run) as soon as any of these is true:
+  * the senior's own report shows its current constraints cannot hold the answer — the feed carries no such field, no content, no coverage of the window or entity. That is proved, not suspected: do not spend another round confirming a dead scope;
+  * its candidate is still UNVERIFIED after a round aimed at verifying it;
+  * it keeps returning to the same narrowed lead without settling it.
+Brief the replacement on the question as asked, then state the deviation you want. The new direction must not re-walk the retired senior's path: name fields, feeds or entities it did not touch, and say where evidence of the ACT the question names would sit if the first reading was wrong. The deviation can be small — the same feed read through a different field is a different direction; the same field re-read is not. Say what to avoid ("do not re-test <retired scope>") as well as what to try. Do not hand over the retired senior's candidate to confirm: it must reach its own answer, and two seniors arriving at the same value independently is verification, while one senior repeating itself is not.
+What the replacement DOES inherit is any entity the retired senior established — a host, account, file or window. Carrying a proven entity into the feed the question names is the most common way a stuck question is solved; dropping it because it was found elsewhere is how one is lost.
 
 YOUR SIX ROUTES
   SPAWN    — another senior. Only with a stated reason the current senior's constraints cannot cover. In parallel only under the PARALLEL SENIORS rule above. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope; it costs no senior slot and is capped at one per question.
@@ -103,12 +108,12 @@ You have run many investigations and seen confident reports fall apart on one un
 When the review finds a flaw, act on it: CRITIC it on the basis it rests on, or COMMAND a round that tests the premise first. Never answer from a report you would send back to a junior.
 
 GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
-  R1 scope alignment       Did it work inside its constraints, and address THIS problem statement rather than a neighbouring one? Walk what the senior actually did against the question's description, word by word:
+  R1 scope alignment       Did this round contribute anything toward identifying an entity the answer depends on — a host, account, process, file, feed or field? A round that names the right entity from an angle you did not ask for is R1 = PASS; so is a round that rules one out with evidence. Grade FAIL only when the work cannot bear on this question at all. An entity a senior found in another feed is a LEAD to test in the feed the question names, never a reason to discard it: the question's wording binds where the MEASUREMENT is taken, not where the entity may be recognised. When grading the chain the answer rests on (not this round's usefulness), walk what the senior did against the question's description, word by word:
                            - the entity: the one the question names, not a neighbour that is easier to find;
                            - the act: records that show the act the question names happening — a port, a name or a convention only suggests it, and records that behave unlike the act (wrong volume, direction or duration) are not it;
                            - the measure: the unit and the span the question's words give, not a rule the senior (or you, in an earlier answer) stated;
                            - the reach of each claim: "no X anywhere in field F" needs a search of F across the whole scope — a look at F on the candidate's own rows only shows those rows.
-                           Any step that does not match is R1 = FAIL, however well-verified the rest is.
+                           A step that does not match does not sink the round's grade; it means the ANSWER built on that chain is not ready, and the premise audit is where you say so.
   R2 progress              Did this round produce information the prior rounds did not have?
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
@@ -473,10 +478,12 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         budget=state.budget)))
 
     answer, end_reason, ungrounded = "", "", 0
+    clarify_text: dict = {}      # sid -> its CLARIFY replies, quotable in SH's audit
+    unread_clarify = False       # a reply SH has not had a turn to read yet
 
     while True:
         stop = state.exhausted()
-        if stop == "rounds" and unread:
+        if stop == "rounds" and (unread or unread_clarify):
             stop = ""              # SH still reads the final wave; the gates stop new work
         if stop:
             end_reason = stop
@@ -529,8 +536,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                            if state.is_active(sid)}
         ) + premise_audit_violations(turn.entries) + evidence_violations(
             turn.entries,
-            reports_of=lambda sid: "\n".join(r.get("report", "") for r in all_reports
-                                             if r.get("senior_id") == sid),
+            reports_of=lambda sid: "\n".join([r.get("report", "") for r in all_reports
+                                              if r.get("senior_id") == sid]
+                                             + clarify_text.get(sid, [])),
             last_report_of=lambda sid: (sessions[sid].last_report if sid in sessions else ""),
             state=state)
         if problems:
@@ -541,6 +549,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         grades.extend(rows)
         unread = {}
 
+        unread_clarify = False
         pending, clarified = {}, []
         for i, e in enumerate(turn.entries):
             log.sh_to_senior(e.senior_id, e.route, body=_entry_body(e))
@@ -581,6 +590,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                              "COMMAND the senior instead if you need this answered")
                 log.clarify_reply(e.senior_id, reply)
                 clarified.append(f"{e.senior_id}: {reply}")
+                # The reply is the senior speaking from what it holds: it settles the
+                # cut-off, and SH may quote it in the audit like any report text.
+                state.clear_cap(e.senior_id)
+                clarify_text.setdefault(e.senior_id, []).append(reply)
 
             elif e.route == "RETIRE":
                 sess = sessions.get(e.senior_id)
@@ -623,6 +636,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             break
         if clarified:
             msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
+            unread_clarify = True   # SH gets the turn to read them, budget or not
         if not pending:
             continue
 

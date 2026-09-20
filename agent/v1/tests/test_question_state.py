@@ -5,7 +5,7 @@ from question_state import ROUND_ITERS, QuestionState, tier_budget
 def test_tier_table_matches_the_spec():
     assert tier_budget(100)  == {"tier": 100,  "seniors": 1, "rounds": 3, "sh_turns": 5,  "iters": 12}
     assert tier_budget(500)  == {"tier": 500,  "seniors": 2, "rounds": 5, "sh_turns": 13, "iters": 12}
-    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 8, "sh_turns": 28, "iters": 12}
+    assert tier_budget(1000) == {"tier": 1000, "seniors": 3, "rounds": 10, "sh_turns": 34, "iters": 12}
 
 
 def test_points_below_500_fall_to_the_base_tier():
@@ -16,7 +16,7 @@ def test_points_below_500_fall_to_the_base_tier():
 
 def test_ceiling_is_seniors_times_rounds_times_iterations():
     st = QuestionState(points=1000)
-    assert st.senior_iteration_ceiling == 3 * 8 * ROUND_ITERS == 288
+    assert st.senior_iteration_ceiling == 3 * 10 * ROUND_ITERS == 360
 
 
 def test_spawn_slots_are_consumed_and_capped():
@@ -59,11 +59,11 @@ def _work(st, sid, n):
 
 def test_a_late_senior_gets_its_own_full_rounds():
     # Rounds are per senior: a replacement is not left with the question's leftovers.
-    st = QuestionState(points=1000)            # 8 rounds per senior
+    st = QuestionState(points=1000)            # 10 rounds per senior
     st.open_senior("s1")
-    _work(st, "s1", 8)
-    assert st.open_senior("s2") == 8
-    assert st.rounds_left_for("s2") == 8
+    _work(st, "s1", 10)
+    assert st.open_senior("s2") == 10
+    assert st.rounds_left_for("s2") == 10
 
 
 def test_rounds_left_for_counts_only_the_seniors_own_rounds():
