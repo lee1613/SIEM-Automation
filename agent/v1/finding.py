@@ -25,9 +25,12 @@ answered in text is more useful than one recorded as having failed, so
 
 from __future__ import annotations
 
+import json
 import re
 
 from langchain_core.tools import tool
+from premise import KINDS, PremiseDraft, PremiseUpdate
+from pydantic import ValidationError
 
 # Ordered worst-to-best; mirrors grounding._STATUS_RANK.
 VALID_STATUS = ("failed", "too_big", "partial", "solved")
@@ -87,7 +90,9 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
                    evidence: str = "", confidence: int = 50,
                    sourcetypes_used: str = "", sources_used: str = "",
                    ruled_out: str = "", notes: str = "",
-                   report: str = "") -> str:
+                   report: str = "", new_premises: list = None,
+                   premise_updates: list = None,
+                   open_questions: list = None) -> str:
     """Finish the task. Call this EXACTLY ONCE, as your final action.
 
     Every other tool gathers evidence; this one reports it. Do not write a prose
@@ -126,6 +131,23 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
       time window you narrowed, a host worth pivoting on, why a candidate could
       not be confirmed. A NOT_FOUND belongs here, and the orchestrator reads it
       to plan the next round.
+    - new_premises: the premises you are filing THIS round, each an object
+      {"text": ..., "kind": "coverage"|"selection"|"definition"|"other",
+       "load_bearing": true|false}. Do NOT re-send premises you filed earlier -
+      the runner holds them and shows them back to you every round. `text` is
+      immutable once filed, so write it as you want it read in five rounds' time.
+      `load_bearing` is true only when the answer breaks if this premise is false;
+      marking everything load-bearing is the same as marking nothing.
+    - premise_updates: verdicts on premises ALREADY in your ledger, each
+      {"id": "p3", "status": "VERIFIED"|"REFUTED"|"UNVERIFIED",
+       "quote": ..., "evidence": ...}. VERIFIED and REFUTED need a quote copied
+      word for word from a query output you actually received - the runner checks
+      it and keeps the old status if it is not there. UNVERIFIED withdraws a
+      verdict and needs no quote.
+    - open_questions: what you need SH to answer, one plain string each. SH must
+      answer every one before your next round, so ask only what SH can settle:
+      which entity is in scope, whether a prior finding applies, which scope to
+      try next. Never an SPL question.
     - report: your round report in markdown, following the template you were given
       at spawn. ~600 words maximum. REWRITE the "Prior rounds" section each round
       instead of appending to it - six lines total, covering every prior round.
@@ -135,6 +157,61 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
 
 def _split(s: str) -> list[str]:
     return [p.strip() for p in (s or "").replace("\n", ",").split(",") if p.strip()]
+
+
+def _coerce_objects(value) -> list:
+    """A list of dicts (or strings) from whatever the provider actually sent.
+
+    Task 0 probed GLM-5.3 on AI& for nested tool arguments. This accepts a real
+    list OR a JSON string either way, so the probe's outcome changes one type
+    annotation on the tool and no logic at all - and a provider that changes its
+    mind later costs nothing.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+    if isinstance(value, dict):
+        value = [value]
+    return [v for v in (value or []) if isinstance(v, (dict, str))]
+
+
+def _drafts(value) -> list:
+    """PremiseDrafts from the tool's `new_premises`. A malformed one is dropped, not
+    fatal: a round that filed four good premises and one bad is worth four."""
+    out = []
+    for d in _coerce_objects(value):
+        if isinstance(d, str):
+            d = {"text": d}
+        text = str(d.get("text", "")).strip()
+        if not text:
+            continue
+        kind = str(d.get("kind", "") or "other").strip().lower()
+        try:
+            out.append(PremiseDraft(text=text,
+                                    kind=kind if kind in KINDS else "other",
+                                    load_bearing=bool(d.get("load_bearing", False))))
+        except ValidationError:
+            continue
+    return out
+
+
+def _updates(value) -> list:
+    """PremiseUpdates from the tool's `premise_updates`. An illegal status is dropped -
+    the premise then keeps its old status, which is the safe direction."""
+    out = []
+    for u in _coerce_objects(value):
+        if not isinstance(u, dict):
+            continue
+        try:
+            out.append(PremiseUpdate(id=str(u.get("id", "")).strip(),
+                                     status=str(u.get("status", "")).strip().upper(),
+                                     quote=str(u.get("quote", "") or ""),
+                                     evidence=str(u.get("evidence", "") or "")))
+        except ValidationError:
+            continue
+    return out
 
 
 def _find_tool_call(messages: list) -> dict | None:
@@ -186,6 +263,9 @@ def empty_finding(status: str = "failed") -> dict:
         "structured":        False,
         "insight":           "NOT_FOUND",
         "report":            "",
+        "new_premises":      [],
+        "premise_updates":   [],
+        "open_questions":    [],
     }
 
 
@@ -271,4 +351,8 @@ def parse_finding(messages: list, answer: str) -> dict:
         "structured": True,
         "insight":    insight,
         "report":     str(args.get("report") or "").strip(),
+        "new_premises":    _drafts(args.get("new_premises")),
+        "premise_updates": _updates(args.get("premise_updates")),
+        "open_questions":  [str(q).strip() for q in (args.get("open_questions") or [])
+                            if str(q).strip()],
     }
