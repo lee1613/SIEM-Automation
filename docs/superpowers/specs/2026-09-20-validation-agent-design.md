@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 **Status:** approved in design, **blocked on spec 1**
-**Target version:** v1.6
+**Target version:** v1.4.3
 **Depends on:** `2026-09-20-premise-ledger-design.md` (spec 1). Every trigger in this
 spec reads ledger fields that do not exist until spec 1 ships.
 

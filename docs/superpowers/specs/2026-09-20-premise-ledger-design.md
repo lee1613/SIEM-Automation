@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 **Status:** approved, not implemented
-**Target version:** v1.5
+**Target version:** v1.4.2 (phase 2 — v1.4.2 has not had its full run, so it is still in progress)
 **Successor spec:** `2026-09-20-validation-agent-design.md` (spec 2) — written, blocked on this one
 
 ---
