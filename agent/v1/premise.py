@@ -71,6 +71,15 @@ class PremiseDraft(BaseModel):
     load_bearing: bool = Field(
         description="True when the answer breaks if this premise is false. Be honest: "
                     "marking everything load-bearing is the same as marking nothing.")
+    quote: str = Field(
+        default="",
+        description="Leave empty when you are filing a hypothesis. When a result you "
+                    "ALREADY have settles it, put that output here word for word and "
+                    "the runner files it VERIFIED in one step - you do not have to wait "
+                    "a round for its id. The same checks apply as for `premise_updates`.")
+    evidence: str = Field(
+        default="",
+        description="Required with `quote`: why that output settles this premise.")
 
 
 class PremiseUpdate(BaseModel):
@@ -146,8 +155,12 @@ class PremiseLedger:
         self._qn = 0
 
     # -- filing ---------------------------------------------------------------
-    def add(self, drafts: list, author: str, round_n: int) -> list[Premise]:
+    def add(self, drafts: list, author: str, round_n: int,
+            corpus: list[str] | None = None,
+            notes: list[str] | None = None) -> list[Premise]:
         """File new premises. The runner assigns ids and stamps the round.
+
+        Two things stop the same claim being filed twice.
 
         Deduped by (author, matched text): the carry-forward block hands a senior
         its own open premises back every round, so it re-filing the same one
@@ -156,12 +169,33 @@ class PremiseLedger:
         second, so it stays open forever. A different author filing the same
         text is cross-author agreement, which is meaningful, so it still gets
         its own id.
+
+        And one OPEN premise per kind per author. Text dedupe alone was not
+        enough: in the Q216 ledger run SH filed the same coverage/selection/
+        definition triplet six times (18 ids for 3 claims, no answer, $2.03),
+        rewording each time - "the only flow in the feed matching Monero stratum
+        behavior" became "the single dp=3333 stratum flow" - which `_match_form`
+        reads as two different premises. The kinds are singular by construction
+        (the prompt asks for *a* coverage premise, *a* selection premise, *a*
+        definition premise), so a second open one of a kind is a re-file, not a
+        new claim. Once the first is settled the kind is free again.
+
+        `corpus` enables filing and settling in one step. The runner owns the
+        ids, so an author cannot name a premise it is filing *this* turn in
+        `premise_updates`; the auto-link then makes that premise an immediate
+        load-bearing blocker on the very ANSWER that filed it. A draft carrying
+        its own quote breaks that deadlock and weakens nothing, because the quote
+        runs the same corpus and circularity checks `apply` runs.
         """
         out = []
         for d in drafts or []:
             key = _match_form(d.text)
             existing = next((p for p in self.premises.values()
                              if p.author == author and _match_form(p.text) == key), None)
+            if existing is None:
+                existing = next((p for p in self.premises.values()
+                                 if p.author == author and p.kind == d.kind
+                                 and p.status == "UNVERIFIED"), None)
             if existing is not None:
                 out.append(existing)
                 continue
@@ -172,6 +206,14 @@ class PremiseLedger:
                                   "by": author, "quote": "", "evidence": ""}])
             self.premises[p.id] = p
             out.append(p)
+            quote = getattr(d, "quote", "")
+            if quote:
+                refused = self.apply(
+                    [PremiseUpdate(id=p.id, status="VERIFIED", quote=quote,
+                                   evidence=getattr(d, "evidence", ""))],
+                    author=author, corpus=corpus or [], round_n=round_n)
+                if notes is not None:
+                    notes.extend(refused)
         return out
 
     def ask(self, texts: list, author: str, round_n: int) -> list[OpenQuestion]:
@@ -286,16 +328,39 @@ class PremiseLedger:
         `render_refuted()` already tells the senior which premises are dead.
         """
         open_ = [p for p in self.unresolved_for(author) if p.status == "UNVERIFIED"]
-        if not open_:
+        # Premises someone else filed that this senior is expected to settle. Without
+        # these the gate's "COMMAND s1 to settle them" names an action s1 cannot take:
+        # it has never seen the premise and does not know the id exists. The Q216 ledger
+        # run settled 0 premises senior-to-senior for exactly this reason, while SH
+        # verified all 15 of its own. Only load-bearing and still open - anything else
+        # is noise in a senior's round.
+        others = [p for p in self.premises.values()
+                  if p.author != author and p.load_bearing and p.status == "UNVERIFIED"]
+        if not open_ and not others:
             return ""
-        lines = ["YOUR UNRESOLVED PREMISES - carried forward by the runner, "
-                 "in your own words:"]
-        for p in open_:
-            tag = "load-bearing, " if p.load_bearing else ""
-            lines.append(f'[{p.id}] {tag}open since round {p.round_first_seen}'
-                         f' - "{p.text}"')
-        lines.append("\nSettle each with `premise_updates`: a status, and a quote from "
-                     "a result you actually ran. Not mentioning one does not remove it.")
+        lines = []
+        if open_:
+            lines.append("YOUR UNRESOLVED PREMISES - carried forward by the runner, "
+                         "in your own words:")
+            for p in open_:
+                tag = "load-bearing, " if p.load_bearing else ""
+                lines.append(f'[{p.id}] {tag}open since round {p.round_first_seen}'
+                             f' - "{p.text}"')
+            lines.append("\nSettle each with `premise_updates`: a status, and a quote "
+                         "from a result you actually ran. Not mentioning one does not "
+                         "remove it.")
+        if others:
+            if lines:
+                lines.append("")
+            lines.append("LOAD-BEARING PREMISES FILED BY OTHERS, still unsettled. The "
+                         "answer to this question rests on these, and whoever filed one "
+                         "cannot settle it from your searches:")
+            for p in others:
+                lines.append(f'[{p.id}] by {p.author}, open since round '
+                             f'{p.round_first_seen} - "{p.text}"')
+            lines.append("\nIf a result you ran settles one, say so in `premise_updates` "
+                         "by its id - the same quote rule applies. If your work cannot "
+                         "reach it, leave it alone.")
         return "\n".join(lines)
 
     def render_table(self) -> str:

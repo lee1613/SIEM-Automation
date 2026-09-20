@@ -44,7 +44,10 @@ def _draft(text, kind="other", lb=True):
 
 def test_the_runner_assigns_ids_the_author_never_picks_one():
     led = PremiseLedger()
-    added = led.add([_draft("a"), _draft("b")], author="s1", round_n=1)
+    # Different kinds: one author may hold only one OPEN premise per kind, so two
+    # `other` drafts would be read as a re-file (see the re-file loop tests).
+    added = led.add([_draft("a", kind="coverage"), _draft("b", kind="selection")],
+                    author="s1", round_n=1)
     assert [p.id for p in added] == ["p1", "p2"]
 
 
@@ -180,9 +183,21 @@ def test_the_carry_forward_block_is_empty_when_nothing_is_open():
     assert led.render_for_senior("s1") == ""
 
 
-def test_a_senior_is_not_handed_another_seniors_premises():
+def test_a_senior_is_handed_another_authors_open_load_bearing_premises():
+    """Changed by the Q216 ledger run. The block used to filter on author alone, which
+    made `ledger_violations`' "COMMAND s1 to settle them" name an action s1 could not
+    take - it had never seen the premise or its id. That run settled 0 premises
+    senior-to-senior while SH verified all 15 of its own."""
     led = PremiseLedger()
-    led.add([_draft("s1 only")], author="s1", round_n=1)
+    led.add([_draft("s1 only", lb=True)], author="s1", round_n=1)
+    block = led.render_for_senior("s2")
+    assert "s1 only" in block and "p1" in block
+
+
+def test_a_senior_is_not_handed_another_authors_incidental_premises():
+    """Only load-bearing and only still-open. Everything else is noise in a round."""
+    led = PremiseLedger()
+    led.add([_draft("s1 aside", lb=False)], author="s1", round_n=1)
     assert led.render_for_senior("s2") == ""
 
 
@@ -350,7 +365,8 @@ def test_a_refuted_terminal_rejection_does_not_append_to_history():
 
 def test_a_mixed_batch_applies_the_valid_update_and_reports_only_the_invalid_one():
     led = PremiseLedger()
-    led.add([_draft("a"), _draft("b")], author="s1", round_n=1)
+    led.add([_draft("a", kind="coverage"), _draft("b", kind="selection")],
+            author="s1", round_n=1)
     notes = led.apply([
         _upd("p1", "VERIFIED", "ibc=5782875 obc=177"),
         _upd("p2", "VERIFIED", "the flow is clearly mining traffic"),

@@ -133,11 +133,18 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
       to plan the next round.
     - new_premises: the premises you are filing THIS round, each an object
       {"text": ..., "kind": "coverage"|"selection"|"definition"|"other",
-       "load_bearing": true|false}. Do NOT re-send premises you filed earlier -
-      the runner holds them and shows them back to you every round. `text` is
-      immutable once filed, so write it as you want it read in five rounds' time.
-      `load_bearing` is true only when the answer breaks if this premise is false;
-      marking everything load-bearing is the same as marking nothing.
+       "load_bearing": true|false, "quote": ..., "evidence": ...}. Do NOT re-send
+      premises you filed earlier - the runner holds them and shows them back to
+      you every round, and a second open premise of a kind you already have open
+      is read as a re-file and handed back to you. `text` is immutable once filed,
+      so write it as you want it read in five rounds' time. `load_bearing` is true
+      only when the answer breaks if this premise is false; marking everything
+      load-bearing is the same as marking nothing.
+      `quote`/`evidence` are optional and go together: leave them empty to file a
+      hypothesis, or, when a result you ALREADY have settles the premise, put that
+      output in `quote` word for word and why it settles it in `evidence` - the
+      runner files it VERIFIED in one step, under the same checks as
+      `premise_updates`, so you do not wait a round for its id.
     - premise_updates: verdicts on premises ALREADY in your ledger, each
       {"id": "p3", "status": "VERIFIED"|"REFUTED"|"UNVERIFIED",
        "quote": ..., "evidence": ...}. VERIFIED and REFUTED need a quote copied
@@ -191,7 +198,9 @@ def _drafts(value) -> list:
         try:
             out.append(PremiseDraft(text=text,
                                     kind=kind if kind in KINDS else "other",
-                                    load_bearing=bool(d.get("load_bearing", False))))
+                                    load_bearing=bool(d.get("load_bearing", False)),
+                                    quote=str(d.get("quote", "") or "").strip(),
+                                    evidence=str(d.get("evidence", "") or "").strip()))
         except ValidationError:
             continue
     return out

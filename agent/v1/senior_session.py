@@ -142,10 +142,11 @@ class SeniorSession:
         if self.ledger is not None:
             self.tool_corpus += tool_outputs(result.get("full_state"))
             self.ledger.add(result.get("new_premises") or [],
-                            author=self.sid, round_n=self.rounds_used)
-            ledger_notes = self.ledger.apply(result.get("premise_updates") or [],
-                                             author=self.sid, corpus=self.tool_corpus,
-                                             round_n=self.rounds_used)
+                            author=self.sid, round_n=self.rounds_used,
+                            corpus=self.tool_corpus, notes=ledger_notes)
+            ledger_notes += self.ledger.apply(result.get("premise_updates") or [],
+                                              author=self.sid, corpus=self.tool_corpus,
+                                              round_n=self.rounds_used)
             self.ledger.ask(result.get("open_questions") or [],
                             author=self.sid, round_n=self.rounds_used)
             self.ledger.record_candidate(self.sid, self.rounds_used,
