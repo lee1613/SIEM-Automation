@@ -552,11 +552,16 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         # ledger, so a verdict reached on this turn is what the gates see.
         answer_cited = {i for e in turn.entries if e.route == "ANSWER"
                         for i in e.answer_premise_ids}
+        # These are verdict lines for SH to read, NOT refusals of its updates, so they
+        # are kept out of `ledger_notes` - folding them in turned every successful
+        # validation into a spurious turn rejection ("the runner refused a premise
+        # update: --- v6 | INDEPENDENT VALIDATION of p6 | VERIFIED -> VERIFIED").
+        answer_verdicts = []
         if answer_cited:
-            ledger_notes.extend(_run_validators(
+            answer_verdicts = _run_validators(
                 pool, ledger, None, qid=qid, log=log, spent=validators,
                 round_n=state.turns_used, max_parallel=max_parallel,
-                cited=answer_cited))
+                cited=answer_cited)
 
         problems = grade_violations(
             turn.entries, graded=set(unread),
@@ -585,8 +590,13 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
-            msgs.append(HumanMessage(content=render_rejection(problems)))
+            # The verdicts go with the rejection: when a validator is why the ANSWER is
+            # blocked, SH cannot act on the block without reading what it found.
+            msgs.append(HumanMessage(content="\n\n".join(
+                [render_rejection(problems), *answer_verdicts])))
             continue
+        if answer_verdicts:
+            msgs.append(HumanMessage(content="\n\n".join(answer_verdicts)))
         # Answers are recorded only once the turn is accepted, and only for the
         # senior the entry addresses. Written before the gates they close the
         # questions that `open_question_violations` reads, so the gate sees nothing

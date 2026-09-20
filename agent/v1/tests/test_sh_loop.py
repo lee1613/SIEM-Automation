@@ -830,3 +830,33 @@ def test_a_premise_sh_settles_on_the_answer_turn_is_still_validated(tmp_path):
     briefed = "\n".join(pool.validator_messages)
     assert "coverage: the duration is the whole of it" in briefed, (
         "a premise settled on the ANSWER turn escaped validation")
+
+
+def test_a_validators_verdict_is_not_reported_as_a_refused_update(tmp_path):
+    """Q216 v1.4.3 r2 logged: "the runner refused a premise update: --- v6 | INDEPENDENT
+    VALIDATION of p6 | VERIFIED -> VERIFIED". The ANSWER-turn verdicts were folded into
+    `ledger_notes`, which the gate block turns into rejections, so every successful
+    validation rejected the turn it belonged to."""
+    pool = _Confirming()
+    late = _answer(new_premises=[PremiseDraft(
+        text="coverage: the duration is the whole of it", kind="coverage",
+        load_bearing=True, quote="The duration is 1367.875.",
+        evidence="s1's report states it")])
+    llm = _LLM([_turn(_spawn()), _turn(late), _turn(_answer())])
+    out = _run(llm, pool, tmp_path)
+
+    convo = _conversation(tmp_path)
+    assert "refused a premise update: ---" not in convo
+    assert out["answer"] == "1367.875", "a confirming validator must not block the answer"
+
+
+class _Confirming(_Recording):
+    """Its validators uphold whatever they are given, quoting their own tool output."""
+
+    def run_round(self, **kw):
+        r = super().run_round(**kw)
+        if kw.get("technique") == "validator":
+            r["premise_updates"] = [PremiseUpdate(
+                id="p", status="VERIFIED", quote='{"dest_port": "3333", "count": "3"}',
+                evidence="my own scan agrees")]
+        return r
