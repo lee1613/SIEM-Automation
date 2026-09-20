@@ -169,3 +169,49 @@ def test_every_transition_is_recorded_in_history():
     led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
               author="s1", corpus=CORPUS, round_n=2)
     assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED", "VERIFIED"]
+
+
+def test_the_carry_forward_block_quotes_the_premise_word_for_word():
+    led = PremiseLedger()
+    text = "The 3333 record's byte profile (5.7MB in / 177B out) is download-like"
+    led.add([_draft(text)], author="s1", round_n=1)
+    block = led.render_for_senior("s1")
+    assert text in block and "[p1]" in block and "open since round 1" in block
+
+
+def test_the_carry_forward_block_is_empty_when_nothing_is_open():
+    led = PremiseLedger()
+    led.add([_draft("a")], author="s1", round_n=1)
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=2)
+    assert led.render_for_senior("s1") == ""
+
+
+def test_a_senior_is_not_handed_another_seniors_premises():
+    led = PremiseLedger()
+    led.add([_draft("s1 only")], author="s1", round_n=1)
+    assert led.render_for_senior("s2") == ""
+
+
+def test_the_sh_table_shows_status_load_bearing_and_who_settled_it():
+    led = PremiseLedger()
+    led.add([_draft("mining could surface as stratum", kind="coverage")],
+            author="s1", round_n=1)
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s2", corpus=CORPUS, round_n=2)
+    table = led.render_table()
+    assert "p1" in table and "coverage" in table and "VERIFIED" in table and "s2" in table
+
+
+def test_the_sh_table_says_so_when_there_are_no_premises():
+    assert "no premises" in PremiseLedger().render_table().lower()
+
+
+def test_the_refuted_block_carries_the_evidence_that_killed_it():
+    led = PremiseLedger()
+    led.add([_draft("the flow is submission")], author="s1", round_n=1)
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177",
+                    evidence="inbound bytes dwarf outbound")],
+              author="s2", corpus=CORPUS, round_n=2)
+    block = led.render_refuted()
+    assert "the flow is submission" in block and "ibc=5782875" in block

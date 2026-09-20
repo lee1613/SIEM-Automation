@@ -217,3 +217,56 @@ class PremiseLedger:
             return False
         q.answer = text
         return True
+
+    # -- rendering ------------------------------------------------------------
+    def render_for_senior(self, author: str) -> str:
+        """The unresolved premises this author owns, verbatim, for its next round.
+
+        Carried by the runner unconditionally. The v1.4.2 equivalent fired only
+        when SH graded R4 WEAK or FAIL - and SH grades all-PASS when it wants to
+        answer. The runner has no candidate and no preference.
+        """
+        open_ = self.unresolved_for(author)
+        if not open_:
+            return ""
+        lines = ["YOUR UNRESOLVED PREMISES - carried forward by the runner, "
+                 "in your own words:"]
+        for p in open_:
+            tag = "load-bearing, " if p.load_bearing else ""
+            state = ", REFUTED" if p.status == "REFUTED" else ""
+            lines.append(f'[{p.id}] {tag}open since round {p.round_first_seen}'
+                         f'{state} - "{p.text}"')
+        lines.append("\nSettle each with `premise_updates`: a status, and a quote from "
+                     "a result you actually ran. Not mentioning one does not remove it.")
+        return "\n".join(lines)
+
+    def render_table(self) -> str:
+        """The whole ledger, for SH. Replaces the three '!!' warning blocks - a
+        missing Coverage row is visible as absence."""
+        if not self.premises:
+            return "PREMISE LEDGER - no premises filed yet."
+        rows = ["PREMISE LEDGER",
+                f"{'id':<4} {'kind':<11} {'status':<11} {'LB':<3} {'since':<6} text"]
+        for p in self.premises.values():
+            by = f"  [{p.verified_by}]" if p.verified_by else ""
+            rows.append(f"{p.id:<4} {p.kind:<11} {p.status:<11} "
+                        f"{'Y' if p.load_bearing else 'n':<3} r{p.round_first_seen:<5} "
+                        f"{p.author}: {p.text[:70]}{by}")
+        return "\n".join(rows)
+
+    def render_refuted(self) -> str:
+        """What a replacement senior must not rebuild on. Empty when nothing is refuted.
+
+        ponytail: no caller until spec 2's alternative-agent brief. Four lines, and
+        the ledger already holds everything it needs - delete it if spec 2 slips.
+        """
+        dead = self.refuted()
+        if not dead:
+            return ""
+        lines = ["PREMISES ALREADY DISPROVEN - do not rebuild on these:"]
+        for p in dead:
+            lines.append(f'[{p.id}] REFUTED by {p.verified_by} - "{p.text}"')
+            lines.append(f'     disproven by: {p.quote}')
+        lines.append("\nA line of reasoning that needs one of these to be true is "
+                     "already known wrong.")
+        return "\n".join(lines)
