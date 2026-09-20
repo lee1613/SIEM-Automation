@@ -3,7 +3,7 @@
 **Date:** 2026-09-20
 **Status:** approved, not implemented
 **Target version:** v1.5
-**Successor spec:** validation agent + alternative-agent hand-over (spec 2, to be written)
+**Successor spec:** `2026-09-20-validation-agent-design.md` (spec 2) — written, blocked on this one
 
 ---
 
@@ -272,7 +272,14 @@ settled with evidence or still blocking the answer.
 
 ## 7. What spec 2 will consume
 
-Recorded here so implementation does not break it:
+Spec 2 (`2026-09-20-validation-agent-design.md`) is written and depends on every
+field below. Recorded here so implementation does not break it.
+
+**This run is also spec 2's calibration data.** Spec 2 §8.1 lists five parameters
+that are deliberately unset until the Q216 smoke run measures them — premises per
+report, the share marked `load_bearing`, and how often the validator trigger *would*
+have fired. Those are reads of this spec's ledger and cost nothing extra, so the
+run must log the ledger in full, not just its effect on the gates.
 
 - `load_bearing` + `round_first_seen` + `status` are the validation agent's trigger:
   a load-bearing premise still UNVERIFIED after ≥2 rounds with the senior's candidate
