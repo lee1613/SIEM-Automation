@@ -32,6 +32,19 @@ KINDS = ("coverage", "selection", "definition", "other")
 # in conversation.py so that module can import it without a cycle.
 MIN_QUOTE_CHARS = 12
 
+# A quote that cites SH is SH's own claim coming back as evidence. v1.4.2 Q216:
+# SH told s1 the attribution was settled, s1 wrote "established by SH outside this
+# feed", and SH quoted that sentence as the evidence for its VERIFIED line.
+#
+# Lives here, not in conversation.py, because the gate alone is not enough: the
+# runner writes the ledger BEFORE the gates run (so SH can cite an id it just
+# filed), and a rejected turn is not rolled back. A check that only the gate knows
+# about flips the status, gets the turn rejected, and leaves the laundered VERIFIED
+# standing for the re-issued turn. `apply` has to refuse it too.
+CIRCULAR = re.compile(r"\b(established|confirmed|settled|told|instructed)\b"
+                      r"[^.]{0,60}\bSH\b|\bper SH\b|\bSH (?:said|states?|instruction)",
+                      re.IGNORECASE)
+
 
 def _match_form(text: str) -> str:
     """Alphanumeric runs only, lowercased, single-spaced.
@@ -213,6 +226,11 @@ class PremiseLedger:
                 continue
             if p.status == "REFUTED":
                 notes.append(f"update ignored: {u.id} is REFUTED, which is final")
+                continue
+            if u.status in ("VERIFIED", "REFUTED") and CIRCULAR.search(u.quote or ""):
+                notes.append(
+                    f"{u.id} stays {p.status}: that quote cites SH as the authority - "
+                    "an instruction is not evidence. Quote the query or result.")
                 continue
             if u.status in ("VERIFIED", "REFUTED") and not quote_supported(u.quote, corpus):
                 notes.append(

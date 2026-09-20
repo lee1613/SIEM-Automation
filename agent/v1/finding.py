@@ -353,6 +353,9 @@ def parse_finding(messages: list, answer: str) -> dict:
         "report":     str(args.get("report") or "").strip(),
         "new_premises":    _drafts(args.get("new_premises")),
         "premise_updates": _updates(args.get("premise_updates")),
-        "open_questions":  [str(q).strip() for q in (args.get("open_questions") or [])
+        # _coerce_objects, not a bare loop: a provider that sends the list as a JSON
+        # string would otherwise be iterated character by character, filing one
+        # open question per character - each with an id SH is then gated on.
+        "open_questions":  [str(q).strip() for q in _coerce_objects(args.get("open_questions"))
                             if str(q).strip()],
     }

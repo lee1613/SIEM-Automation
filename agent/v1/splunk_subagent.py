@@ -383,4 +383,10 @@ class SplunkWorkerPool:
             "structured":        finding["structured"],
             "insight":           finding["insight"],
             "report":            finding["report"],
+            # The ledger half of the finding. Dropping these here is silent - the
+            # session reads them with .get(), so the run stays green and the ledger
+            # simply never holds a senior's premise.
+            "new_premises":      finding["new_premises"],
+            "premise_updates":   finding["premise_updates"],
+            "open_questions":    finding["open_questions"],
         }

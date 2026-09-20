@@ -19,10 +19,10 @@ holds. A doubt that fits none of the five is a CLARIFY, not a critic.
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from typing import Literal
 
+from premise import CIRCULAR as _CIRCULAR
 from premise import PremiseDraft, PremiseUpdate, quote_supported
 from pydantic import BaseModel, Field, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
@@ -339,14 +339,6 @@ def unsure_remedy(state: QuestionState, src: str) -> str:
                 f"SPAWN an alternative senior on a different area, constrained to where "
                 f"{src} may have overlooked")
     return ""
-
-
-# A quote that cites SH is SH's own claim coming back as evidence. v1.4.2 Q216:
-# SH told s1 the attribution was settled, s1 wrote "established by SH outside this
-# feed", and SH quoted that sentence as the evidence for its VERIFIED line.
-_CIRCULAR = re.compile(r"\b(established|confirmed|settled|told|instructed)\b"
-                       r"[^.]{0,60}\bSH\b|\bper SH\b|\bSH (?:said|states?|instruction)",
-                       re.IGNORECASE)
 
 
 def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:

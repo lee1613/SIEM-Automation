@@ -524,6 +524,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         # reports, not tool output - it has no Splunk access and never will.
         sh_corpus = ([r.get("report", "") for r in all_reports]
                      + sum(clarify_text.values(), []))
+        ledger_notes: list[str] = []
         for e in turn.entries:
             filed = ledger.add(e.new_premises, author="sh", round_n=state.turns_used)
             # SH cannot cite what it has just filed - the runner owns the ids - so the
@@ -534,11 +535,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             if e.route == "ANSWER":
                 e.answer_premise_ids = list(e.answer_premise_ids) + [
                     p.id for p in filed if p.id not in e.answer_premise_ids]
-            ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
-                         round_n=state.turns_used)
-            for a in e.open_question_answers:
-                if a.answer.strip():
-                    ledger.answer(a.id, a.answer)
+            notes = ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
+                                 round_n=state.turns_used)
+            ledger_notes.extend(notes)
 
         problems = grade_violations(
             turn.entries, graded=set(unread),
@@ -558,11 +557,28 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + premise_audit_violations(
             turn.entries, ledger
         ) + ledger_violations(turn.entries, ledger, state)
+        # A refused update is not a gate violation, so without this SH is told
+        # nothing and re-sends the same malformed update until the turns run out,
+        # blocked each time by an ANSWER gate naming a premise it believes settled.
+        if ledger_notes:
+            problems = problems + ["the runner refused a premise update: " + n
+                                   for n in ledger_notes]
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
             msgs.append(HumanMessage(content=render_rejection(problems)))
             continue
+        # Answers are recorded only once the turn is accepted, and only for the
+        # senior the entry addresses. Written before the gates they close the
+        # questions that `open_question_violations` reads, so the gate sees nothing
+        # owed and never fires; and a turn rejected for any other reason would eat
+        # the answers without ever delivering them.
+        for e in turn.entries:
+            sid = e.source_senior if e.route == "ANSWER" else e.senior_id
+            owned = {q.id for q in ledger.open_questions_for(sid)} if sid else set()
+            for a in e.open_question_answers:
+                if a.id in owned:
+                    ledger.answer(a.id, a.answer)
         grades.extend(rows)
         unread = {}
 
