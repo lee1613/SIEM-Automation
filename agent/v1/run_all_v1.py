@@ -50,6 +50,7 @@ from hint_client import HintBook
 from hitl import RunPaused
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
+from premise import dump_ledgers
 from sh_loop import run_question
 from splunk_pool import SplunkConnectionPool
 from splunk_subagent import SplunkWorkerPool
@@ -356,6 +357,10 @@ def main():
     print("=" * 80)
 
     results              = []
+    # qid -> PremiseLedger. Dumped once at the end of the run: spec 2's
+    # calibration reads each premise's status HISTORY, which the per-question
+    # reports cannot recover after the fact.
+    ledgers: dict        = {}
     metrics_rows         = []
     total_points         = 0
     earned_pts           = 0
@@ -454,6 +459,7 @@ def main():
                     case_file=case_file, dataset_briefing=briefing,
                     delegations=ctx.q_delegations, history=sh_history,
                 )
+                ledgers[qid] = conv["ledger"]
                 sh_answer = conv["answer"]
                 ctx.all_delegations.extend(ctx.q_delegations)
                 print(f"[SH CONV] {qid}: end={conv['end_reason']}  "
@@ -541,6 +547,7 @@ def main():
                                 case_file=case_file, dataset_briefing=briefing,
                                 delegations=ctx.q_delegations, history=sh_history,
                             )
+                        ledgers[f"{qid}-hint"] = hint_result["ledger"]
                         stage_ms["hint"] = t_hint.ms
                         ctx.all_delegations.extend(ctx.q_delegations[n_before:])
                         hint_conv = {
@@ -682,6 +689,14 @@ def main():
     logger.events.emit("run_end", correct=correct_n, attempted=att,
                        score=earned_pts, total=total_points,
                        estimated_usd=tok_total.get("estimated_usd", 0))
+
+    # One file for the whole run. The per-premise status HISTORY is the point, not
+    # the end state: the follow-up spec's trigger asks how long a premise sat
+    # UNVERIFIED while the candidate held still, and a finished report cannot say.
+    ledger_path = os.path.join(logger.run_dir, "premise_ledger.json")
+    dump_ledgers(ledger_path, ledgers)
+    n_premises = sum(len(led.premises) for led in ledgers.values())
+
     print(f"\n{'='*80}\nFINAL — {logger.run_name}  ({run_label})")
     print(f"  Correct           : {correct_n}/{att}"
           f"  ({(correct_n/att*100 if att else 0):.1f}%)")
@@ -689,6 +704,7 @@ def main():
     print(f"  Failed delegations: {ctx.failed_delegations}")
     print(f"  Summary JSON      : {summary_path}")
     print(f"  Timeline          : {logger.timeline_path}")
+    print(f"  Premise ledger    : {ledger_path}  ({n_premises} premises)")
     print(f"  LangSmith project : {ls_project}")
     print(f"  Total tokens      : {tok_total.get('total_tokens', 0):,}"
           f"  (in={tok_total.get('input_tokens',0):,}"
