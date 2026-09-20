@@ -50,19 +50,32 @@ settle it, and it does not stop a confirming second opinion.
 
 ### 3.1 Trigger — the runner spawns it, SH is not asked
 
-Evaluated by the runner after each wave, per active senior:
+> **Revised 2026-09-21 from the Q216 ledger runs (§8.2).** The original trigger fired
+> on a load-bearing premise that had been UNVERIFIED for `VALIDATE_AFTER_ROUNDS` with
+> the candidate unchanged. Both runs showed that trigger would never fire on the
+> failure that actually loses the question: in r2 every premise was settled to
+> VERIFIED by its own author within two rounds of being filed, so none ever went
+> stale. A staleness trigger waits for a signal a self-certifying author never emits.
+
+Evaluated by the runner after each wave:
 
 ```
-a load-bearing premise exists with
-    status == "UNVERIFIED"
-    current_round - round_first_seen >= VALIDATE_AFTER_ROUNDS
-AND the senior's candidate value is unchanged across those rounds
-AND validators_spent[senior] < MAX_VALIDATORS_PER_SENIOR
+a premise was settled this wave (UNVERIFIED -> VERIFIED or REFUTED)
+    AND premise.load_bearing
+    AND validators_spent[question] < MAX_VALIDATORS_PER_QUESTION
 ```
 
-When it holds: **retire the senior, spawn one validator per qualifying premise**
-(oldest `round_first_seen` first, capped). The senior's candidate is held, not
-discarded.
+When it holds: **spawn one validator per qualifying premise**. The senior is NOT
+retired and the wave is not interrupted — validators run as their own parallel wave
+and SH reads the verdicts in its next turn. (The original spec retired the senior,
+which made sense for a staleness trigger firing late in a senior's life; under a
+settle-time trigger it would retire the senior in round 2, every time.)
+
+Validating at the moment of settling is what catches the r2 failure at the point the
+error enters. Q216 r2's coverage premise `p1` said in its own text that route (c) was
+*"NOT yet searched"*, and was marked VERIFIED quoting the result of searching route
+(c) — 4,832 flows where the answer assumed 1. The premise was never UNVERIFIED for
+two rounds; it went straight from filed to falsely settled.
 
 SH does not choose this and cannot decline it. That is the point. Every version so
 far has failed at exactly this moment because SH had a rule and did not follow it —
@@ -251,15 +264,15 @@ The numbers came from the user's initial sketch, not from evidence. Before
 implementing §3, read `log/temp/<run>/premise_ledger.json` from spec 1's Q216 run
 and set them per §8 — which also says what to do if that file is missing.
 
-| | Parameter | Provisional | What decides it |
+| | Parameter | **Set 2026-09-21** | Basis |
 |---|---|---|---|
-| 7.1 | `MAX_VALIDATORS_PER_SENIOR` | 3 | How many load-bearing UNVERIFIED premises a real question actually produces. If the median is 1, 3 is dead weight; if it is 6, 3 validates an arbitrary third |
-| 7.2 | `VALIDATOR_ROUNDS` | 1 | Whether validators conclude within one round or routinely run out |
-| 7.3 | `VALIDATOR_ITERS` | 8 | Iterations actually used by validators that *did* conclude. If they conclude at 3, cut it; if they cap out at 8, the briefing is too thin (see 7.4) |
-| 7.4 | Validator briefing content | premise + `evidence` only | Whether a blind validator can search efficiently. Fallback if not: add the senior's `spl_used` list — queries leak less than reports do. Last resort: a sanitized problem statement, which puts the biased party back in the loop |
-| 7.5 | Trigger tightness | `load_bearing` + 2 rounds + candidate unchanged | The observed distribution of `load_bearing`. If seniors mark everything load-bearing, add a cap on load-bearing premises per report or have SH set the flag instead |
+| 7.1 | `MAX_VALIDATORS_PER_QUESTION` | **6** | Q216 r2 produced 3 premises, all load-bearing. 6 leaves room for a second settling of the same premise without ever being the binding constraint. Was `MAX_VALIDATORS_PER_SENIOR` = 3 |
+| 7.2 | `VALIDATOR_ROUNDS` | **1** (unchanged) | Untested — no validator has run. Revisit after the first validator wave |
+| 7.3 | `VALIDATOR_ITERS` | **8** (unchanged) | Untested. Seniors settled their premises in 1–2 rounds of 10 iterations, so 8 for a single claim is plausible |
+| 7.4 | Validator briefing content | **premise + `evidence` only** (unchanged) | Untested. For a settle-time trigger the premise also carries the author's `quote`, which is the thing being checked, so the validator gets strictly more to work with than the original design assumed |
+| 7.5 | Trigger | **settle-time, load-bearing** | Replaces staleness entirely — see §3.1. `load_bearing` was 100% in r2 and 89% in r1, so it does not discriminate; under a settle-time trigger that is acceptable, because it selects everything and everything is three |
 
-`VALIDATE_AFTER_ROUNDS` = 2 is folded into 7.5.
+`VALIDATE_AFTER_ROUNDS` is deleted — the staleness trigger it belonged to is gone.
 
 ## 8. How the first run sets §7
 
@@ -270,6 +283,39 @@ and set them per §8 — which also says what to do if that file is missing.
 The Q216 smoke run that validates spec 1 produces every number above, **before any
 of this spec is implemented**. It costs nothing extra: the ledger is already being
 measured, and these are reads of the same data.
+
+### 8.2 What the two runs actually said (2026-09-21)
+
+Read off `log/temp/v1.4.2_ledger_Q216_r1/premise_ledger.json` and
+`.../v1.4.2_ledger_Q216_r2/premise_ledger.json`. Full analysis in
+`docs/version_architecture/v1/v1.4.2.md`.
+
+r1 is **not usable for calibration**: its 28 premises include six re-filings of the
+same three claims, a runner defect fixed in `79f3823`. r2 is the realistic shape.
+
+| | r1 (inflated) | **r2** |
+|---|---|---|
+| Premises per question | 28 | **3** |
+| `load_bearing` share | 89% | **100%** |
+| Rounds UNVERIFIED before settling | median 2, range 1–19 | **1–2** |
+| Self-verified by author | SH 15/15 | **s1 3/3** |
+| Cross-author settles | 4, all by SH | **0** |
+
+Three readings changed this spec:
+
+1. **The staleness trigger is dead** (§3.1). Nothing sat UNVERIFIED long enough. The
+   failure is a premise settled *too fast*, not one left too long.
+2. **`load_bearing` cannot filter** — it is 100%. Under a settle-time trigger that is
+   harmless; under any budget-rationing trigger it would have been fatal.
+3. **There is no independent verifier in the system.** r2: the senior filed all three
+   premises and verified all three itself. r1: SH filed 18 and verified 15 of its own.
+   Both are self-certification. This is the strongest argument for this spec, and it
+   is why the validator must not be an existing party.
+
+The test case to build against is r2's `p1`: premise text saying route (c) was *"NOT
+yet searched"*, marked VERIFIED, quoting the result of searching route (c) and
+returning 4,832 flows. A validator shown only that text and that quote needs no case
+knowledge to return REFUTED.
 
 ### Where to read it
 
