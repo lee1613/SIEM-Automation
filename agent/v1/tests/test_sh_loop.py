@@ -79,9 +79,17 @@ class _Pool:
         }
         self.result.update(over)
         self.rounds = 0
+        self.validations = 0
         self.clarifies = 0
 
     def run_round(self, **kw):
+        # v1.4.3: validators share the worker pool but are not senior rounds. Without
+        # this branch a validator would re-file the senior's premises and updates, and
+        # `rounds` would count it against the senior's budget.
+        if kw.get("technique") == "validator":
+            self.validations += 1
+            return {**self.result, "new_premises": [], "premise_updates": [],
+                    "open_questions": [], "report": "validator report"}
         self.rounds += 1
         return dict(self.result)
 
@@ -520,9 +528,16 @@ class _Recording(_Pool):
     def __init__(self, **over):
         super().__init__(**over)
         self.messages = []
+        self.validator_messages = []
 
     def run_round(self, **kw):
-        self.messages.append(kw.get("message", ""))
+        # `messages` means "what the SENIOR was told", which is what the carry-forward
+        # assertions are about. Validators share the pool, so their briefings would
+        # otherwise interleave and shift every index.
+        if kw.get("technique") == "validator":
+            self.validator_messages.append(kw.get("message", ""))
+        else:
+            self.messages.append(kw.get("message", ""))
         return super().run_round(**kw)
 
 
@@ -737,3 +752,63 @@ def test_a_premise_sh_filed_survives_the_turn_that_was_rejected(tmp_path):
     out = _run(llm, _Pool(), tmp_path)
     sh_filed = [p for p in out["ledger"].premises.values() if p.author == "sh"]
     assert [p.text for p in sh_filed] == [SH_COVERAGE.text]
+
+
+# ── v1.4.3: the validation agent fires on a premise as it is settled ─────────
+
+class _Validating(_Recording):
+    """Its validators refute whatever they are given, quoting their own tool output.
+
+    Q216 r2 in miniature: s1 files p1, s1 verifies p1 from its own search, and
+    nothing else in the system reads the premise against its quote.
+    """
+
+    def run_round(self, **kw):
+        r = super().run_round(**kw)
+        if kw.get("technique") == "validator":
+            r["premise_updates"] = [PremiseUpdate(
+                id="p", status="REFUTED", quote='{"dest_port": "3333", "count": "3"}',
+                evidence="the claim names a route it says was not searched")]
+        return r
+
+
+def test_a_settled_load_bearing_premise_is_validated_without_sh_being_asked(tmp_path):
+    pool = _Validating()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
+    out = _run(llm, pool, tmp_path)
+
+    # p1 is the premise the fake senior VERIFIES on round 1 (UPDATES, above).
+    assert pool.validator_messages, "no validator ran"
+    assert out["ledger"].premises["p1"].status == "REFUTED"
+    assert out["ledger"].premises["p1"].verified_by.startswith("v")
+
+
+def test_the_validator_is_shown_the_claim_and_not_the_question(tmp_path):
+    pool = _Validating()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
+    _run(llm, pool, tmp_path, question="How long was the flow?")
+
+    brief = pool.validator_messages[0]
+    assert "mining could surface as stratum or DNS" in brief
+    assert "How long was the flow" not in brief
+    assert "1367.875" not in brief, "the candidate must not leak into the briefing"
+
+
+def test_a_refuted_premise_blocks_the_answer_that_rests_on_it(tmp_path):
+    """Spec 1's no-escape gate, now reachable: the author said VERIFIED, an
+    independent reader said REFUTED, and the ANSWER citing it cannot go through."""
+    pool = _Validating()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer()),
+                _turn(_answer()), _turn(_answer())])
+    out = _run(llm, pool, tmp_path)
+
+    assert out["answer"] == NO_ANSWER
+    assert "REFUTED" in _conversation(tmp_path)
+
+
+def test_a_premise_is_validated_once_not_every_wave(tmp_path):
+    pool = _Validating()
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()),
+                _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert len(pool.validator_messages) == 1

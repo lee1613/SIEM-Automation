@@ -43,6 +43,12 @@ from question_state import ROUND_ITERS, QuestionState
 from senior_report import REPORT_WORD_CAP
 from senior_session import SeniorSession
 from usage_tracker import context_window
+from validator import (
+    MAX_VALIDATORS_PER_QUESTION,
+    VALIDATOR_ITERS,
+    refusal_reason,
+    validate,
+)
 
 MAX_PARALLEL = 6          # matches SplunkConnectionPool's default size
 # What a question submits when SH never issued an accepted ANSWER. Only SH answers:
@@ -433,6 +439,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     """
     state = QuestionState(points=points)
     ledger = PremiseLedger()
+    validators: list = []     # v1.4.3: one entry per validator spent
+
     log = ConversationLog(run_dir, qid)
     window = senior_window or context_window(pool.senior_model)
     delegations = delegations if delegations is not None else []
@@ -677,6 +685,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if not pending:
             continue
 
+        # v1.4.3 §3.1: the validator trigger is "settled this wave", so the statuses
+        # have to be read before the wave writes to the ledger.
+        pre_status = {pid: p.status for pid, p in ledger.premises.items()}
         wave = _run_wave(pending, max_parallel=max_parallel)
         # Rounds are senior rounds (§4.2); a scout-only wave costs SH's turn, not a round.
         if any(kinds[sid] != "exploration" for sid in wave):
@@ -740,12 +751,17 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 result["rounds_left"] = state.rounds_left_for(sid)
                 unread[sid] = result
 
-        if unread or scouted or failures:
+        verdicts = _run_validators(pool, ledger, pre_status, qid=qid, log=log,
+                                   spent=validators, round_n=state.turns_used,
+                                   max_parallel=max_parallel)
+
+        if unread or scouted or failures or verdicts:
             head = (render_wave(unread, slots_remaining=state.slots_remaining,
                                 turns_remaining=state.turns_remaining,
                                 ledger=ledger) if unread
                     else _budget_line(state.slots_remaining, state.turns_remaining))
-            msgs.append(HumanMessage(content="\n\n".join([head, *scouted, *failures])))
+            msgs.append(HumanMessage(content="\n\n".join(
+                [head, *scouted, *failures, *verdicts])))
 
     if not answer:
         answer = NO_ANSWER
@@ -792,6 +808,81 @@ def _timed(run) -> dict:
         result = {"status": "api_failed", "report": "", "answer": detail, "value": "",
                   "insight": "NOT_FOUND", "spl_used": [], "iterations": 0}
     return {**result, "duration_s": round(time.perf_counter() - t0, 3)}
+
+
+def _run_validators(pool, ledger, pre_status: dict, *, qid: str, log,
+                    spent: list, round_n: int, max_parallel: int) -> list[str]:
+    """Spec 2 §3.1, settle-time trigger: validate every load-bearing premise at the
+    moment it stops being UNVERIFIED, before that status is allowed to stick.
+
+    SH is not asked and cannot decline. That is the point — both Q216 ledger runs
+    failed here, and in both the party holding the candidate was also the only
+    witness for the premise the candidate rested on (r2: s1 filed 3 and verified 3
+    of its own; r1: SH filed 18 and verified 15 of its own).
+
+    The senior is NOT retired and the wave is not interrupted. The original spec
+    retired it, which suited a trigger that fired late in a senior's life; this one
+    fires the round after a premise is filed, so retiring would end every senior in
+    round 2.
+
+    Returns one line per verdict for SH's next turn, or [] when nothing qualified.
+    """
+    done = {v["premise_id"] for v in spent}
+    due = [p for pid, p in ledger.premises.items()
+           if p.load_bearing and p.status in ("VERIFIED", "REFUTED")
+           and pre_status.get(pid) != p.status and pid not in done]
+    room = MAX_VALIDATORS_PER_QUESTION - len(spent)
+    if not due or room <= 0:
+        if due:
+            log.note(f"{len(due)} premise(s) settled unvalidated — the question's "
+                     f"validator budget ({MAX_VALIDATORS_PER_QUESTION}) is spent")
+        return []
+    due = due[:room]
+
+    jobs, targets = {}, {}
+    for n, p in enumerate(due, start=len(spent) + 1):
+        vid = f"v{n}"
+        targets[vid] = p
+        jobs[vid] = partial(validate, pool, p, vid=vid, qid=qid, idx=n,
+                            iters=VALIDATOR_ITERS)
+    log.note(f"validating {len(jobs)} settled load-bearing premise(s): "
+             + ", ".join(f"{v}->{p.id}" for v, p in targets.items()))
+
+    out = []
+    results = _run_wave(jobs, max_parallel=max_parallel)
+    for vid, res in sorted(results.items()):
+        # `_timed` turns a crashed worker into an api_failed dict with none of
+        # validate()'s keys, so the premise is read from the job map, not the result.
+        p = targets[vid]
+        spent.append({"premise_id": p.id, "vid": vid})
+        was = p.status
+        if res.get("status") == "api_failed":
+            log.note(f"{vid} on {p.id}: transport failure — {p.id} keeps {was}")
+            out.append(f"--- {vid} | validated {p.id} | validator failed to run "
+                       f"(transport). {p.id} keeps {was}, unvalidated.")
+            continue
+        why = refusal_reason(res["update"], res["corpus"])
+        if why:
+            log.note(f"{vid} on {p.id}: no verdict taken — {why}")
+            out.append(f"--- {vid} | validated {p.id} | NO VERDICT ({why}). "
+                       f"{p.id} keeps {was}.")
+            continue
+        notes = ledger.apply([res["update"]], author=vid, corpus=res["corpus"],
+                             round_n=round_n)
+        if notes:
+            log.note(f"{vid} on {p.id}: ledger refused the verdict — {notes[0]}")
+            out.append(f"--- {vid} | validated {p.id} | verdict refused by the runner. "
+                       f"{p.id} keeps {was}.")
+            continue
+        log.note(f"{vid} on {p.id}: {was} -> {p.status}")
+        out.append(
+            f"--- {vid} | INDEPENDENT VALIDATION of {p.id} | {was} -> {p.status}\n"
+            f'Premise: "{p.text}"\n'
+            f"The validator was shown this claim and the evidence offered for it, and "
+            f"nothing else — not the question, not the reports, not the candidate.\n"
+            f"Its quote: {res['update'].quote}\n"
+            f"Its reason: {res['update'].evidence}")
+    return out
 
 
 def _run_wave(pending: dict, *, max_parallel: int) -> dict:

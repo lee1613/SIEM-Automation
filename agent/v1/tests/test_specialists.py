@@ -14,6 +14,6 @@ def test_parse_metrics_tag_case_insensitive():
 
 
 def test_all_specialists_have_prompt_text():
-    assert set(SPECIALISTS) == {"hunter", "content", "metrics"}
+    assert set(SPECIALISTS) == {"hunter", "content", "metrics", "validator"}
     for name in ("content", "metrics"):
         assert SPECIALISTS[name].strip()
