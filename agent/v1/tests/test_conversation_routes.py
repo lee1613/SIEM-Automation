@@ -509,8 +509,17 @@ def _evidence(e, report, rounds_left=True, slots_left=True):
     if not rounds_left:
         while st.rounds_left_for("s1") > 0:
             st.record_round("s1")
+    from senior_report import open_doubts
     return evidence_violations([e], reports_of=lambda s: report,
-                               last_report_of=lambda s: report, state=st)
+                               doubts_of=lambda s: open_doubts(report), state=st)
+
+
+def test_a_quote_that_cites_sh_is_not_evidence():
+    # v1.4.2 Q216: SH told s1 the attribution was settled, s1 wrote it down, and SH
+    # quoted that sentence back as the evidence for its own VERIFIED line.
+    v = _evidence(_audited("External corroboration of this flow was established by SH "
+                           "outside this feed"), _R)
+    assert any("quotes SH as the authority" in x for x in v)
 
 
 def _audited(quote):

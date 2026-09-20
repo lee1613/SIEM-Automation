@@ -25,7 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
-from senior_report import open_doubts
+from senior_report import open_doubts  # noqa: F401  (re-exported for tests)
 
 GRADES = ("PASS", "WEAK", "FAIL")
 NA = "NA"
@@ -370,7 +370,15 @@ def unsure_remedy(state: QuestionState, src: str) -> str:
     return ""
 
 
-def evidence_violations(entries: list, *, reports_of, last_report_of,
+# A quote that cites SH is SH's own claim coming back as evidence. v1.4.2 Q216:
+# SH told s1 the attribution was settled, s1 wrote "established by SH outside this
+# feed", and SH quoted that sentence as the evidence for its VERIFIED line.
+_CIRCULAR = re.compile(r"\b(established|confirmed|settled|told|instructed)\b"
+                       r"[^.]{0,60}\bSH\b|\bper SH\b|\bSH (?:said|states?|instruction)",
+                       re.IGNORECASE)
+
+
+def evidence_violations(entries: list, *, reports_of, doubts_of,
                         state: QuestionState) -> list[str]:
     """Checks an ANSWER against the senior's own words, which SH cannot relabel.
 
@@ -379,10 +387,11 @@ def evidence_violations(entries: list, *, reports_of, last_report_of,
       reports first and then against every senior's, because a premise established
       by a sibling is still evidence. A VERIFIED with nothing behind it is SH's
       opinion, not evidence. `reports_of(None)` must return every senior's text.
-    * While the source senior has rounds left, its latest report must not still
-      flag a doubt in its own Assumptions (an unverified premise, rows it did not
-      read). Q216 r11: SH audited everything VERIFIED over a report that said
-      "not verifiable in-feed" and "the 2,365 unreturned rows".
+    * The source senior must have no OPEN doubt left (`doubts_of` carries every
+      unsettled premise forward across its rounds, so one cannot be dropped by
+      writing a cleaner report next round — see senior_report.carry_doubts).
+    * A VERIFIED line may not cite SH itself: an orchestrator's instruction is not
+      evidence, however faithfully the senior wrote it down.
     """
     out = []
     for e in entries:
@@ -397,11 +406,15 @@ def evidence_violations(entries: list, *, reports_of, last_report_of,
             # Any senior's report may hold the quote: an answer built on s2 routinely
             # rests on a premise s1 established, and SH names the real source in
             # `a.source` (v1.4.2 Q216 was blocked three turns for quoting s1 under s2).
-            if len(q) < MIN_QUOTE_CHARS or (q not in text and q not in _norm(reports_of(None))):
+            if _CIRCULAR.search(a.quote or ""):
+                out.append(f"audit line '{a.premise[:80]}' quotes SH as the authority — "
+                           "your own instruction is not evidence. Quote the senior's query "
+                           "or result that shows it, or mark the line UNVERIFIED")
+            elif len(q) < MIN_QUOTE_CHARS or (q not in text and q not in _norm(reports_of(None))):
                 out.append(f"audit line '{a.premise[:80]}' is VERIFIED but its quote is in "
                            "no senior's report — copy the query, result or finding that "
                            "shows it word for word, or mark the line UNVERIFIED")
-        doubts = open_doubts(last_report_of(src))
+        doubts = doubts_of(src)
         fix = unsure_remedy(state, src) if doubts else ""
         if fix:
             out.append(f"ANSWER is blocked: {src}'s latest report still flags "

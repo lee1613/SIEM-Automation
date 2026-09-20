@@ -328,3 +328,17 @@ def test_a_none_bullet_with_a_reason_is_not_a_question():
     assert open_questions(md) == []
     md2 = md.replace("- None — the definition is anchored.", "- Does the window include setup?")
     assert open_questions(md2) == ["Does the window include setup?"]
+
+
+def test_a_doubt_survives_a_report_that_simply_stops_mentioning_it():
+    # v1.4.2 Q216: s1 r1 flagged the byte profile UNVERIFIED; after a restate-only
+    # round, r3's Assumptions no longer mentioned it and the gate saw a clean report.
+    from senior_report import carry_doubts
+    r1 = ("## Assumptions\n- Definition premise: the byte profile is download-like, "
+          "so the record does not show the act - UNVERIFIED\n")
+    r3 = "## Assumptions\n- Selection: only endpoint with pool-port contact - VERIFIED\n"
+    doubts = carry_doubts([], r1)
+    assert len(doubts) == 1
+    assert carry_doubts(doubts, r3) == doubts            # dropped, not settled
+    settled = "## Assumptions\n- Definition premise: byte profile explained - VERIFIED\n"
+    assert carry_doubts(doubts, settled) == []           # named and settled

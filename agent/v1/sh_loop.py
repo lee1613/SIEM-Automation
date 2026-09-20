@@ -41,6 +41,7 @@ from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
 from senior_report import (
     REPORT_WORD_CAP,
+    carry_doubts,
     has_coverage_premise,
     has_selection_premise,
     open_questions,
@@ -479,6 +480,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
     answer, end_reason, ungrounded = "", "", 0
     clarify_text: dict = {}      # sid -> its CLARIFY replies, quotable in SH's audit
+    doubts: dict = {}            # sid -> its unsettled premises, carried across rounds
     unread_clarify = False       # a reply SH has not had a turn to read yet
 
     while True:
@@ -543,7 +545,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                  if sid is None or r.get("senior_id") == sid]
                 + (sum(clarify_text.values(), []) if sid is None
                    else clarify_text.get(sid, []))),
-            last_report_of=lambda sid: (sessions[sid].last_report if sid in sessions else ""),
+            doubts_of=lambda sid: doubts.get(sid, []),
             state=state)
         if problems:
             state.r2_streak = saved_streak
@@ -662,6 +664,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 state.record_round(
                     sid, capped=(bool(result.get("cap_hit"))
                                  or int(result.get("iterations", 0)) >= ROUND_ITERS))
+            # Doubts follow the senior, not its latest report: a later round cannot
+            # drop an unsettled premise by not mentioning it (carry_doubts).
+            doubts[sid] = carry_doubts(doubts.get(sid, []), result.get("report", ""))
             rel = log.write_report(sid, result.get("round", 0), result.get("report", ""))
             log.senior_to_sh(sid, round_n=result.get("round", 0),
                              insight=result.get("insight", "?"),

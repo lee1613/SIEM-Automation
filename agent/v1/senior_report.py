@@ -135,6 +135,32 @@ def open_doubts(md: str) -> list[str]:
     return [ln.strip() for ln in m.group(1).splitlines() if _DOUBT.search(ln)]
 
 
+def _label(line: str) -> str:
+    """The premise a doubt line is about: its text up to the first colon, else its
+    first four words. Used to tell "this doubt was settled" from "it was dropped"."""
+    head = (line.split(":", 1)[0] if ":" in line else " ".join(line.split()[:4]))
+    return re.sub(r"[^a-z0-9 ]", "", head.lower()).strip(" -")
+
+
+def carry_doubts(prev: list[str], report: str) -> list[str]:
+    """A senior's open doubts after this report: the ones it carried in, minus the
+    ones this report marks VERIFIED, plus whatever new it flags.
+
+    A doubt leaves the list only when the senior says it is settled. Dropping it
+    silently is not settling it — v1.4.2 Q216: s1 r1 wrote "the 3333 record's byte
+    profile (5.7MB in / 177B out) is download-like, so the record does not positively
+    show the act - UNVERIFIED", SH then commanded a restate-only round, and r3 came
+    back with that line simply gone. The gate reads the latest report, so the doubt
+    that should have blocked the answer had vanished from view.
+    """
+    m = re.search(r"^## Assumptions[^\n]*$(.*?)(?=^#{1,3} |^_|\Z)",
+                  report or "", re.MULTILINE | re.DOTALL)
+    settled = {_label(ln) for ln in (m.group(1).splitlines() if m else [])
+               if "VERIFIED" in ln and not _DOUBT.search(ln)}
+    kept = [d for d in prev if _label(d) not in settled]
+    return kept + [d for d in open_doubts(report) if d not in kept]
+
+
 def unverified_premises(md: str) -> int:
     """How many lines of the "## Assumptions" section are marked UNVERIFIED —
     surfaced to SH as a warning, never a gate (R4 is soft by design)."""
