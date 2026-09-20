@@ -179,31 +179,33 @@ non-empty `deviation`, or the turn is rejected.
 This replaces the prose ALTERNATIVE SENIOR paragraph in `SH_SYSTEM_PROMPT` with
 fields SH must fill — the same move spec 1 makes for premises.
 
-### 4.3 Divergence: what code can check, and what it cannot
+### 4.3 Divergence is NOT checked — deliberately
 
-You asked for the runner to verify the AA reaches a different answer. Checking that
-the *value* differs was rejected in design: if the retired senior happened to be
-right, a hard check forces the AA away from the correct answer and gives it no way
-to report "I checked, and the original value holds for a different reason."
+Nothing in this spec verifies that the AA diverges from the senior it replaced.
 
-What replaces it splits into what code can honestly do and what it cannot:
+Two checks were designed and both were dropped:
 
-**Enforced (code):** an ANSWER may not cite a REFUTED premise id. This is already
-spec 1 §3.8 and needs nothing new.
+- **"the value must differ"** — rejected because if the retired senior happened to
+  be right, a hard check forces the AA away from the correct answer and gives it no
+  way to report "I checked, and the original value holds for a different reason."
+- **"the AA must not re-derive a refuted premise"** — rejected because code cannot
+  do this from free text. Any implementation is a fuzzy string match, which is the
+  exact class of mechanism spec 1 exists to delete; it would reintroduce `_label()`
+  under a new name.
 
-**Surfaced (SH's judgement):** when the AA's candidate equals the retired senior's,
-the runner adds a notice to the wave:
+**What stands in their place is the brief itself.** §4.1 puts every REFUTED premise
+in front of the AA verbatim, with the evidence that disproved it, and states that a
+line of reasoning needing one of them is already known wrong. That is explicit
+instruction, not inference.
 
-```
-!! s3's candidate equals the retired s1's candidate, and p5 is REFUTED.
-   Your audit must say which premise carries this value now.
-```
+Whether the AA obeys it is an **observation, not a gate**. The run will show whether
+a replacement rebuilds on ground it was told was disproven. If it does, that is the
+point at which to design a check — with a real example of the failure in hand rather
+than a guess at its shape.
 
-**Not attempted:** detecting that the AA *re-derived* a refuted premise in different
-words. Code cannot do this from free text — any attempt is a fuzzy string match,
-which is the exact class of mechanism spec 1 exists to delete. Pretending otherwise
-would reintroduce `_label()` under a new name. It is left to SH, with the refuted
-list in front of it and the notice above when the values collide.
+Spec 1 §3.8 still applies and is unaffected: an ANSWER may not cite a REFUTED
+premise id. That is a direct contradiction, trivially checkable, and a different
+thing from judging whether reasoning was rebuilt.
 
 ## 5. Risks
 
@@ -236,8 +238,11 @@ too loose, a senior making real progress on other fronts is lost. §7.5.
 - a validator consumes no senior spawn slot
 - the AA's brief contains every REFUTED premise verbatim, with SH unable to alter it
 - a SPAWN with a REFUTED load-bearing premise and empty `deviation` is rejected
-- the candidate-collision notice appears when the AA's value equals the retired senior's
 - the validator's prompt contains no part of the question text (leakage regression guard)
+
+Not tested, because not enforced (§4.3): that the AA's candidate differs from the
+retired senior's, or that its reasoning avoids a refuted premise. Both are
+**observed** in the run log instead — see §8.2.
 
 ## 7. Open parameters — set these from data, not from judgement
 
@@ -272,6 +277,10 @@ measured, and these are reads of the same data.
 - share of validators returning UNVERIFIED (failed to settle) → **7.2, 7.4**. A high
   share means the blind briefing is too thin, not that the premises are hard
 - validator cost as a share of question cost → sanity check against §5
+- **did the AA rebuild on a REFUTED premise it was explicitly handed?** (§4.3). Read
+  its ledger entries against the refuted list by hand. If it did, that is the
+  evidence needed to design a check — and the shape of the real failure beats a
+  guess at it. If it did not, the brief was enough and no check is owed
 
 **8.3 — recording.** Write the measured values into this file's §7 table alongside
 the provisional ones, with the run they came from. Do not silently replace them:
@@ -284,6 +293,6 @@ the provisional number and the reason it was wrong are the useful record.
 | `agent/v1/validator.py` | **new** — the validation worker: prompt, one-round runner, ledger write-back |
 | `agent/v1/premise.py` | trigger predicate (`needs_validation`), validator accounting |
 | `agent/v1/question_state.py` | `validators_spent` per senior; validators consume no spawn slot |
-| `agent/v1/sh_loop.py` | automatic retire-and-spawn on the trigger; AA brief injection; candidate-collision notice |
+| `agent/v1/sh_loop.py` | automatic retire-and-spawn on the trigger; AA brief injection |
 | `agent/v1/conversation.py` | SPAWN gains `deviation` + `inherited_entities`; the `deviation` gate |
 | `agent/v1/tests/` | as §6 |
