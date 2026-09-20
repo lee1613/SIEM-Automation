@@ -2,6 +2,7 @@
 import os
 
 from conversation import SeniorDirective, SHTurn
+from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from sh_loop import NO_ANSWER, render_wave, run_question
 
 # Every SeniorDirective field is required under strict json_schema, so tests fill
@@ -11,7 +12,8 @@ from sh_loop import NO_ANSWER, render_wave, run_question
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
-    "open_question_answers": [],
+    "open_question_answers": [], "new_premises": [], "premise_updates": [],
+    "answer_premise_ids": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
@@ -19,7 +21,7 @@ BLANK = {
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
-    "case_updates": [], "premise_audit": [],
+    "case_updates": [],
 }
 
 
@@ -29,8 +31,20 @@ def entry(**kw) -> SeniorDirective:
 
 REPORT = ("# s1 - Q216 - Round 1\n**Insight:** FOUND\n\n## Prior rounds\n- r1\n\n"
           "## This round\n### What I ran\n- search x -> 3 events\n"
-          "### What it means\nThe duration is 1367.875.\n\n## Ruled out\n- none\n\n"
-          "## Open questions for SH\n- none\n")
+          "### What it means\nThe duration is 1367.875.\n\n## Ruled out\n- none\n")
+
+# What the fake senior files into the ledger each round. p1 is the coverage premise
+# every _answer() below rests on; p2 stays UNVERIFIED, so an answer that cites it is
+# blocked while s1 still has rounds.
+PREMISES = [PremiseDraft(text="mining could surface as stratum or DNS", kind="coverage",
+                         load_bearing=True),
+            PremiseDraft(text="this endpoint and not another", kind="selection",
+                         load_bearing=True)]
+UPDATES = [PremiseUpdate(id="p1", status="VERIFIED", quote="dest_port=3333 count=3",
+                         evidence="the full 22-value listing")]
+# The tool output those quotes are checked against (SeniorSession.tool_outputs).
+TOOL_STATE = [{"type": "ToolMessage",
+               "content": '{"results": [{"dest_port": "3333", "count": "3"}]}'}]
 
 
 class _LLM:
@@ -60,7 +74,8 @@ class _Pool:
             "report": REPORT, "spl_used": ["search x"], "sourcetypes": ["cisco:nvm"],
             "negative_findings": [], "search_space_used": {"sourcetypes": [], "sources": []},
             "iterations": 6, "cap_hit": False, "structured": True,
-            "last_prompt_tokens": 500, "answer": "", "full_state": [],
+            "last_prompt_tokens": 500, "answer": "", "full_state": TOOL_STATE,
+            "new_premises": PREMISES, "premise_updates": UPDATES, "open_questions": [],
         }
         self.result.update(over)
         self.rounds = 0
@@ -91,7 +106,7 @@ def _spawn(**kw):
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
-                premise_audit=["Coverage - VERIFIED: search x -> 3 events"],
+                answer_premise_ids=["p1"],
                 r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
                 r4_premise_verification="PASS")
     base.update(kw)
@@ -501,10 +516,6 @@ def test_each_delegation_records_its_duration(tmp_path):
 
 # ── SH must answer the senior's open questions; R4 is recorded ───────────────
 
-ASKING = REPORT.replace("## Open questions for SH\n- none\n",
-                        "## Open questions for SH\n- Is host A the one the question means?\n")
-
-
 class _Recording(_Pool):
     def __init__(self, **over):
         super().__init__(**over)
@@ -515,16 +526,37 @@ class _Recording(_Pool):
         return super().run_round(**kw)
 
 
+class _Asking(_Recording):
+    """Files one open question into the ledger, on its first round only."""
+
+    def run_round(self, **kw):
+        r = super().run_round(**kw)
+        if self.rounds == 1:
+            r["open_questions"] = ["Is host A the one the question means?"]
+        return r
+
+
 def test_ignoring_a_seniors_open_question_is_rejected(tmp_path):
-    pool = _Recording(report=ASKING)
-    answered = _continue(open_question_answers=["Yes: host A is the endpoint in scope."])
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(answered),
-                _turn(_answer(open_question_answers=["Yes, host A."]))])
+    pool = _Asking()
+    answered = _continue(open_question_answers=[
+        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}])
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(answered), _turn(_answer())])
     _run(llm, pool, tmp_path)
     assert pool.rounds == 2, "the ignoring turn must not run a round"
-    assert "open question" in _conversation(tmp_path).lower()
+    assert "waiting on q1" in _conversation(tmp_path)
     assert "host A is the endpoint in scope" in pool.messages[-1], \
         "SH's answer must reach the senior with its next directive"
+
+
+def test_an_answered_question_is_not_owed_again(tmp_path):
+    # Settled in the ledger, so the ANSWER turn that follows owes nothing.
+    pool = _Asking()
+    answered = _continue(open_question_answers=[
+        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}])
+    llm = _LLM([_turn(_spawn()), _turn(answered), _turn(_answer())])
+    out = _run(llm, pool, tmp_path)
+    assert out["end_reason"] == "answer"
+    assert out["ledger"].open_questions_for("s1") == []
 
 
 def test_grade_rows_record_r4(tmp_path):
@@ -543,26 +575,34 @@ def test_an_answer_on_an_unverified_premise_is_allowed_but_logged(tmp_path):
     assert "unverified premise" in _conversation(tmp_path).lower()
 
 
-def test_a_weak_r4_tells_the_senior_to_verify_first(tmp_path):
+def test_the_runner_carries_the_unresolved_premises_into_the_next_round(tmp_path):
+    # Replaces the verify-first prefix: the runner prepends p2 (still UNVERIFIED)
+    # to round 2 itself, so SH's grade cannot decide whether the senior is reminded.
     pool = _Recording()
     llm = _LLM([_turn(_spawn()), _turn(_continue(r4_premise_verification="WEAK")),
                 _turn(_answer())])
     _run(llm, pool, tmp_path)
-    assert "UNVERIFIED" in pool.messages[1] and "first" in pool.messages[1].lower()
+    assert "YOUR UNRESOLVED PREMISES" in pool.messages[1]
+    assert "p2" in pool.messages[1]
 
 
-def test_a_passing_r4_adds_no_reminder(tmp_path):
+def test_the_carry_forward_does_not_depend_on_shs_r4_grade(tmp_path):
+    # v1.4.2: the old reminder fired on WEAK/FAIL R4 only, and SH grades all-PASS
+    # when it wants to answer.
     pool = _Recording()
     llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
     _run(llm, pool, tmp_path)
-    assert "UNVERIFIED" not in pool.messages[1]
+    assert "YOUR UNRESOLVED PREMISES" in pool.messages[1]
 
 
-def test_the_wave_flags_unverified_premises_to_sh():
-    report = "## Assumptions\n- a - VERIFIED: q -> 3\n- b - UNVERIFIED\n"
-    text = render_wave({"s1": {"report": report, "novel_spl_count": 1}},
-                       slots_remaining=1, turns_remaining=3)
-    assert "1 UNVERIFIED" in text
+def test_the_wave_shows_sh_every_unsettled_premise():
+    led = PremiseLedger()
+    led.add(PREMISES, author="s1", round_n=1)
+    led.apply(UPDATES, author="s1", corpus=[TOOL_STATE[0]["content"]], round_n=1)
+    text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
+                       slots_remaining=1, turns_remaining=3, ledger=led)
+    assert "p2" in text and "UNVERIFIED" in text
+    assert "p1" in text and "VERIFIED" in text
 
 
 def test_two_parallel_seniors_on_disjoint_scopes_both_run(tmp_path):
@@ -602,35 +642,32 @@ def test_a_provider_outage_still_asks_a_human(tmp_path, monkeypatch):
     assert len(paused) == 1
 
 
-def test_an_answer_without_a_premise_audit_is_rejected_then_accepted(tmp_path):
-    llm = _LLM([_turn(_spawn()), _turn(_answer(premise_audit=[])), _turn(_answer())])
+def test_an_answer_citing_no_premise_is_rejected_then_accepted(tmp_path):
+    llm = _LLM([_turn(_spawn()), _turn(_answer(answer_premise_ids=[])), _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     assert out["answer"] == "1367.875" and out["turns"] == 3
     log = _conversation(tmp_path)
-    assert "premise_audit" in log and "Premise audit (SH)" in log
+    assert "names no premises" in log and "Premises it rests on:** p1" in log
 
 
-def test_an_answer_on_an_unverified_audit_line_is_blocked_while_rounds_remain(tmp_path):
-    # Q216 r10 answered over two UNVERIFIED audit lines that decided the value.
+def test_an_answer_on_an_unverified_premise_is_blocked_while_rounds_remain(tmp_path):
+    # Q216 r10 answered over two UNVERIFIED premises that decided the value.
     llm = _LLM([_turn(_spawn()),
-                _turn(_answer(premise_audit=["Coverage - VERIFIED: search x -> 3 events",
-                                             "this endpoint and not another - UNVERIFIED"])),
+                _turn(_answer(answer_premise_ids=["p1", "p2"])),
                 _turn(_answer())])
     out = _run(llm, _Pool(), tmp_path)
     assert out["end_reason"] == "answer"
-    assert "premise(s) UNVERIFIED" in _conversation(tmp_path)
+    assert "load-bearing premise(s) it rests on are still UNVERIFIED" \
+        in _conversation(tmp_path)
 
 
-def test_a_report_without_a_selection_premise_is_flagged_to_sh():
+def test_a_missing_coverage_premise_is_visible_to_sh_as_absence():
+    # The table replaces the old '!!' warnings: SH sees which kinds were filed.
+    led = PremiseLedger()
+    led.add(PREMISES[1:], author="s1", round_n=1)     # selection only
     text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
-                       slots_remaining=2, turns_remaining=5)
-    assert "no Selection premise" in text
-
-
-def test_a_report_without_a_coverage_premise_is_flagged_to_sh():
-    text = render_wave({"s1": {"report": REPORT, "novel_spl_count": 1}},
-                       slots_remaining=2, turns_remaining=5)
-    assert "no Coverage premise" in text
+                       slots_remaining=2, turns_remaining=5, ledger=led)
+    assert "selection" in text and "coverage" not in text
 
 
 def test_the_senior_task_leads_with_the_question_verbatim():
@@ -648,3 +685,20 @@ def test_retiring_a_retired_senior_again_gets_a_reminder(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(retire), _turn(retire), _turn(_answer())])
     _run(llm, _Pool(), tmp_path)
     assert "s1 is already retired or was never spawned" in _conversation(tmp_path)
+
+
+def test_render_wave_prints_the_ledger_table():
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining could surface as stratum", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    out = render_wave({"s1": {"report": "## This round\nx", "insight": "FOUND",
+                              "novel_spl_count": 2, "rounds_left": 5}},
+                      slots_remaining=2, turns_remaining=10, ledger=led)
+    assert "PREMISE LEDGER" in out and "p1" in out and "coverage" in out
+
+
+def test_render_wave_still_works_with_an_empty_ledger():
+    out = render_wave({"s1": {"report": "x", "insight": "FOUND",
+                              "novel_spl_count": 1, "rounds_left": 3}},
+                      slots_remaining=1, turns_remaining=4, ledger=PremiseLedger())
+    assert "no premises filed yet" in out.lower()

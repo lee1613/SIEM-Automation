@@ -23,9 +23,9 @@ import re
 from collections import Counter
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from premise import PremiseDraft, PremiseUpdate, quote_supported
+from pydantic import BaseModel, Field, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
-from senior_report import open_doubts  # noqa: F401  (re-exported for tests)
 
 GRADES = ("PASS", "WEAK", "FAIL")
 NA = "NA"
@@ -55,37 +55,14 @@ class Scope(BaseModel):
         return not (self.sourcetypes or self.sources or self.fields)
 
 
-class AuditLine(BaseModel):
-    """One premise of SH's pre-ANSWER audit. Structured so code can read the verdict:
-    as free text, "could change the answer" was prose no gate could rely on."""
+class QuestionAnswer(BaseModel):
+    """SH's answer to one open question, addressed by id.
 
-    premise: str = Field(description="The premise the answer rests on. The first line's "
-                                     "premise starts with 'Coverage'.")
-    status: Literal["VERIFIED", "UNVERIFIED"] = Field(
-        description="VERIFIED only when a result in a report, read in full, shows it.")
-    source: str = Field(description="VERIFIED: which senior report holds the evidence, "
-                                    "e.g. 's1 round 2'. UNVERIFIED: empty.")
-    quote: str = Field(description="VERIFIED: the senior's query, result or finding that "
-                                   "shows it, copied WORD FOR WORD from that report (the "
-                                   "runner checks it is there). UNVERIFIED: empty.")
-    evidence: str = Field(description="VERIFIED: why that quote establishes the premise. "
-                                      "UNVERIFIED: what would test it.")
+    A bare list matched by index let SH answer question 2 twice and pass the count
+    check, which is what `open_question_violations` used to do."""
 
-    def render(self) -> str:
-        cite = f" [{self.source}: \"{self.quote}\"]" if self.quote else ""
-        return (f"{self.premise} - {self.status}" + cite
-                + (f": {self.evidence}" if self.evidence else ""))
-
-
-def _norm(text: str) -> str:
-    """Whitespace-, case- and markdown-insensitive form, so a faithful quote matches."""
-    return re.sub(r"\s+", " ", re.sub(r"[`*_]", "", text or "")).strip().lower()
-
-
-MIN_QUOTE_CHARS = 12   # shorter than this, a "quote" matches almost any report
-
-
-_AUDIT_TEXT = re.compile(r"^(.*?)\s*(?:-|\u2013|\u2014)\s*(UNVERIFIED|VERIFIED)(?![A-Z])\s*:?\s*(.*)$", re.S)
+    id: str = Field(description="The question id, e.g. 'q2'. Copy it exactly.")
+    answer: str = Field(description="Your answer. If you cannot settle it, say what would.")
 
 
 class SeniorDirective(BaseModel):
@@ -109,14 +86,14 @@ class SeniorDirective(BaseModel):
                     "a result shown in the report? PASS: each has a query and result behind "
                     "it. WEAK: minor premises untested, the chain holds without them. FAIL: "
                     "the candidate or the direction depends on a premise nobody tested. A "
-                    "WEAK/FAIL tells the senior to verify first; the ANSWER gate is the "
-                    "premise audit, not this grade.")
-    open_question_answers: list[str] = Field(
-        description="Your answer to each bullet in the '## Open questions for SH' section of "
-                    "the report this entry addresses (for ANSWER: the source senior's report), "
-                    "in order, one per question. Answer from the case, the question text and "
-                    "sibling reports; if you cannot, say what would settle it. Empty only when "
-                    "that report asked nothing, and for SPAWN.")
+                    "WEAK/FAIL is your reading of the chain; the ANSWER gate is the "
+                    "ledger, not this grade.")
+    open_question_answers: list[QuestionAnswer] = Field(
+        description="One entry per OPEN question the senior you are addressing has "
+                    "asked (for ANSWER: the source senior's). Each names the question's "
+                    "id and your answer. Answer from the case, the question text and "
+                    "sibling reports; if you cannot, say what would settle it - that is "
+                    "still an answer. Empty only when it has asked nothing.")
     route: Literal["SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER"] = Field(
         description="Exactly one route for this senior this wave.")
 
@@ -172,14 +149,24 @@ class SeniorDirective(BaseModel):
     value_kind: str = Field(description="ANSWER only. What the value is — count, hostname, ip, cve...")
     source_senior: str = Field(description="ANSWER only. The senior whose report the value came from.")
     justification: str = Field(description="ANSWER only. Why that report establishes this value.")
-    premise_audit: list[AuditLine] = Field(
-        description="ANSWER only. Your own audit before answering: trace the chain from the "
-                    "question's words to the value and list every premise it rests on that the "
-                    "source report's Assumptions do NOT list. Open with a 'Coverage' premise: "
-                    "every way the question's key concept could show up in the data and whether "
-                    "the seniors searched each. Then above all, why this entity and not another "
-                    "that could fit the question. An ANSWER with any UNVERIFIED line is rejected "
-                    "while its source senior has rounds left. Empty for every other route.")
+    new_premises: list[PremiseDraft] = Field(
+        description="Premises YOU are adding to the ledger - the ones the chain from "
+                    "the question's words to the value rests on that the senior never "
+                    "filed. Before any ANSWER, trace that chain and file what is "
+                    "missing, opening with a 'coverage' premise: every way the "
+                    "question's key concept could show up in the data, and whether the "
+                    "seniors searched each. Then a 'selection' premise: why this entity "
+                    "and not another that could fit. Empty on other routes unless you "
+                    "have a premise to add.")
+    premise_updates: list[PremiseUpdate] = Field(
+        description="Verdicts you are recording on premises already in the ledger. "
+                    "VERIFIED needs `quote` copied WORD FOR WORD from a senior's "
+                    "report - any senior's, since a premise established by a sibling "
+                    "is still evidence. Your own instruction is never evidence.")
+    answer_premise_ids: list[str] = Field(
+        description="ANSWER only. Every premise id the value rests on. The runner "
+                    "checks each is VERIFIED, and refuses an answer resting on a "
+                    "REFUTED one however little budget is left.")
     case_updates: list[str] = Field(
         description="ANSWER only. Durable incident facts for the case file, each in the form "
                     "'entity <type> <value>' or 'finding [verified|hypothesis] <claim> | evidence: <spl>'.")
@@ -194,24 +181,6 @@ class SeniorDirective(BaseModel):
     # deliberately left advisory — an unscoped or unexplained spawn is a bad
     # turn, not a malformed one, and it's the orchestrator's prompt, not this
     # validator, that has to push SH toward supplying them.
-    @field_validator("premise_audit", mode="before")
-    @classmethod
-    def _audit_from_text(cls, v):
-        """Accept the legacy '<premise> - VERIFIED: <where>' strings. A line with no
-        verdict reads as UNVERIFIED: an unmarked premise is an untested one."""
-        out = []
-        for a in v or []:
-            if isinstance(a, str):
-                if not a.strip():
-                    continue
-                m = _AUDIT_TEXT.match(a.strip())
-                a = ({"premise": m.group(1), "status": m.group(2), "source": "",
-                      "quote": m.group(3), "evidence": m.group(3)} if m
-                     else {"premise": a.strip(), "status": "UNVERIFIED", "source": "",
-                           "quote": "", "evidence": ""})
-            out.append(a)
-        return out
-
     @model_validator(mode="after")
     def _payload_matches_route(self):
         r = self.route
@@ -327,28 +296,30 @@ def spawn_overlap_violations(entries: list[SeniorDirective], active: dict) -> li
     return out
 
 
-def premise_audit_violations(entries: list) -> list[str]:
-    """An ANSWER must carry SH's own premise audit (`premise_audit`): the premises the
-    chain rests on that the senior never listed. Soft on content — an UNVERIFIED line
-    is allowed, like R4 — but an ANSWER with no audit at all is rejected."""
+def premise_audit_violations(entries: list, ledger) -> list[str]:
+    """An ANSWER must name the premises it rests on, and one of them must be the
+    Coverage premise - every way the question's concept could show up in the data.
+    A candidate can only win against candidates that were looked for."""
     out = []
     for e in entries:
         if e.route != "ANSWER":
             continue
-        if not e.premise_audit:
-            out.append(f"ANSWER from {e.source_senior} has no premise_audit — trace the chain "
-                       "from the question to the value and list the premises the report did not")
-        elif not any(a.premise.strip().lstrip("-* ").lower().startswith("coverage")
-                     for a in e.premise_audit):
-            out.append(f"ANSWER from {e.source_senior}: premise_audit has no Coverage line — "
-                       "list every way the question's concept could show up in the data and "
-                       "whether each was searched")
+        cited = [ledger.premises.get(i) for i in e.answer_premise_ids]
+        missing = [i for i, p in zip(e.answer_premise_ids, cited) if p is None]
+        if missing:
+            out.append(f"ANSWER cites {', '.join(missing)}, which is not a premise on "
+                       "this question - cite ids from the ledger, or file the premise "
+                       "in new_premises first")
+        found = [p for p in cited if p is not None]
+        if not found:
+            out.append(f"ANSWER from {e.source_senior} names no premises - trace the "
+                       "chain from the question to the value and cite every premise "
+                       "it rests on in answer_premise_ids")
+        elif not any(p.kind == "coverage" for p in found):
+            out.append(f"ANSWER from {e.source_senior} rests on no Coverage premise - "
+                       "list every way the question's concept could show up in the "
+                       "data and whether each was searched")
     return out
-
-
-def unverified_audit(entry) -> list[str]:
-    """The audit lines SH itself marked UNVERIFIED."""
-    return [a.render() for a in entry.premise_audit if a.status == "UNVERIFIED"]
 
 
 def unsure_remedy(state: QuestionState, src: str) -> str:
@@ -378,64 +349,75 @@ _CIRCULAR = re.compile(r"\b(established|confirmed|settled|told|instructed)\b"
                        re.IGNORECASE)
 
 
-def evidence_violations(entries: list, *, reports_of, doubts_of,
-                        state: QuestionState) -> list[str]:
-    """Checks an ANSWER against the senior's own words, which SH cannot relabel.
+def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:
+    """The ANSWER gate, read off the ledger.
 
-    * Every VERIFIED audit line must quote, word for word, a senior's query, result
-      or finding that shows it. The quote is checked against the source senior's
-      reports first and then against every senior's, because a premise established
-      by a sibling is still evidence. A VERIFIED with nothing behind it is SH's
-      opinion, not evidence. `reports_of(None)` must return every senior's text.
-    * The source senior must have no OPEN doubt left (`doubts_of` carries every
-      unsettled premise forward across its rounds, so one cannot be dropped by
-      writing a cleaner report next round — see senior_report.carry_doubts).
-    * A VERIFIED line may not cite SH itself: an orchestrator's instruction is not
-      evidence, however faithfully the senior wrote it down.
+    Two blocks with different force:
+      * a load-bearing premise still UNVERIFIED blocks while there is a remedy -
+        a round left on the source senior, or a free slot for an alternative;
+      * a REFUTED premise blocks FULL STOP. It is not "unsettled", it is known
+        false, and an answer resting on it scores zero and poisons the case file
+        for every later question. There is deliberately no escape here.
     """
     out = []
     for e in entries:
         if e.route != "ANSWER":
             continue
-        src = e.source_senior
-        text = _norm(reports_of(src))
-        for a in e.premise_audit:
-            if a.status != "VERIFIED":
-                continue
-            q = _norm(a.quote)
-            # Any senior's report may hold the quote: an answer built on s2 routinely
-            # rests on a premise s1 established, and SH names the real source in
-            # `a.source` (v1.4.2 Q216 was blocked three turns for quoting s1 under s2).
-            if _CIRCULAR.search(a.quote or ""):
-                out.append(f"audit line '{a.premise[:80]}' quotes SH as the authority — "
-                           "your own instruction is not evidence. Quote the senior's query "
-                           "or result that shows it, or mark the line UNVERIFIED")
-            elif len(q) < MIN_QUOTE_CHARS or (q not in text and q not in _norm(reports_of(None))):
-                out.append(f"audit line '{a.premise[:80]}' is VERIFIED but its quote is in "
-                           "no senior's report — copy the query, result or finding that "
-                           "shows it word for word, or mark the line UNVERIFIED")
-        doubts = doubts_of(src)
-        fix = unsure_remedy(state, src) if doubts else ""
+        cited = [ledger.premises[i] for i in e.answer_premise_ids
+                 if i in ledger.premises]
+        dead = [p for p in cited if p.status == "REFUTED"]
+        if dead:
+            out.append("ANSWER is blocked: it rests on REFUTED premise(s) - "
+                       + "; ".join(f'{p.id} "{p.text[:80]}"' for p in dead)
+                       + ". A refuted premise is not unsettled, it is false: this "
+                       "value cannot be answered from. RETIRE and work a direction "
+                       "that does not need it.")
+        open_ = [p for p in cited if p.load_bearing and p.status == "UNVERIFIED"]
+        fix = unsure_remedy(state, e.source_senior) if open_ else ""
         if fix:
-            out.append(f"ANSWER is blocked: {src}'s latest report still flags "
-                       f"{len(doubts)} unsettled premise(s) in its own Assumptions — {fix}: "
-                       + " | ".join(d[:160] for d in doubts))
+            out.append(f"ANSWER is blocked: {len(open_)} load-bearing premise(s) it "
+                       f"rests on are still UNVERIFIED - {fix}: "
+                       + " | ".join(f'{p.id} "{p.text[:80]}"' for p in open_))
     return out
 
 
-def open_question_violations(entries: list[SeniorDirective], asked: dict) -> list[str]:
-    """SH answers every open question a senior put to it. `asked` maps each senior
-    whose report was just read to how many questions it asked (see
-    senior_report.open_questions). The entry that owes the answers is the route
-    addressed to that senior, or the ANSWER built on its report."""
+def sh_update_violations(entries: list, ledger, reports_of) -> list[str]:
+    """SH settles a premise from a senior's REPORT, not from a tool result it never
+    saw. The quote is checked against every senior's reports (a premise established
+    by a sibling is still evidence - v1.4.2 Q216 was blocked three turns for quoting
+    s1 under s2), and may not cite SH itself."""
+    out = []
+    for e in entries:
+        for u in e.premise_updates:
+            if u.status == "UNVERIFIED":
+                continue
+            if u.id not in ledger.premises:
+                out.append(f"premise_update names {u.id}, which is not on this question")
+            elif _CIRCULAR.search(u.quote or ""):
+                out.append(f"premise_update {u.id} quotes SH as the authority - your "
+                           "own instruction is not evidence. Quote the senior's query "
+                           "or result that shows it.")
+            elif not quote_supported(u.quote, [reports_of(None)]):
+                out.append(f"premise_update {u.id} is {u.status} but its quote is in no "
+                           "senior's report - copy the query, result or finding that "
+                           "shows it word for word.")
+    return out
+
+
+def open_question_violations(entries: list[SeniorDirective], ledger) -> list[str]:
+    """SH answers every OPEN question, by id. The entry that owes the answers is the
+    route addressed to that senior, or the ANSWER built on its report."""
     out = []
     for e in entries:
         sid = e.source_senior if e.route == "ANSWER" else e.senior_id
-        need = asked.get(sid, 0)
-        got = sum(1 for a in e.open_question_answers if a.strip())
-        if need and got < need:
-            out.append(f"{sid} asked {need} open question(s) and you answered {got} — "
-                       f"answer each one, in order, in open_question_answers")
+        if not sid:
+            continue
+        owed = {q.id for q in ledger.open_questions_for(sid)}
+        got = {a.id for a in e.open_question_answers if a.answer.strip()}
+        missing = sorted(owed - got)
+        if missing:
+            out.append(f"{sid} is waiting on {', '.join(missing)} - answer each by id "
+                       "in open_question_answers")
     return out
 
 
@@ -510,12 +492,6 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
         # a FOUND report carrying the runner's cap line and two unanswered questions
         # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
         # CLARIFY costs no round, so the cheap move is always available.
-        if e.route == "ANSWER" and unverified_audit(e):
-            fix = unsure_remedy(state, e.source_senior)
-            if fix:
-                out.append(f"ANSWER is blocked: your premise audit marks "
-                           f"{len(unverified_audit(e))} premise(s) UNVERIFIED — {fix}: "
-                           + "; ".join(unverified_audit(e)))
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
             out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
                        "at the iteration cap — CLARIFY it (costs no round; its reply "

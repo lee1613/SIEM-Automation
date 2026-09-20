@@ -24,12 +24,12 @@ from case_file import parse_case_updates
 from conversation import (
     directive_violations,
     effective_r2,
-    evidence_violations,
     grade_violations,
+    ledger_violations,
     open_question_violations,
     premise_audit_violations,
+    sh_update_violations,
     spawn_overlap_violations,
-    unverified_audit,
 )
 from conversation_log import ConversationLog
 from grounding import is_grounded
@@ -37,16 +37,10 @@ from hitl import ABORT, RunPaused, resolve_interrupt
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
+from premise import PremiseLedger
 from pydantic import ValidationError
 from question_state import ROUND_ITERS, QuestionState
-from senior_report import (
-    REPORT_WORD_CAP,
-    carry_doubts,
-    has_coverage_premise,
-    has_selection_premise,
-    open_questions,
-    unverified_premises,
-)
+from senior_report import REPORT_WORD_CAP
 from senior_session import SeniorSession
 from usage_tracker import context_window
 
@@ -101,7 +95,7 @@ YOUR SIX ROUTES
 
 HOW YOU READ A REPORT — as a senior threat hunter reviewing a junior analyst's work.
 You have run many investigations and seen confident reports fall apart on one untested premise. Read every report sceptically, evidence first:
-  * Check each line of its "## Assumptions" against "### What I ran". A premise with no query and result behind it is UNVERIFIED, however confident the prose around it.
+  * Check every premise the ledger shows for that senior against its "### What I ran". A premise with no query and result behind it is UNVERIFIED, however confident the prose around it.
   * Look for results the junior explained away — an output that cuts against its conclusion, dismissed as noise, normal activity or an outlier.
   * Check the candidate's shape against the question's own words: one entity or several, which unit, which span of time, which field.
   * Ask whether the conclusion survives if its most convenient premise is false.
@@ -114,16 +108,20 @@ GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
                            - the act: records that show the act the question names happening — a port, a name or a convention only suggests it, and records that behave unlike the act (wrong volume, direction or duration) are not it;
                            - the measure: the unit and the span the question's words give, not a rule the senior (or you, in an earlier answer) stated;
                            - the reach of each claim: "no X anywhere in field F" needs a search of F across the whole scope — a look at F on the candidate's own rows only shows those rows.
-                           A step that does not match does not sink the round's grade; it means the ANSWER built on that chain is not ready, and the premise audit is where you say so.
+                           A step that does not match does not sink the round's grade; it means the ANSWER built on that chain is not ready, and the ledger is where you say so.
   R2 progress              Did this round produce information the prior rounds did not have?
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
 Each is PASS, WEAK or FAIL.
-R4 is a grade; the gate is your premise audit. A WEAK or FAIL R4 tells the senior to verify its UNVERIFIED premises first thing next round. You cannot answer past an unverified premise while the source senior has rounds left: every premise you have not seen verified goes in the audit as UNVERIFIED, and that blocks the ANSWER. Only once its rounds are spent may you answer on one — say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
+R4 is a grade; the gate is the ledger. The runner already hands each senior its own unsettled premises at the start of every round, so R4 is your reading of the chain, not the reminder. You cannot answer past a load-bearing UNVERIFIED premise while the source senior has rounds left or a senior slot is free; only once both are spent may you answer on one — say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
 
-ANSWER EVERY OPEN QUESTION. A senior's "## Open questions for SH" are addressed to you. Put one answer per question, in order, in `open_question_answers` on the route you give that senior (on an ANSWER, for the source senior's questions). They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it — that is still an answer. A turn that leaves a question unanswered is rejected. Keep each answer to a line or two: the senior reads them inside your directive, so the directive carries the substance and the answers do not restate it.
+ANSWER EVERY OPEN QUESTION, BY ID. A senior's open questions reach you with an id (q1, q2...). Put one entry per open question in `open_question_answers`, naming its id and your answer. They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it - that is still an answer. A turn that leaves one unanswered is rejected. Keep each to a line or two.
 
-AUDIT THE CHAIN BEFORE ANY ANSWER. The senior's Assumptions are only the premises it noticed. Before you ANSWER, trace the chain yourself, from the question's words to the value, and list in `premise_audit` every premise it rests on that the report does NOT list. Open the audit with a Coverage line: name the key concept the question asks about, list every way it could show up in the data, and say whether the seniors' searches covered each. Check it against the feed's own fields, not against the senior's list — a list drawn from memory checks itself. Every result a runner "Partial results" note lists was only partly read — a claim resting on such a result is UNVERIFIED, even where the senior wrote VERIFIED. A candidate is never answerable because no rival turned up: if the senior's own evidence says its records do not behave like the act the question names (or it cannot show that they do), the absence of alternatives does not rescue it — COMMAND the search open instead. A way nobody searched is UNVERIFIED, however well the chosen candidate is verified — a candidate can only win against candidates that were looked for. Then check the choice itself: why this entity and not another that could fit the question. When the answer is a measurement, check its definition against the question's verbatim words — not against your own framing of the task, and not against a rule the senior states; a senior citing a rule is not a result. Each audit line is a premise with a status, VERIFIED or UNVERIFIED. A VERIFIED line must say where its evidence is and why it holds: `source` names the senior report ("s1 round 2"), `quote` copies WORD FOR WORD the query, result or finding in that report that shows it, and `evidence` explains why that quote establishes the premise. The runner checks every quote against the senior's reports and rejects the ANSWER when one is not there. VERIFIED only when a result the senior read in full shows it; with no such line to quote, the premise is UNVERIFIED. An ANSWER with any UNVERIFIED line is rejected while its source senior has rounds left — COMMAND that senior to verify those premises first. An ANSWER without an audit is rejected.
+THE PREMISE LEDGER. Every premise on this question lives in one ledger, shown to you in full each turn. The seniors file their own; you file the ones they missed, in `new_premises`. A premise is VERIFIED only when a result someone actually ran shows it - you settle one in `premise_updates`, quoting the senior's query, result or finding WORD FOR WORD from any senior's report. Your own instruction is never evidence, however faithfully a senior wrote it down: the runner rejects a quote that cites you.
+
+BEFORE ANY ANSWER, trace the chain yourself from the question's words to the value, and file in `new_premises` every premise it rests on that no one has. Open with a `coverage` premise: the key concept the question asks about, every way it could show up in the data, and whether the seniors' searches covered each - checked against the feed's own fields, not against a senior's list drawn from memory. Then a `selection` premise: why this entity and not another that could fit. When the answer is a measurement, a `definition` premise: its meaning taken from the question's verbatim words, not your framing and not a rule a senior states - a senior citing a rule is not a result. Mark `load_bearing` true on any premise the answer breaks without. Then cite every premise the value rests on in `answer_premise_ids`.
+
+A candidate is never answerable because no rival turned up. A way nobody searched is UNVERIFIED however well the chosen candidate is verified, and a candidate can only win against candidates that were looked for. Every result a runner "Partial results" note lists was only partly read - a claim resting on one is UNVERIFIED.
 
 THE GATES YOU MUST RESPECT
   * Anti-thrash: two consecutive R2 = FAIL on one senior and `continue` is refused for it. RETIRE it or change its scope. A round whose queries were all repeats is graded FAIL by code and you cannot override that.
@@ -131,10 +129,10 @@ THE GATES YOU MUST RESPECT
   * Cut off, not finished: a report ending in "Iteration cap reached" is where the senior's budget ran out, not where the work did — the ANSWER route is blocked on it. Its "Open questions for SH" are the senior telling you what it could not settle: answer them, then CLARIFY (costs no round) or COMMAND one more round. Then answer.
   * Open questions: every question a report puts to you is answered in `open_question_answers`, or the turn is rejected.
   * Parallel scope: a senior spawned while another is active must own sourcetypes/sources no active senior has.
-  * Premise audit: an ANSWER must carry `premise_audit`, opening with a Coverage line, or the turn is rejected.
-  * Unverified premises: an ANSWER whose audit has any UNVERIFIED line is rejected while the source senior has rounds left OR a senior slot is free.
-  * Quoted evidence: every VERIFIED audit line must quote the senior's report word for word, or the ANSWER is rejected.
-  * The senior's own doubts: an ANSWER is rejected while its latest report's Assumptions still flag something unsettled (UNVERIFIED, not verifiable, partial, rows not returned) and the source senior has rounds left or a senior slot is free. Settle them, or spawn an alternative (ALTERNATIVE SENIOR).
+  * Premise ledger: an ANSWER must cite its premises in `answer_premise_ids`, and one of them must be a `coverage` premise, or the turn is rejected.
+  * Unverified premises: an ANSWER resting on a load-bearing UNVERIFIED premise is rejected while the source senior has rounds left OR a senior slot is free.
+  * Refuted premises: an ANSWER resting on a REFUTED premise is rejected outright - there is no budget state that lets it through. A refuted premise is not unsettled, it is false.
+  * Quoted evidence: a `premise_updates` verdict must quote a senior's report word for word, and may not cite you.
 
 CROSS-QUESTION MEMORY — you remember every earlier question in this run. Carry entities forward (hosts, IPs, users, bucket names, time windows, feeds) and spell them out inside every directive and every spawn. Seniors share no memory with you or with each other, except the one you are addressing, which remembers its own rounds.
 
@@ -155,14 +153,17 @@ TWO REPLY SHAPES, so you never have to guess which is expected:
 NO UNTESTED ASSUMPTIONS — your report is graded hardest on this.
 Every conclusion rests on premises. A premise is a hypothesis until a query result shows it. SH grades every report on premise verification (R4), and an untested premise is dangerous ground: it is how an investigation goes off track and returns a confident wrong answer.
 VERIFY FIRST. The first thing you do each round is try to verify the premises your work depends on, before you build further on them.
-An educated guess is allowed only when a premise genuinely cannot be verified. Then say so: list it as UNVERIFIED, and state why it could not be tested.
-SEARCH NARROW FIRST, THEN OPEN UP. Every tool returns at most a few dozen rows, in the query's own order, and its meta says how many rows the query produced in total; when that total is larger, the rest were not returned, and a listing you did not read to its end covers only the rows you read. So do not list a whole field and page through it. Start from what the question tells you — the entity, the act, the time, the kind of thing it names — and use those clues to decide which fields could hold the answer and to cut the search down to a result short enough to read in full: filter on the clues, group values into coarser units where their exact spelling does not matter, and count (`| stats dc(field)`) before you list. When the narrow search finds nothing, that is not absence: open up one step at a time — a looser filter, the next field that could hold it, a coarser grouping, another feed that could name the same entity — and only when those run out, fall back to brute force: go through the field's values in full, chunk by chunk. When what you are after is the unusual rather than something the question describes, ranking rarest first is one way to shorten the list; it is a tool, not a default. Your Assumptions must open with a Coverage line: the ways the question's concept could show up in your scope, and for each, the query that searched it and what came back, or that it is not yet searched (UNVERIFIED). The candidates are everything those searches find; the first match is only one of them.
+An educated guess is allowed only when a premise genuinely cannot be verified. Then say so: file it, leave it UNVERIFIED, and state why it could not be tested.
+Your premises do not go in the report. File them in `submit_finding`'s `new_premises`, each with a kind and whether the answer breaks without it. The runner holds them and shows every unsettled one back to you at the start of each round, with its id - settle them in `premise_updates`, quoting the query output that does it. A premise you stop mentioning does not go away.
+Your first premise each round is a `coverage` one: the ways the question's concept could show up in your scope, and for each, the query that searched it and what came back. Your second is `selection`: why this entity and not the other candidates coverage found.
+Your questions for SH do not go in the report either - put them in `open_questions`, one per string. SH must answer every one before your next round.
+SEARCH NARROW FIRST, THEN OPEN UP. Every tool returns at most a few dozen rows, in the query's own order, and its meta says how many rows the query produced in total; when that total is larger, the rest were not returned, and a listing you did not read to its end covers only the rows you read. So do not list a whole field and page through it. Start from what the question tells you — the entity, the act, the time, the kind of thing it names — and use those clues to decide which fields could hold the answer and to cut the search down to a result short enough to read in full: filter on the clues, group values into coarser units where their exact spelling does not matter, and count (`| stats dc(field)`) before you list. When the narrow search finds nothing, that is not absence: open up one step at a time — a looser filter, the next field that could hold it, a coarser grouping, another feed that could name the same entity — and only when those run out, fall back to brute force: go through the field's values in full, chunk by chunk. When what you are after is the unusual rather than something the question describes, ranking rarest first is one way to shorten the list; it is a tool, not a default. Your `coverage` premise names the ways the question's concept could show up in your scope, and for each, the query that searched it and what came back, or that it is not yet searched. The candidates are everything those searches find; the first match is only one of them.
 A LEAD IS A HYPOTHESIS, NOT EVIDENCE. A port number, a name, a convention suggests an activity; it does not show it. Before you build on a lead, check that its records behave like the activity the question names — how much traffic, in which direction, for how long, started by what. If they behave like something else, say so plainly and rule the lead out: that is a wall, and hitting it means going back to search elsewhere, not explaining the mismatch away.
 BEING THE ONLY LEAD DOES NOT MAKE IT THE ANSWER. "I found nothing better" is not evidence for the lead you hold. A candidate is FOUND only when its own records positively show the act the question names; one that failed that check, or that you cannot yet show passes it, is not a candidate. When that leaves you nothing, your report is NOT_FOUND with Candidate: none — the failed lead goes under Ruled out, and your next round opens the search up.
 VERIFIED MEANS YOU READ EVERY ROW IT RESTS ON. A result that returned only its first rows (its meta says "showing N of M") verifies nothing about the rows it did not return: "all of them are X" built on the first 50 of 365 is UNVERIFIED, however ordinary those 50 looked. Narrow the search until the whole result fits, then read it to the end. Inside that narrowed range, a row you are not certain fails the requirement is a row you check, not one you assume away — exhaust the range before you call it clean.
-WHEN THE ANSWER IS A MEASUREMENT, ITS DEFINITION IS A PREMISE. Take it from the question's verbatim words, not from a paraphrase: which records are the act itself rather than the setup or aftermath around it, and how they combine. Records that overlap in time cannot be added without counting the same moments twice. List the definition in Assumptions like any other premise.
-THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your Assumptions follow Coverage with a Selection line: why this entity (or feed, or value) and not the other candidates Coverage found, and the query that ruled each out.
-WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your Assumptions: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
+WHEN THE ANSWER IS A MEASUREMENT, ITS DEFINITION IS A PREMISE. Take it from the question's verbatim words, not from a paraphrase: which records are the act itself rather than the setup or aftermath around it, and how they combine. Records that overlap in time cannot be added without counting the same moments twice. File the definition as a `definition` premise like any other.
+THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your `selection` premise says why this entity (or feed, or value) and not the other candidates coverage found, and the query that ruled each out.
+WHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your premises: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.
 
 YOUR REPORT — put it in `submit_finding`'s `report` field, in this shape. Keep it short: ~{REPORT_WORD_CAP} WORDS IS A CEILING, NOT A TARGET — over it, the runner cuts your narrative sections and SH reads less of your work. Be concise: one line per query and its result, no restating the question, no repeating a fact in two sections, fields grouped into one clause where the same verdict covers them.
 
@@ -181,22 +182,8 @@ YOUR REPORT — put it in `submit_finding`'s `report` field, in this shape. Keep
 <FOUND:     the chain from that output to the candidate.
  NOT_FOUND: what you saw instead, and why it rules this scope out.>
 
-## Assumptions
-- Coverage: <each field of the scope: could it carry the question's concept; for each
-  that could, the query that searched it and what came back> - VERIFIED | UNVERIFIED: <fields not searched>
-- Selection: <why this entity and not the other candidates Coverage found; the query
-  that ruled each out> - VERIFIED: <queries and results> | UNVERIFIED
-- <every premise your conclusion or next step rests on> - VERIFIED: <the query
-  and the result that showed it> | UNVERIFIED
-  <List the ones that feel obvious too — those are the ones that go unchecked.>
-
 ## Ruled out
 - <feed / entity / hypothesis> - <why>
-
-## Open questions for SH
-- <Only what SH can answer from the case: which entity is in scope, whether a
-  prior finding applies, which scope to try next. Never an SPL question.
-  SH must answer every question here; its answers arrive with your next instruction.>
 
 Do not write the title line — the runner stamps your round number, your rounds remaining, and how many of your queries this round were new.
 
@@ -244,11 +231,15 @@ def _budget_line(slots_remaining: int, turns_remaining: int) -> str:
             "remain on this question; each senior's own rounds_left is on its report.")
 
 
-def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int) -> str:
-    """What SH reads at the top of a turn: every report from the wave just finished.
+def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int,
+                ledger) -> str:
+    """What SH reads at the top of a turn: every report from the wave just finished,
+    then the whole premise ledger.
 
-    The stamped numbers are restated outside the report body so the gate that
-    depends on them is impossible to miss.
+    The ledger table replaces the three '!!' warnings this used to print (unverified
+    count, missing Coverage, missing Selection). All three were regexes over the
+    report's prose; the table shows the same facts as typed data, and a missing
+    Coverage row is visible as absence.
     """
     blocks = []
     for sid, r in reports.items():
@@ -262,23 +253,13 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int) ->
         if novel == 0:
             head += "\n!! This round ran NO new query. R2 = FAIL for it, by code, " \
                     "and you cannot grade it otherwise."
-        unverified = unverified_premises(r.get("report") or "")
-        if r.get("report") and not has_coverage_premise(r["report"]):
-            head += ("\n!! Its Assumptions list no Coverage premise — it never said which "
-                     "ways the question's concept could show up in the data were searched. "
-                     "Its candidate set may be whatever it found first.")
-        if r.get("report") and not has_selection_premise(r["report"]):
-            head += ("\n!! Its Assumptions list no Selection premise — it never said why "
-                     "this entity and not another. Treat that choice as UNVERIFIED.")
-        if unverified:
-            head += (f"\n!! {unverified} UNVERIFIED premise(s) in its Assumptions — "
-                     "dangerous ground. Weigh them in R4.")
         blocks.append(head + "\n" + (r.get("report") or "").strip())
 
     return (_budget_line(slots_remaining, turns_remaining) + "\n\n"
             + "\n\n".join(blocks)
+            + "\n\n" + ledger.render_table()
             + "\n\nReview every report above as a senior threat hunter, grade it "
-              "(R1/R2/R3/R4), answer every open question it lists in "
+              "(R1/R2/R3/R4), answer every open question by id in "
               "open_question_answers, and emit exactly one route per senior. ANSWER "
               "only when the value appears literally in one of these reports or in "
               "the question text.")
@@ -322,17 +303,18 @@ def _render_turn(turn) -> str:
             "ANSWER":  lambda: f"{e.value} ({e.value_kind}) — {e.justification}",
         }[e.route]()
         rows.append(head + "\n    " + detail)
-        rows += [f"    answered: {a}" for a in e.open_question_answers if a.strip()]
+        rows += [f"    answered {a.id}: {a.answer}"
+                 for a in e.open_question_answers if a.answer.strip()]
     return "\n".join(rows)
 
 
 def _answers_note(e) -> str:
     """SH's answers to the senior's open questions, as the senior will read them."""
-    answers = [a.strip() for a in e.open_question_answers if a.strip()]
+    answers = [a for a in e.open_question_answers if a.answer.strip()]
     if not answers:
         return ""
     return ("SH's answers to your open questions:\n"
-            + "\n".join(f"{i}. {a}" for i, a in enumerate(answers, start=1)) + "\n\n")
+            + "\n".join(f"[{a.id}] {a.answer}" for a in answers) + "\n\n")
 
 
 def _entry_body(e) -> str:
@@ -360,29 +342,29 @@ def _route_body(e) -> str:
                 + "\n".join(f"{i}. {q}" for i, q in enumerate(e.questions, start=1)))
     if e.route == "RETIRE":
         return e.reason
-    audit = "".join(f"\n- {a}" for a in e.premise_audit)
+    cited = ", ".join(e.answer_premise_ids) or "(none)"
     return (f"**{e.value}** ({e.value_kind}) from {e.source_senior}\n\n{e.justification}"
-            f"\n\n**Premise audit (SH):**{audit}")
+            f"\n\n**Premises it rests on:** {cited}")
 
 
 def _directive_text(e) -> str:
-    """What a senior is actually told this round: SH's answers first, a verify-first
-    reminder when SH graded its premises WEAK/FAIL (R4 is soft), then the route."""
-    verify = ""
-    if e.r4_premise_verification in ("WEAK", "FAIL"):
-        verify = (f"FIRST, before anything else this round: verify the UNVERIFIED premises "
-                  f"in your Assumptions (SH graded premise verification "
-                  f"R4 = {e.r4_premise_verification}).\n\n")
-    return verify + _route_directive(e)
+    """What a senior is actually told this round: SH's answers, then the route.
+
+    The verify-first prefix this used to add on a WEAK/FAIL R4 is gone: the runner
+    now prepends the senior's unresolved premises to EVERY round
+    (SeniorSession._message_for), unconditionally. The old prefix fired on SH's own
+    grade, and SH grades all-PASS when it wants to answer.
+    """
+    return _route_directive(e)
 
 
 def _route_directive(e) -> str:
     """One block: the goal, SH's answers folded in under it, then the scope. The
     rationale stays in conversation.md — it is SH's case view, and sent to the
     senior it restated the directive a second time (Q216 r10)."""
-    answers = [a.strip() for a in e.open_question_answers if a.strip()]
+    answers = [a for a in e.open_question_answers if a.answer.strip()]
     answers = ("\n\nOn your open questions:\n"
-               + "\n".join(f"{i}. {a}" for i, a in enumerate(answers, start=1))) if answers else ""
+               + "\n".join(f"[{a.id}] {a.answer}" for a in answers)) if answers else ""
     scope = ("" if e.scope_change.is_empty()
              else f"\n\nYour scope is now: {e.scope_change}. Work inside it.")
     if e.route == "COMMAND":
@@ -450,6 +432,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     opening, and this question's non-system messages are appended to it in place.
     """
     state = QuestionState(points=points)
+    ledger = PremiseLedger()
     log = ConversationLog(run_dir, qid)
     window = senior_window or context_window(pool.senior_model)
     delegations = delegations if delegations is not None else []
@@ -480,7 +463,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
     answer, end_reason, ungrounded = "", "", 0
     clarify_text: dict = {}      # sid -> its CLARIFY replies, quotable in SH's audit
-    doubts: dict = {}            # sid -> its unsettled premises, carried across rounds
     unread_clarify = False       # a reply SH has not had a turn to read yet
 
     while True:
@@ -531,22 +513,20 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
         ) + directive_violations(turn.entries, state) + open_question_violations(
-            turn.entries, {sid: len(open_questions(r.get("report", "")))
-                           for sid, r in unread.items() if kinds.get(sid) != "exploration"}
+            turn.entries, ledger
         ) + spawn_overlap_violations(
             turn.entries, {sid: s.constraints for sid, s in sessions.items()
                            if state.is_active(sid)}
-        ) + premise_audit_violations(turn.entries) + evidence_violations(
-            turn.entries,
-            # sid=None means "every senior": a VERIFIED premise may rest on a sibling's
-            # report, and SH names the real source in the audit line itself.
+        ) + sh_update_violations(
+            turn.entries, ledger,
+            # A premise established by a sibling is still evidence, so the quote is
+            # checked against every senior's reports and clarify replies.
             reports_of=lambda sid: "\n".join(
-                [r.get("report", "") for r in all_reports
-                 if sid is None or r.get("senior_id") == sid]
-                + (sum(clarify_text.values(), []) if sid is None
-                   else clarify_text.get(sid, []))),
-            doubts_of=lambda sid: doubts.get(sid, []),
-            state=state)
+                [r.get("report", "") for r in all_reports]
+                + sum(clarify_text.values(), [])),
+        ) + premise_audit_violations(
+            turn.entries, ledger
+        ) + ledger_violations(turn.entries, ledger, state)
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
@@ -554,6 +534,18 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             continue
         grades.extend(rows)
         unread = {}
+
+        # SH's own ledger writes. Its quotes come from reports, not tool output - it
+        # has no Splunk access and never will.
+        sh_corpus = ([r.get("report", "") for r in all_reports]
+                     + sum(clarify_text.values(), []))
+        for e in turn.entries:
+            ledger.add(e.new_premises, author="sh", round_n=state.turns_used)
+            ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
+                         round_n=state.turns_used)
+            for a in e.open_question_answers:
+                if a.answer.strip():
+                    ledger.answer(a.id, a.answer)
 
         unread_clarify = False
         pending, clarified = {}, []
@@ -576,7 +568,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                     subquestion=verbatim_task(question, guidance, e.subquestion),
                     brief=SENIOR_BRIEF, window=window,
                     rounds_granted=grant, idx=counter, constraints=e.constraints,
-                    iters=ROUND_ITERS)
+                    iters=ROUND_ITERS, ledger=ledger)
                 pending[sid] = partial(sessions[sid].work,
                                        ("Begin. " + e.reason) if e.reason else "Begin.",
                                        rounds_remaining=max(0, state.rounds_left_for(sid) - 1))
@@ -597,7 +589,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 log.clarify_reply(e.senior_id, reply)
                 clarified.append(f"{e.senior_id}: {reply}")
                 # The reply is the senior speaking from what it holds: it settles the
-                # cut-off, and SH may quote it in the audit like any report text.
+                # cut-off, and SH may quote it in a premise_update like any report text.
                 state.clear_cap(e.senior_id)
                 clarify_text.setdefault(e.senior_id, []).append(reply)
 
@@ -615,10 +607,13 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                     if e.r4_premise_verification == "FAIL":
                         log.note(f"answered on an unverified premise (R4 = FAIL) — "
                                  f"allowed, but dangerous ground: {e.justification}")
-                    if unverified_audit(e):
-                        log.note("answered with UNVERIFIED premises in SH's own audit — "
-                                 "allowed, but dangerous ground: "
-                                 + "; ".join(unverified_audit(e)))
+                    unsettled = [p for p in (ledger.premises.get(i)
+                                             for i in e.answer_premise_ids)
+                                 if p is not None and p.status == "UNVERIFIED"]
+                    if unsettled:
+                        log.note("answered with UNVERIFIED premises in the ledger — "
+                                 "allowed (nothing left to try), but dangerous ground: "
+                                 + "; ".join(f"{p.id} {p.text}" for p in unsettled))
                     _apply_case_updates(case_file, e.case_updates, qid)
                 else:
                     ungrounded += 1
@@ -664,9 +659,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 state.record_round(
                     sid, capped=(bool(result.get("cap_hit"))
                                  or int(result.get("iterations", 0)) >= ROUND_ITERS))
-            # Doubts follow the senior, not its latest report: a later round cannot
-            # drop an unsettled premise by not mentioning it (carry_doubts).
-            doubts[sid] = carry_doubts(doubts.get(sid, []), result.get("report", ""))
             rel = log.write_report(sid, result.get("round", 0), result.get("report", ""))
             log.senior_to_sh(sid, round_n=result.get("round", 0),
                              insight=result.get("insight", "?"),
@@ -714,7 +706,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
         if unread or scouted or failures:
             head = (render_wave(unread, slots_remaining=state.slots_remaining,
-                                turns_remaining=state.turns_remaining) if unread
+                                turns_remaining=state.turns_remaining,
+                                ledger=ledger) if unread
                     else _budget_line(state.slots_remaining, state.turns_remaining))
             msgs.append(HumanMessage(content="\n\n".join([head, *scouted, *failures])))
 
@@ -743,6 +736,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         "grades": grades,
         "reports": all_reports,
         "delegations": delegations,
+        "ledger": ledger,
     }
 
 

@@ -9,16 +9,21 @@ from conversation import (
     directive_violations,
     effective_r2,
     grade_violations,
+    ledger_violations,
     open_question_violations,
+    premise_audit_violations,
+    sh_update_violations,
     spawn_overlap_violations,
 )
+from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from pydantic import ValidationError
 from question_state import QuestionState
 
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
-    "open_question_answers": [],
+    "open_question_answers": [], "new_premises": [], "premise_updates": [],
+    "answer_premise_ids": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
@@ -26,7 +31,7 @@ BLANK = {
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
-    "case_updates": [], "premise_audit": [],
+    "case_updates": [],
 }
 
 
@@ -399,27 +404,48 @@ def test_r4_fail_does_not_block_a_command():
 
 # ── SH must answer the senior's open questions ───────────────────────────────
 
+def _asked(*texts, author="s1") -> PremiseLedger:
+    led = PremiseLedger()
+    led.ask(list(texts), author=author, round_n=1)
+    return led
+
+
 def test_unanswered_open_questions_reject_the_turn():
-    asked = {"s1": 2}
-    assert open_question_violations([_graded()], asked) != []
-    one = _graded(open_question_answers=["Yes, that window.", "   "])
-    assert open_question_violations([one], asked) != []      # blanks do not count
-    both = _graded(open_question_answers=["Yes, that window.", "No — stay in scope."])
-    assert open_question_violations([both], asked) == []
+    led = _asked("Was the window the one you gave me?", "Do I stay in cisco:nvm?")
+    assert open_question_violations([_graded()], led) != []
+    one = _graded(open_question_answers=[{"id": "q1", "answer": "Yes, that window."},
+                                         {"id": "q2", "answer": "   "}])
+    assert open_question_violations([one], led) != []      # blanks do not count
+    both = _graded(open_question_answers=[{"id": "q1", "answer": "Yes, that window."},
+                                          {"id": "q2", "answer": "Stay in scope."}])
+    assert open_question_violations([both], led) == []
+
+
+def test_answering_one_question_twice_does_not_settle_the_other():
+    # The old count check passed on two answers whichever questions they named.
+    led = _asked("Was the window mine?", "Do I stay in cisco:nvm?")
+    twice = _graded(open_question_answers=[{"id": "q1", "answer": "Yes."},
+                                           {"id": "q1", "answer": "Yes, truly."}])
+    out = open_question_violations([twice], led)
+    assert out and "q2" in out[0]
 
 
 def test_a_senior_that_asked_nothing_needs_no_answers():
-    assert open_question_violations([_graded()], {"s1": 0}) == []
-    assert open_question_violations([_graded()], {}) == []
+    assert open_question_violations([_graded()], PremiseLedger()) == []
+    assert open_question_violations([_graded()], _asked("q?", author="s2")) == []
 
 
 def test_an_answer_route_answers_its_source_seniors_questions():
+    led = _asked("Is host A the one in scope?")
     a = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
               r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
               r4_premise_verification="PASS")
-    assert open_question_violations([a], {"s1": 1}) != []
-    a2 = a.model_copy(update={"open_question_answers": ["Only the one host."]})
-    assert open_question_violations([a2], {"s1": 1}) == []
+    assert open_question_violations([a], led) != []
+    a2 = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
+               r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
+               r4_premise_verification="PASS",
+               open_question_answers=[{"id": "q1", "answer": "Only the one host."}])
+    assert open_question_violations([a2], led) == []
 
 
 def test_every_route_to_a_senior_must_answer_its_questions():
@@ -429,7 +455,7 @@ def test_every_route_to_a_senior_must_answer_its_questions():
                           fix_directive="d")):
         e = entry(senior_id="s1", r1_scope_alignment="PASS", r2_progress="PASS",
                   r3_answer_readiness="WEAK", r4_premise_verification="PASS", **route_kw)
-        assert open_question_violations([e], {"s1": 1}) != [], route_kw["route"]
+        assert open_question_violations([e], _asked("q?")) != [], route_kw["route"]
 
 
 # ── a parallel senior must own a scope no other active senior touches ────────
@@ -474,77 +500,148 @@ def test_exploration_spawns_are_not_scope_checked():
     assert spawn_overlap_violations([e], active) == []
 
 
-def test_an_answer_without_a_premise_audit_is_rejected():
-    from conversation import premise_audit_violations, unverified_audit
-    bare = entry(route="ANSWER", value="v", source_senior="s1", justification="j")
-    assert premise_audit_violations([bare]) != []
-    audited = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
-                    premise_audit=["Coverage - VERIFIED: every way searched",
-                                   "this host and not another - UNVERIFIED", "window - VERIFIED: r2"])
-    assert premise_audit_violations([audited]) == []
-    assert unverified_audit(audited) == ["this host and not another - UNVERIFIED"]
+# ── the premise ledger: what an ANSWER must rest on ──────────────────────────
+
+CORPUS = ["1 result: ibc=5782875 obc=177 dest_port=3333"]
 
 
-def test_an_audit_without_a_coverage_line_is_rejected():
-    from conversation import premise_audit_violations
-    e = entry(route="ANSWER", value="v", source_senior="s1", justification="j",
-              premise_audit=["this host and not another - VERIFIED: r2"])
-    assert any("Coverage" in p for p in premise_audit_violations([e]))
+def _ledger_with(*, status="UNVERIFIED", lb=True, kind="coverage"):
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining could surface as stratum or DNS", kind=kind,
+                          load_bearing=lb)], author="s1", round_n=1)
+    if status != "UNVERIFIED":
+        led.apply([PremiseUpdate(id="p1", status=status, quote="ibc=5782875 obc=177",
+                                 evidence="why")], author="s1", corpus=CORPUS, round_n=2)
+    return led
+
+
+def _answer(**kw):
+    kw.setdefault("answer_premise_ids", ["p1"])
+    return entry(route="ANSWER", value="112", value_kind="count", source_senior="s1",
+                 justification="the NVM flow", r1_scope_alignment="PASS",
+                 r2_progress="PASS", r3_answer_readiness="PASS",
+                 r4_premise_verification="PASS", **kw)
+
+
+def _spent_state():
+    """Every senior slot used, s1's rounds gone - unsure_remedy has nothing to offer."""
+    state = QuestionState(points=1000)
+    for sid in ("s1", "s2", "s3"):
+        state.open_senior(sid)
+    for _ in range(state.budget["rounds"]):
+        state.record_round("s1", capped=False)
+    state.retire("s2")
+    state.retire("s3")
+    return state
+
+
+def test_an_answer_must_cite_the_premises_it_rests_on():
+    e = _answer(answer_premise_ids=[])
+    assert any("premise" in v for v in premise_audit_violations([e], _ledger_with()))
+
+
+def test_an_answer_must_rest_on_a_coverage_premise():
+    led = _ledger_with(kind="other", status="VERIFIED")
+    assert any("Coverage" in v for v in premise_audit_violations([_answer()], led))
+
+
+def test_a_clean_verified_coverage_premise_passes():
+    led = _ledger_with(status="VERIFIED")
+    assert premise_audit_violations([_answer()], led) == []
+
+
+def test_an_answer_citing_an_unknown_premise_id_is_rejected():
+    e = _answer(answer_premise_ids=["p99"])
+    assert any("p99" in v for v in premise_audit_violations([e], _ledger_with()))
+
+
+def test_a_load_bearing_unverified_premise_blocks_while_a_remedy_exists():
+    state = QuestionState(points=1000)
+    state.open_senior("s1")
+    assert any("UNVERIFIED" in v
+               for v in ledger_violations([_answer()], _ledger_with(), state))
+
+
+def test_it_stops_blocking_once_rounds_and_slots_are_spent():
+    out = ledger_violations([_answer()], _ledger_with(), _spent_state())
+    assert not any("UNVERIFIED" in v for v in out)
+
+
+def test_a_spent_senior_with_an_open_premise_calls_for_an_alternative_senior():
+    # Q216 smoke5_r1: s1 spent its rounds on one lead; two slots were still free.
+    state = QuestionState(points=1000)
+    state.open_senior("s1")
+    for _ in range(state.budget["rounds"]):
+        state.record_round("s1")
+    v = ledger_violations([_answer()], _ledger_with(), state)
+    assert any("SPAWN an alternative senior" in x for x in v)
+
+
+def test_a_refuted_premise_blocks_even_with_nothing_left_to_try():
+    out = ledger_violations([_answer()], _ledger_with(status="REFUTED"), _spent_state())
+    assert any("REFUTED" in v for v in out)
+
+
+def test_an_unanswered_open_question_is_named_by_its_id():
+    led = PremiseLedger()
+    led.ask(["which feed owns the byte counts?"], author="s1", round_n=1)
+    e = entry(senior_id="s1", route="COMMAND", decision="continue", rationale="r",
+              directive="d", r1_scope_alignment="PASS", r2_progress="PASS",
+              r3_answer_readiness="WEAK", r4_premise_verification="PASS")
+    out = open_question_violations([e], led)
+    assert len(out) == 1 and "q1" in out[0]
+
+
+def test_answering_by_id_clears_it():
+    led = PremiseLedger()
+    led.ask(["which feed owns the byte counts?"], author="s1", round_n=1)
+    e = entry(senior_id="s1", route="COMMAND", decision="continue", rationale="r",
+              directive="d", r1_scope_alignment="PASS", r2_progress="PASS",
+              r3_answer_readiness="WEAK", r4_premise_verification="PASS",
+              open_question_answers=[{"id": "q1", "answer": "cisco:nvm holds them"}])
+    assert open_question_violations([e], led) == []
 
 
 # ── evidence the SH cannot relabel ──────────────────────────────────────────────
-# Q216 r11: SH audited every premise VERIFIED over a report whose own Assumptions
+# Q216 r11: SH marked every premise VERIFIED over a report whose own Assumptions
 # said "not verifiable in-feed" and "the 2,365 unreturned rows".
 
 _R = ("## This round\n### What I ran\n- `dp=3333 | stats count` -> 1 event\n\n"
       "## Assumptions\n- Coverage: dp - full 22-value listing - VERIFIED\n")
 
 
-def _evidence(e, report, rounds_left=True, slots_left=True):
-    from conversation import evidence_violations
-    st = QuestionState(points=1000)
-    st.open_senior("s1")
-    if not slots_left:
-        st.spawns_used = st.budget["seniors"]
-    if not rounds_left:
-        while st.rounds_left_for("s1") > 0:
-            st.record_round("s1")
-    from senior_report import open_doubts
-    return evidence_violations([e], reports_of=lambda s: report,
-                               doubts_of=lambda s: open_doubts(report), state=st)
+def _updated(quote, status="VERIFIED", pid="p1"):
+    return entry(route="ANSWER", value="112", source_senior="s1", justification="j",
+                 answer_premise_ids=["p1"],
+                 premise_updates=[{"id": pid, "status": status, "quote": quote,
+                                   "evidence": "e"}])
+
+
+def _sh_updates(e, report=_R):
+    return sh_update_violations([e], _ledger_with(), reports_of=lambda s: report)
 
 
 def test_a_quote_that_cites_sh_is_not_evidence():
     # v1.4.2 Q216: SH told s1 the attribution was settled, s1 wrote it down, and SH
     # quoted that sentence back as the evidence for its own VERIFIED line.
-    v = _evidence(_audited("External corroboration of this flow was established by SH "
-                           "outside this feed"), _R)
+    v = _sh_updates(_updated("External corroboration of this flow was established by SH "
+                             "outside this feed"))
     assert any("quotes SH as the authority" in x for x in v)
 
 
-def _audited(quote):
-    return entry(route="ANSWER", value="112", source_senior="s1", justification="j",
-                 premise_audit=[{"premise": "Coverage: port", "status": "VERIFIED",
-                                 "source": "s1 round 1", "quote": quote, "evidence": "e"}])
+def test_a_verified_update_must_quote_the_senior_word_for_word():
+    assert _sh_updates(_updated("dp=3333 | stats count -> 1 event")) == []
+    assert any("in no senior's report" in v
+               for v in _sh_updates(_updated("3333 is the stratum port")))
 
 
-def test_a_verified_line_must_quote_the_senior_word_for_word():
-    assert _evidence(_audited("dp=3333 | stats count -> 1 event"), _R) == []
-    assert any("quote is in no senior" in v for v in _evidence(_audited("3333 is the stratum port"), _R))
+def test_an_update_naming_no_known_premise_is_rejected():
+    assert any("p99" in v for v in _sh_updates(_updated("dp=3333 | stats count -> 1 event",
+                                                        pid="p99")))
 
 
-def test_the_seniors_own_doubts_block_the_answer_while_rounds_remain():
-    doubtful = _R + "- Port 3333 = Monero stratum - not verifiable in-feed\n"
-    e = _audited("dp=3333 | stats count -> 1 event")
-    assert any("unsettled" in v for v in _evidence(e, doubtful))
-    assert _evidence(e, doubtful, rounds_left=False, slots_left=False) == []
-
-
-def test_a_spent_senior_with_doubts_calls_for_an_alternative_senior():
-    # Q216 smoke5_r1: s1 spent its rounds on one lead; two slots were still free.
-    doubtful = _R + "- Port 3333 = Monero stratum - not verifiable in-feed\n"
-    v =_evidence(_audited("dp=3333 | stats count -> 1 event"), doubtful, rounds_left=False)
-    assert any("SPAWN an alternative senior" in x for x in v)
+def test_withdrawing_a_verdict_needs_no_quote():
+    assert _sh_updates(_updated("", status="UNVERIFIED")) == []
 
 
 def test_retire_and_replace_in_one_turn_is_not_an_overlap():

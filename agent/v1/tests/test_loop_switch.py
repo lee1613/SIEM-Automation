@@ -86,7 +86,8 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
     directive = SeniorDirective(
         senior_id="", r1_scope_alignment="NA", r2_progress="NA",
         r3_answer_readiness="NA", r4_premise_verification="NA", route="ANSWER",
-        open_question_answers=[], premise_audit=["Coverage - VERIFIED: every way searched"],
+        open_question_answers=[], new_premises=[], premise_updates=[],
+        answer_premise_ids=["p1"],
         decision="", rationale="", directive="", basis="", flaw="",
         why_it_fails="", fix_directive="",
         scope_change={"sourcetypes": [], "sources": [], "fields": []},

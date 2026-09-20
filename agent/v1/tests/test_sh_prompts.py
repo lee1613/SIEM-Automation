@@ -1,3 +1,4 @@
+from premise import PremiseLedger
 from sh_loop import SENIOR_BRIEF, SH_SYSTEM_PROMPT, render_opening, render_rejection, render_wave
 
 
@@ -26,11 +27,24 @@ def test_sh_prompt_carries_the_three_rubric_dimensions_and_both_gates():
 
 def test_the_senior_brief_carries_the_report_template_and_the_reply_shapes():
     for section in ("## Prior rounds", "## This round", "### What I ran",
-                    "### What it means", "## Ruled out", "## Open questions for SH"):
+                    "### What it means", "## Ruled out"):
         assert section in SENIOR_BRIEF
+    # Premises and questions are ledger fields now, not report sections.
+    for gone in ("## Assumptions", "## Open questions for SH"):
+        assert gone not in SENIOR_BRIEF
+    for field in ("new_premises", "premise_updates", "open_questions"):
+        assert field in SENIOR_BRIEF
     assert "CLARIFY" in SENIOR_BRIEF and "COMMAND" in SENIOR_BRIEF
     from senior_report import REPORT_WORD_CAP
     assert str(REPORT_WORD_CAP) in SENIOR_BRIEF
+
+
+def test_sh_is_told_how_to_write_to_the_ledger_and_what_it_may_quote():
+    for field in ("new_premises", "premise_updates", "answer_premise_ids",
+                  "open_question_answers"):
+        assert field in SH_SYSTEM_PROMPT
+    assert "REFUTED" in SH_SYSTEM_PROMPT          # the no-escape gate
+    assert "never evidence" in SH_SYSTEM_PROMPT   # SH may not quote itself
 
 
 def test_the_senior_is_told_intent_not_the_rubric():
@@ -64,7 +78,8 @@ def test_a_wave_renders_every_report_with_its_stamped_numbers():
                "insight": "FOUND", "status": "solved", "value": "1367.875",
                "confidence": 80, "rounds_left": 6},
     }
-    text = render_wave(reports, slots_remaining=5, turns_remaining=7)
+    text = render_wave(reports, slots_remaining=5, turns_remaining=7,
+                       ledger=PremiseLedger())
     assert "s1" in text and "s2" in text
     assert "novel_spl=0" in text or "novel SPL: 0" in text
     assert "1367.875" in text
@@ -75,7 +90,8 @@ def test_a_wave_flags_the_code_side_r2_failure_explicitly():
     reports = {"s1": {"report": "r", "novel_spl_count": 0, "insight": "NOT_FOUND",
                       "status": "partial", "value": "", "confidence": 10,
                       "rounds_left": 2}}
-    text = render_wave(reports, slots_remaining=2, turns_remaining=3)
+    text = render_wave(reports, slots_remaining=2, turns_remaining=3,
+                       ledger=PremiseLedger())
     assert "R2 = FAIL" in text
 
 
