@@ -83,3 +83,89 @@ def test_a_candidate_is_recorded_per_round_for_later_calibration():
     led.record_candidate("s1", 1, "112")
     led.record_candidate("s1", 2, "112")
     assert led.candidates["s1"] == {1: "112", 2: "112"}
+
+
+from premise import PremiseUpdate, quote_supported
+
+CORPUS = ["sourcetype=cisco:nvm | 1 result: ibc=5782875 obc=177 dest_port=3333"]
+
+
+def _upd(pid, status, quote="", evidence="because"):
+    return PremiseUpdate(id=pid, status=status, quote=quote, evidence=evidence)
+
+
+def _led():
+    led = PremiseLedger()
+    led.add([_draft("The 3333 flow is submission, not download")],
+            author="s1", round_n=1)
+    return led
+
+
+def test_quote_supported_matches_across_markdown_and_whitespace():
+    assert quote_supported("**ibc=5782875**   obc=177", CORPUS)
+
+
+def test_quote_supported_rejects_a_quote_nobody_received():
+    assert not quote_supported("obc=5782875 ibc=177", CORPUS)
+
+
+def test_quote_supported_rejects_a_quote_too_short_to_mean_anything():
+    assert not quote_supported("ibc=57", CORPUS)
+
+
+def test_verified_needs_a_quote_from_a_result_the_author_received():
+    led = _led()
+    notes = led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+                      author="s1", corpus=CORPUS, round_n=2)
+    assert notes == [] and led.premises["p1"].status == "VERIFIED"
+    assert led.premises["p1"].verified_by == "s1"
+
+
+def test_verified_without_a_real_quote_is_dropped_and_reported():
+    led = _led()
+    notes = led.apply([_upd("p1", "VERIFIED", "the flow is clearly mining traffic")],
+                      author="s1", corpus=CORPUS, round_n=2)
+    assert led.premises["p1"].status == "UNVERIFIED"
+    assert len(notes) == 1 and "p1" in notes[0]
+
+
+def test_refuted_is_terminal():
+    led = _led()
+    led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
+              author="v1", corpus=CORPUS, round_n=2)
+    notes = led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+                      author="s1", corpus=CORPUS, round_n=3)
+    assert led.premises["p1"].status == "REFUTED"
+    assert len(notes) == 1 and "REFUTED" in notes[0]
+
+
+def test_withdrawing_a_verdict_needs_no_quote():
+    led = _led()
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=2)
+    notes = led.apply([_upd("p1", "UNVERIFIED", "")], author="s1",
+                      corpus=CORPUS, round_n=3)
+    assert notes == [] and led.premises["p1"].status == "UNVERIFIED"
+
+
+def test_a_sibling_senior_may_settle_another_seniors_premise():
+    led = _led()
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s2", corpus=CORPUS, round_n=2)
+    assert led.premises["p1"].status == "VERIFIED"
+    assert led.premises["p1"].verified_by == "s2"
+    assert led.premises["p1"].author == "s1"
+
+
+def test_an_update_naming_an_unknown_id_is_reported_not_crashed():
+    led = _led()
+    notes = led.apply([_upd("p99", "VERIFIED", "ibc=5782875 obc=177")],
+                      author="s1", corpus=CORPUS, round_n=2)
+    assert len(notes) == 1 and "p99" in notes[0]
+
+
+def test_every_transition_is_recorded_in_history():
+    led = _led()
+    led.apply([_upd("p1", "VERIFIED", "ibc=5782875 obc=177")],
+              author="s1", corpus=CORPUS, round_n=2)
+    assert [h["status"] for h in led.premises["p1"].history] == ["UNVERIFIED", "VERIFIED"]

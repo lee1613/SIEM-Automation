@@ -94,6 +94,20 @@ class OpenQuestion(BaseModel):
     round_asked: int = 0
 
 
+def quote_supported(quote: str, corpus: list) -> bool:
+    """Does this quote appear, word for word, in something the author actually received?
+
+    The senior-side equivalent of the rule that stops SH citing its own instruction
+    as evidence. Without it a senior can assert VERIFIED with nothing behind it and
+    only SH's judgement stands between that and an answer - which is what happened
+    on Q216.
+    """
+    q = _norm(quote)
+    if len(q) < MIN_QUOTE_CHARS:
+        return False
+    return any(q in _norm(chunk) for chunk in corpus or [])
+
+
 class PremiseLedger:
     """Every premise on one question, for every author. One instance per question.
 
@@ -162,3 +176,44 @@ class PremiseLedger:
     def open_questions_for(self, author: str) -> list[OpenQuestion]:
         return [q for q in self.questions.values()
                 if q.author == author and not q.answer.strip()]
+
+    # -- transitions ------------------------------------------------------------
+    def apply(self, updates: list, author: str, corpus: list, round_n: int) -> list[str]:
+        """Apply this round's verdicts. Returns a note per REJECTED update.
+
+        A senior round cannot be rejected mid-flight the way an SH turn can, so a
+        bad update is dropped rather than raised: the premise keeps its old status
+        and the note goes into the report SH reads. The effect on the gates is the
+        same as if the update had never been sent.
+        """
+        notes = []
+        for u in updates or []:
+            p = self.premises.get(u.id)
+            if p is None:
+                notes.append(f"update ignored: {u.id} is not a premise on this question")
+                continue
+            if p.status == "REFUTED":
+                notes.append(f"update ignored: {u.id} is REFUTED, which is final")
+                continue
+            if u.status in ("VERIFIED", "REFUTED") and not quote_supported(u.quote, corpus):
+                notes.append(
+                    f"{u.id} stays {p.status}: its quote is in no result you ran - "
+                    "copy the query output that shows it word for word")
+                continue
+            p.status = u.status
+            p.evidence = u.evidence
+            if u.status == "UNVERIFIED":
+                p.verified_by, p.quote = "", ""
+            else:
+                p.verified_by, p.quote = author, u.quote
+            p.history.append({"round": round_n, "status": u.status,
+                              "by": author, "quote": u.quote})
+        return notes
+
+    def answer(self, question_id: str, text: str) -> bool:
+        """Record SH's answer to one open question. False when the id is unknown."""
+        q = self.questions.get(question_id)
+        if q is None:
+            return False
+        q.answer = text
+        return True
