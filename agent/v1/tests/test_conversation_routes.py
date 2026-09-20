@@ -521,7 +521,7 @@ def _audited(quote):
 
 def test_a_verified_line_must_quote_the_senior_word_for_word():
     assert _evidence(_audited("dp=3333 | stats count -> 1 event"), _R) == []
-    assert any("quote is not" in v for v in _evidence(_audited("3333 is the stratum port"), _R))
+    assert any("quote is in no senior" in v for v in _evidence(_audited("3333 is the stratum port"), _R))
 
 
 def test_the_seniors_own_doubts_block_the_answer_while_rounds_remain():

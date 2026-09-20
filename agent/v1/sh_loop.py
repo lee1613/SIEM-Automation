@@ -536,9 +536,13 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                            if state.is_active(sid)}
         ) + premise_audit_violations(turn.entries) + evidence_violations(
             turn.entries,
-            reports_of=lambda sid: "\n".join([r.get("report", "") for r in all_reports
-                                              if r.get("senior_id") == sid]
-                                             + clarify_text.get(sid, [])),
+            # sid=None means "every senior": a VERIFIED premise may rest on a sibling's
+            # report, and SH names the real source in the audit line itself.
+            reports_of=lambda sid: "\n".join(
+                [r.get("report", "") for r in all_reports
+                 if sid is None or r.get("senior_id") == sid]
+                + (sum(clarify_text.values(), []) if sid is None
+                   else clarify_text.get(sid, []))),
             last_report_of=lambda sid: (sessions[sid].last_report if sid in sessions else ""),
             state=state)
         if problems:

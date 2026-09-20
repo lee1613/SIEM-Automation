@@ -374,9 +374,11 @@ def evidence_violations(entries: list, *, reports_of, last_report_of,
                         state: QuestionState) -> list[str]:
     """Checks an ANSWER against the senior's own words, which SH cannot relabel.
 
-    * Every VERIFIED audit line must quote, word for word, the senior's query,
-      result or finding that shows it — and the quote must be in that senior's
-      reports. A VERIFIED with nothing behind it is SH's opinion, not evidence.
+    * Every VERIFIED audit line must quote, word for word, a senior's query, result
+      or finding that shows it. The quote is checked against the source senior's
+      reports first and then against every senior's, because a premise established
+      by a sibling is still evidence. A VERIFIED with nothing behind it is SH's
+      opinion, not evidence. `reports_of(None)` must return every senior's text.
     * While the source senior has rounds left, its latest report must not still
       flag a doubt in its own Assumptions (an unverified premise, rows it did not
       read). Q216 r11: SH audited everything VERIFIED over a report that said
@@ -392,9 +394,12 @@ def evidence_violations(entries: list, *, reports_of, last_report_of,
             if a.status != "VERIFIED":
                 continue
             q = _norm(a.quote)
-            if len(q) < MIN_QUOTE_CHARS or q not in text:
-                out.append(f"audit line '{a.premise[:80]}' is VERIFIED but its quote is not "
-                           f"in {src}'s reports — copy the query, result or finding that "
+            # Any senior's report may hold the quote: an answer built on s2 routinely
+            # rests on a premise s1 established, and SH names the real source in
+            # `a.source` (v1.4.2 Q216 was blocked three turns for quoting s1 under s2).
+            if len(q) < MIN_QUOTE_CHARS or (q not in text and q not in _norm(reports_of(None))):
+                out.append(f"audit line '{a.premise[:80]}' is VERIFIED but its quote is in "
+                           "no senior's report — copy the query, result or finding that "
                            "shows it word for word, or mark the line UNVERIFIED")
         doubts = open_doubts(last_report_of(src))
         fix = unsure_remedy(state, src) if doubts else ""
