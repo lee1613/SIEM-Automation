@@ -43,6 +43,18 @@ def unseen_rows_note(truncated: list[str]) -> str:
             "UNVERIFIED._")
 
 
+def tool_outputs(full_state) -> list:
+    """The text every tool returned this round.
+
+    `full_state` is the ROUND's messages, not the thread's (splunk_subagent._run
+    slices `all_msgs[before:]`), so the session accumulates these across rounds to
+    hold everything this senior has actually seen. That corpus is what a VERIFIED
+    premise's quote is checked against.
+    """
+    return [str(m.get("content") or "") for m in (full_state or [])
+            if m.get("type") == "ToolMessage" and str(m.get("content") or "").strip()]
+
+
 def should_compact(current_context: int, *, mean_per_iter: int, window: int,
                    iters: int = ROUND_ITERS) -> bool:
     """Would a full round of growth push this thread past 80% of its window?"""
@@ -60,7 +72,7 @@ class SeniorSession:
     def __init__(self, *, sid: str, pool, qid: str, technique: str,
                  subquestion: str, brief: str, window: int,
                  rounds_granted: int, idx: int = 0, constraints=None,
-                 iters: int = ROUND_ITERS):
+                 iters: int = ROUND_ITERS, ledger=None):
         self.sid = sid
         self.pool = pool
         self.qid = qid
@@ -72,6 +84,8 @@ class SeniorSession:
         self.idx = idx or 1
         self.constraints = constraints
         self.iters = iters
+        self.ledger = ledger
+        self.tool_corpus: list = []
 
         self.thread_id = self._new_thread()
         self.rounds_used = 0
@@ -122,6 +136,21 @@ class SeniorSession:
 
         count, self.prior_spl = novel_spl(self.prior_spl, result.get("spl_used") or [])
 
+        # The ledger: this round's filings, then its verdicts. Order matters - a
+        # senior may file a premise and settle it in the same round.
+        ledger_notes = []
+        if self.ledger is not None:
+            self.tool_corpus += tool_outputs(result.get("full_state"))
+            self.ledger.add(result.get("new_premises") or [],
+                            author=self.sid, round_n=self.rounds_used)
+            ledger_notes = self.ledger.apply(result.get("premise_updates") or [],
+                                             author=self.sid, corpus=self.tool_corpus,
+                                             round_n=self.rounds_used)
+            self.ledger.ask(result.get("open_questions") or [],
+                            author=self.sid, round_n=self.rounds_used)
+            self.ledger.record_candidate(self.sid, self.rounds_used,
+                                         result.get("value", ""))
+
         # Only update context and thread iterations on successful rounds
         if not failed:
             self.last_prompt_tokens = int(result.get("last_prompt_tokens", 0))
@@ -134,6 +163,11 @@ class SeniorSession:
             # capped round's report is where the budget ran out, not a conclusion.
             body = (body.rstrip() + f"\n\n_Iteration cap reached: {self.iters}/{self.iters} "
                     "iterations used this round — cut off, not finished._\n")
+        if ledger_notes:
+            # The senior claimed a verdict the runner could not support. SH must see
+            # it: keeping the old status silently would look like it never tried.
+            body = (body.rstrip() + "\n\n_Premise updates refused by the runner:_\n"
+                    + "\n".join(f"- {n}" for n in ledger_notes) + "\n")
         note = "" if failed else unseen_rows_note(result.get("truncated") or [])
         if note:
             body = body.rstrip() + f"\n\n{note}\n"
@@ -167,10 +201,16 @@ class SeniorSession:
 
     def _message_for(self, directive: str) -> str:
         """The round's input: the brief on round one, a compaction seed when the
-        projection says so, otherwise the bare directive."""
+        projection says so, otherwise the bare directive - always preceded by the
+        premises this senior has left open."""
+        carried = (self.ledger.render_for_senior(self.sid)
+                   if self.ledger is not None else "")
+        head = f"{carried}\n\n" if carried else ""
+
         if not self.briefed:
             self.briefed = True
-            return f"{self.brief}\n\n## Your task\n{self.subquestion}\n\n## This round\n{directive}"
+            return (f"{self.brief}\n\n## Your task\n{self.subquestion}\n\n"
+                    f"{head}## This round\n{directive}")
 
         if should_compact(self.last_prompt_tokens,
                           mean_per_iter=self.mean_tokens_per_iteration,
@@ -185,10 +225,9 @@ class SeniorSession:
             spl_section = f"## SPL you already ran — do not repeat, go one step further\n{self._render_spl_list()}\n\n"
             return (f"{self.brief}\n\n## Your task\n{self.subquestion}\n\n"
                     f"## Where you got to (your own last report)\n{self.last_report}\n\n"
-                    f"{spl_section}"
-                    f"## This round\n{directive}")
+                    f"{spl_section}{head}## This round\n{directive}")
 
-        return directive
+        return f"{head}{directive}"
 
     def _fallback_report(self, result: dict) -> str:
         """A senior that skipped the `report` field still has to be readable.
