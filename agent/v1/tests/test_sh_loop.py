@@ -186,6 +186,23 @@ def test_a_rejected_turn_is_fed_back_and_costs_a_turn(tmp_path):
         assert "REJECTED" in f.read()
 
 
+def test_an_unstamped_verification_is_rejected_by_the_loop(tmp_path):
+    """The stamp gate is IN the chain, not merely written in conversation.py.
+
+    Its own unit tests would pass just as well if nobody had wired it up, and the
+    fallout that proved the wiring - every scripted turn failing at once - disappears
+    the moment those turns are given their stamps. This is what is left holding it.
+    """
+    llm = _LLM([_turn(_spawn()),
+                _turn(_answer(premise_stamps=[])),
+                _turn(_answer())])
+    out = _run(llm, _Pool(), tmp_path)
+    assert out["answer"] == "1367.875"
+    assert out["turns"] == 3, "the unstamped turn was refused and cost a turn"
+    with open(os.path.join(str(tmp_path), "Q216", "conversation.md"), encoding="utf-8") as f:
+        assert "you have not read them" in f.read()
+
+
 def test_running_out_of_turns_ends_the_question_with_no_answer(tmp_path):
     # 100pt tier: 5 SH turns. Script 5 spawn-less no-op turns by clarifying forever.
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="unclear",
