@@ -812,11 +812,22 @@ Replace `render_table`'s body (keeping its docstring) with:
         return "\n".join(rows)
 ```
 
-In `to_records`, add two keys to the dict, after `"verified_by": p.verified_by,`:
+In `to_records`, add three keys to the dict, after `"verified_by": p.verified_by,`:
 
 ```python
+            "rival": p.rival,
             "stamp": p.stamp,
             "stamp_reason": p.stamp_reason,
+```
+
+`rival` is carried here for the same reason it exists at all (Task 3): it holds the
+second live record set, so that the losing candidate is recorded as data instead of
+staying prose in a report where it can be argued away. Left out of the dump, it would
+be unreadable in exactly the post-run analysis it was added to serve. Add an assertion
+for it to `test_the_stamp_is_in_the_table_and_the_dump`:
+
+```python
+    assert rec["rival"] == "the other flows in the window"
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -2437,8 +2448,14 @@ Expected: PASS. Both describe behaviour that already holds — if either fails, 
 Run: `python -m pytest agent/v1/tests tests -q`
 Expected: PASS, no failures. Record the count.
 
-Run: `python -m ruff check agent/`
+Run: `python -m ruff check agent/v1/premise.py agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/validator.py agent/v1/finding.py agent/v1/tests/`
 Expected: `All checks passed!`. Fix anything it reports — most likely an unused import left by Task 4 or Task 8.
+
+> `python -m ruff check agent/` reports **18 pre-existing errors** on this branch, all in
+> files this plan never touches: `orchestrator.py` (5), `executor_graph.py` (2) and six
+> test modules (mostly `I001` unsorted imports). Measured 2026-09-21, before any task
+> here ran. They are out of scope — do not fix them as part of this work, and do not
+> treat them as a regression. The gate is: **no NEW error in a file this plan touches.**
 
 - [ ] **Step 4: Changelog**
 
