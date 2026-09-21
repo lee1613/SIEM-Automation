@@ -1,7 +1,9 @@
 # agent/v1/tests/test_sh_loop.py
 import os
 
+import pytest
 from conversation import PremiseStamp, SeniorDirective, SHTurn
+from hitl import RunPaused
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from sh_loop import NO_ANSWER, render_wave, run_question
 
@@ -721,6 +723,38 @@ def test_a_provider_outage_still_asks_a_human(tmp_path, monkeypatch):
     llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
     _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
     assert len(paused) == 1
+
+
+def test_an_unreachable_operator_skips_instead_of_losing_the_question(tmp_path, monkeypatch):
+    # v1.4.3_stamp_smoke5_r1: a GLM-5.3 timeout on Q224's s3 stopped the run under
+    # nohup, where stdin is closed so resolve_interrupt raises RunPaused instead of
+    # returning a choice — which meant the `choice == ABORT` branch never even ran.
+    # Nothing replays a dead process (decision_request.json is a postmortem record,
+    # not a resume token), so the way back in re-ran Q224 from zero and re-paid for
+    # two seniors that had already finished, one with a FOUND. The senior is retired
+    # and its slot refunded before the pause, so the loop can just carry on.
+    import sh_loop
+
+    def _unreachable(*a, **k):
+        raise RunPaused("/tmp/decision_request.json", "outage on Q216")
+
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", _unreachable)
+    llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
+    out = _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
+    assert out["answer"] == NO_ANSWER, "the question ran to its own end, not a pause"
+    log = _conversation(tmp_path)
+    assert "no operator reachable" in log
+    assert "/tmp/decision_request.json" in log
+
+
+def test_an_operator_who_can_answer_can_still_abort(tmp_path, monkeypatch):
+    # The skip above is only for an operator who cannot be reached. One who can be
+    # and says abort must still stop the run, or the pause stops meaning anything.
+    import sh_loop
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", lambda *a, **k: "abort")
+    llm = _LLM([_turn(_spawn()), _turn()] + [_turn() for _ in range(3)])
+    with pytest.raises(RunPaused):
+        _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
 
 
 def test_an_answer_citing_no_premise_is_rejected_then_accepted(tmp_path):

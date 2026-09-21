@@ -36,7 +36,7 @@ from conversation import (
 )
 from conversation_log import ConversationLog
 from grounding import is_grounded
-from hitl import ABORT, RunPaused, resolve_interrupt
+from hitl import ABORT, SKIP, RunPaused, resolve_interrupt
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
@@ -794,11 +794,27 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 # dead endpoint. A runaway is already handled — the senior is
                 # retired, its slot refunded, and SH decides whether to respawn.
                 if hitl and result["status"] == "api_failed":
-                    choice = resolve_interrupt(
-                        [_Interrupt({"provider": result.get("provider", ""),
-                                     "error": result.get("answer", "")[:400],
-                                     "qids": [qid]})],
-                        qid=qid, run_dir=run_dir)
+                    try:
+                        choice = resolve_interrupt(
+                            [_Interrupt({"provider": result.get("provider", ""),
+                                         "error": result.get("answer", "")[:400],
+                                         "qids": [qid]})],
+                            qid=qid, run_dir=run_dir)
+                    except RunPaused as paused:
+                        # No operator is reachable — a background launch closes
+                        # stdin, so resolve_interrupt raises before it can
+                        # return a choice. Stopping here discards the whole
+                        # in-flight question, because nothing replays a dead
+                        # process: decision_request.json is a postmortem
+                        # record, not a resume token, and the operator's only
+                        # way back in re-runs the question from zero. The state
+                        # is consistent to continue from — this senior was
+                        # retired and its slot refunded just above — so SKIP is
+                        # what a reachable operator would have chosen anyway.
+                        choice = SKIP
+                        log.note(f"{sid} api_failed and no operator reachable — "
+                                 f"skipping; slot already refunded, decision "
+                                 f"request at {paused.request_path}")
                     if choice == ABORT:
                         raise RunPaused(os.path.join(run_dir, "decision_request.json"),
                                         f"operator aborted on {qid} after {sid} "
