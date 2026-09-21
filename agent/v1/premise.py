@@ -26,7 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-KINDS = ("coverage", "selection", "definition", "other")
+KINDS = ("coverage", "selection", "other")
 
 # Shorter than this and a "quote" matches almost any text. Lives here rather than
 # in conversation.py so that module can import it without a cycle.
@@ -75,10 +75,9 @@ class PremiseDraft(BaseModel):
     """A premise as its author files it. No id and no status: both are the runner's."""
 
     text: str = Field(description="The premise, in one sentence. Immutable once filed.")
-    kind: Literal["coverage", "selection", "definition", "other"] = Field(
+    kind: Literal["coverage", "selection", "other"] = Field(
         description="'coverage': the ways the question's concept could show up in the "
                     "data. 'selection': why this entity and not another candidate. "
-                    "'definition': what the question's words mean for the measurement. "
                     "'other': anything else your conclusion or next step rests on.")
     load_bearing: bool = Field(
         description="True when the answer breaks if this premise is false. Be honest: "
@@ -114,7 +113,7 @@ class Premise(BaseModel):
 
     id: str
     author: str
-    kind: Literal["coverage", "selection", "definition", "other"]
+    kind: Literal["coverage", "selection", "other"]
     text: str
     status: Literal["UNVERIFIED", "VERIFIED", "REFUTED"] = "UNVERIFIED"
     load_bearing: bool = False

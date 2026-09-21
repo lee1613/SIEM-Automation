@@ -433,3 +433,23 @@ def test_dump_ledgers_merges_multiple_ledgers_and_round_trips_through_a_file(tmp
     assert len(records) == 2
     texts = {r["text"] for r in records}
     assert texts == {"A's premise", "B's premise"}
+
+
+def test_definition_is_no_longer_a_kind():
+    """A measurement ambiguity is an open question to SH, not a premise: no search
+    settles "span or sum", while "do these records overlap" is a query. p12 was a
+    selection claim wearing the label, which is why it could be "verified"."""
+    from premise import KINDS
+    assert KINDS == ("coverage", "selection", "other")
+    with pytest.raises(ValidationError):
+        PremiseDraft(text="the measure is the wall-clock span", kind="definition",
+                     load_bearing=True)
+
+
+def test_a_senior_still_saying_definition_keeps_its_claim_as_other():
+    """finding._drafts maps an unknown kind to 'other' rather than dropping the draft,
+    so a senior on an older habit loses the label, never the premise."""
+    from finding import _drafts
+    [d] = _drafts([{"text": "the measure is the wall-clock span", "kind": "definition"}])
+    assert d.kind == "other"
+    assert d.text == "the measure is the wall-clock span"

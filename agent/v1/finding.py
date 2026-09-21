@@ -132,7 +132,7 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
       not be confirmed. A NOT_FOUND belongs here, and the orchestrator reads it
       to plan the next round.
     - new_premises: the premises you are filing THIS round, each an object
-      {"text": ..., "kind": "coverage"|"selection"|"definition"|"other",
+      {"text": ..., "kind": "coverage"|"selection"|"other",
        "load_bearing": true|false, "quote": ..., "evidence": ...}. Do NOT re-send
       premises you filed earlier - the runner holds them and shows them back to
       you every round, and a second open premise of a kind you already have open
