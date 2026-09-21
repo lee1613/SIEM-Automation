@@ -513,3 +513,59 @@ def test_refiling_the_same_text_is_silent():
     notes = []
     led.add([draft], author="s1", round_n=2, notes=notes)
     assert notes == []
+
+
+# -- SH loses the power to settle a premise --------------------------------------
+
+SH_QUOTE = '{"dest_port": "3333", "count": "3"}'
+
+
+def test_sh_cannot_verify_a_premise():
+    """r1: SH settled 19 of 28 premises, and the triplet that lost Q216 was filed by SH
+    and verified by SH in the same round. SH has no Splunk access, so "SH verified it"
+    has only ever meant "SH read a report and decided" - which is the stamp."""
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining surfaces on the stratum port", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    notes = led.apply([PremiseUpdate(id="p1", status="VERIFIED", quote=SH_QUOTE,
+                                     evidence="the port census")],
+                      author="sh", corpus=[SH_QUOTE], round_n=2)
+    assert led.premises["p1"].status == "UNVERIFIED"
+    assert notes and "does not settle premises" in notes[0]
+
+
+def test_sh_cannot_refute_a_premise_either():
+    """'Verify' is read as 'settle', in either direction. SH's channel for disbelief is
+    the stamp, which costs it a senior slot and is on the record."""
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining surfaces on the stratum port", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    led.apply([PremiseUpdate(id="p1", status="REFUTED", quote=SH_QUOTE, evidence="no")],
+              author="sh", corpus=[SH_QUOTE], round_n=2)
+    assert led.premises["p1"].status == "UNVERIFIED"
+
+
+def test_sh_cannot_file_and_settle_in_one_step():
+    """`PremiseDraft.quote` is the other way a premise reaches VERIFIED, and it routes
+    through the same `apply`, so one guard closes both."""
+    led = PremiseLedger()
+    notes = []
+    led.add([PremiseDraft(text="every route was covered", kind="coverage",
+                          load_bearing=True, quote=SH_QUOTE, evidence="the census")],
+            author="sh", round_n=4, corpus=[SH_QUOTE], notes=notes)
+    assert led.premises["p1"].status == "UNVERIFIED"
+    assert notes and "does not settle premises" in notes[0]
+
+
+def test_a_senior_and_a_validator_still_settle():
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining surfaces on the stratum port", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    assert led.apply([PremiseUpdate(id="p1", status="VERIFIED", quote=SH_QUOTE,
+                                    evidence="the port census")],
+                     author="s1", corpus=[SH_QUOTE], round_n=2) == []
+    assert led.premises["p1"].verified_by == "s1"
+    assert led.apply([PremiseUpdate(id="p1", status="REFUTED", quote=SH_QUOTE,
+                                    evidence="a full dh scan shows another route")],
+                     author="v1", corpus=[SH_QUOTE], round_n=3) == []
+    assert led.premises["p1"].verified_by == "v1"

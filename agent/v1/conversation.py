@@ -22,8 +22,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Literal
 
-from premise import CIRCULAR as _CIRCULAR
-from premise import PremiseDraft, PremiseUpdate, is_validator, quote_supported
+from premise import PremiseDraft, is_validator
 from pydantic import BaseModel, Field, model_validator
 from question_state import MAX_EXPLORATIONS, QuestionState
 
@@ -158,11 +157,6 @@ class SeniorDirective(BaseModel):
                     "seniors searched each. Then a 'selection' premise: why this entity "
                     "and not another that could fit. Empty on other routes unless you "
                     "have a premise to add.")
-    premise_updates: list[PremiseUpdate] = Field(
-        description="Verdicts you are recording on premises already in the ledger. "
-                    "VERIFIED needs `quote` copied WORD FOR WORD from a senior's "
-                    "report - any senior's, since a premise established by a sibling "
-                    "is still evidence. Your own instruction is never evidence.")
     answer_premise_ids: list[str] = Field(
         description="ANSWER only. Every premise id the value rests on. The runner "
                     "checks each is VERIFIED, and refuses an answer resting on a "
@@ -388,29 +382,6 @@ def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:
             out.append(f"ANSWER is blocked: {len(open_)} load-bearing premise(s) it "
                        f"rests on are still UNVERIFIED - {fix}: "
                        + " | ".join(f'{p.id} "{p.text[:80]}"' for p in open_))
-    return out
-
-
-def sh_update_violations(entries: list, ledger, reports_of) -> list[str]:
-    """SH settles a premise from a senior's REPORT, not from a tool result it never
-    saw. The quote is checked against every senior's reports (a premise established
-    by a sibling is still evidence - v1.4.2 Q216 was blocked three turns for quoting
-    s1 under s2), and may not cite SH itself."""
-    out = []
-    for e in entries:
-        for u in e.premise_updates:
-            if u.status == "UNVERIFIED":
-                continue
-            if u.id not in ledger.premises:
-                out.append(f"premise_update names {u.id}, which is not on this question")
-            elif _CIRCULAR.search(u.quote or ""):
-                out.append(f"premise_update {u.id} quotes SH as the authority - your "
-                           "own instruction is not evidence. Quote the senior's query "
-                           "or result that shows it.")
-            elif not quote_supported(u.quote, [reports_of(None)]):
-                out.append(f"premise_update {u.id} is {u.status} but its quote is in no "
-                           "senior's report - copy the query, result or finding that "
-                           "shows it word for word.")
     return out
 
 

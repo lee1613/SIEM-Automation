@@ -28,11 +28,16 @@ def test_the_worker_returns_the_three_ledger_fields():
 
 
 def test_a_circular_quote_is_refused_by_apply_not_only_by_the_gate():
-    """C2: the runner writes the ledger BEFORE the gates (so SH can cite an id it
-    just filed) and a rejected turn is not rolled back. With the circular check
-    living only in `sh_update_violations`, the premise flipped to VERIFIED, the
-    turn was rejected, and SH re-issued it without the offending update - leaving
-    the laundered VERIFIED standing. This is the v1.4.2 Q216 loss exactly."""
+    """C2: the runner writes the ledger BEFORE the gates (so a settling author can
+    cite an id it just filed) and a rejected turn is not rolled back. With the
+    circular check living only in a turn-level gate, a quote citing SH's own
+    instruction as evidence could flip a premise to VERIFIED, the turn get rejected,
+    and a re-issued turn without the offending update would leave the laundered
+    VERIFIED standing - the v1.4.2 Q216 loss exactly. `apply` refuses it directly,
+    for any settling author. (SH itself never reaches this check at all now -
+    `apply` refuses author="sh" outright before the circular check runs; this
+    exercises it against a senior, who can still cite SH's word as if it were
+    evidence.)"""
     ledger = PremiseLedger()
     p = ledger.add([PremiseDraft(text="the 3333 flow is a download", kind="selection",
                              load_bearing=True, rival="the coinhive HTTPS flows")],
@@ -42,7 +47,7 @@ def test_a_circular_quote_is_refused_by_apply_not_only_by_the_gate():
         [PremiseUpdate(id=p.id, status="VERIFIED",
                        quote="the attribution was established by SH outside this feed",
                        evidence="SH settled it")],
-        author="sh", corpus=["the attribution was established by SH outside this feed"],
+        author="s1", corpus=["the attribution was established by SH outside this feed"],
         round_n=2)
 
     assert ledger.premises[p.id].status == "UNVERIFIED"

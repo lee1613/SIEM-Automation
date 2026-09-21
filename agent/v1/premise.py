@@ -301,6 +301,9 @@ class PremiseLedger:
     def apply(self, updates: list, author: str, corpus: list, round_n: int) -> list[str]:
         """Apply this round's verdicts. Returns a note per REJECTED update.
 
+        Only a senior or a validator settles anything: an update authored by "sh" is
+        refused whatever it says, because SH has no Splunk access and never will.
+
         A senior round cannot be rejected mid-flight the way an SH turn can, so a
         bad update is dropped rather than raised: the premise keeps its old status
         and the note goes into the report SH reads. The effect on the gates is the
@@ -308,6 +311,18 @@ class PremiseLedger:
         """
         notes = []
         for u in updates or []:
+            if author == "sh":
+                # SH has no Splunk access, so "SH verified it" has only ever meant "SH
+                # read a report and decided". That reading is the stamp, which is an
+                # annotation, costs a senior slot when it is false, and is on the
+                # record. r1: SH settled 19 of 28 premises, including the triplet that
+                # lost the question.
+                notes.append(
+                    f"{u.id} unchanged: SH does not settle premises. Your reading of a "
+                    "senior's verification goes in `premise_stamps`; a premise reaches "
+                    "VERIFIED from the senior whose search shows it, or from an "
+                    "independent validator.")
+                continue
             p = self.premises.get(u.id)
             if p is None:
                 notes.append(f"update ignored: {u.id} is not a premise on this question")

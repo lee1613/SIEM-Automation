@@ -12,7 +12,6 @@ from conversation import (
     ledger_violations,
     open_question_violations,
     premise_audit_violations,
-    sh_update_violations,
     spawn_overlap_violations,
 )
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
@@ -22,7 +21,7 @@ from question_state import QuestionState
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
-    "open_question_answers": [], "new_premises": [], "premise_updates": [],
+    "open_question_answers": [], "new_premises": [],
     "answer_premise_ids": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
@@ -600,48 +599,6 @@ def test_answering_by_id_clears_it():
               r3_answer_readiness="WEAK", r4_premise_verification="PASS",
               open_question_answers=[{"id": "q1", "answer": "cisco:nvm holds them"}])
     assert open_question_violations([e], led) == []
-
-
-# ── evidence the SH cannot relabel ──────────────────────────────────────────────
-# Q216 r11: SH marked every premise VERIFIED over a report whose own Assumptions
-# said "not verifiable in-feed" and "the 2,365 unreturned rows".
-
-_R = ("## This round\n### What I ran\n- `dp=3333 | stats count` -> 1 event\n\n"
-      "## Assumptions\n- Coverage: dp - full 22-value listing - VERIFIED\n")
-
-
-def _updated(quote, status="VERIFIED", pid="p1"):
-    return entry(route="ANSWER", value="112", source_senior="s1", justification="j",
-                 answer_premise_ids=["p1"],
-                 premise_updates=[{"id": pid, "status": status, "quote": quote,
-                                   "evidence": "e"}])
-
-
-def _sh_updates(e, report=_R):
-    return sh_update_violations([e], _ledger_with(), reports_of=lambda s: report)
-
-
-def test_a_quote_that_cites_sh_is_not_evidence():
-    # v1.4.2 Q216: SH told s1 the attribution was settled, s1 wrote it down, and SH
-    # quoted that sentence back as the evidence for its own VERIFIED line.
-    v = _sh_updates(_updated("External corroboration of this flow was established by SH "
-                             "outside this feed"))
-    assert any("quotes SH as the authority" in x for x in v)
-
-
-def test_a_verified_update_must_quote_the_senior_word_for_word():
-    assert _sh_updates(_updated("dp=3333 | stats count -> 1 event")) == []
-    assert any("in no senior's report" in v
-               for v in _sh_updates(_updated("3333 is the stratum port")))
-
-
-def test_an_update_naming_no_known_premise_is_rejected():
-    assert any("p99" in v for v in _sh_updates(_updated("dp=3333 | stats count -> 1 event",
-                                                        pid="p99")))
-
-
-def test_withdrawing_a_verdict_needs_no_quote():
-    assert _sh_updates(_updated("", status="UNVERIFIED")) == []
 
 
 def test_retire_and_replace_in_one_turn_is_not_an_overlap():

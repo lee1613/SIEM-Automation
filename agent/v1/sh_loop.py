@@ -28,7 +28,6 @@ from conversation import (
     ledger_violations,
     open_question_violations,
     premise_audit_violations,
-    sh_update_violations,
     spawn_overlap_violations,
 )
 from conversation_log import ConversationLog
@@ -544,9 +543,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             if e.route == "ANSWER":
                 e.answer_premise_ids = list(e.answer_premise_ids) + [
                     p.id for p in filed if p.id not in e.answer_premise_ids]
-            notes = ledger.apply(e.premise_updates, author="sh", corpus=sh_corpus,
-                                 round_n=state.turns_used)
-            ledger_notes.extend(notes)
 
         # v1.4.3: an ANSWER's cited premises are validated BEFORE the gates read the
         # ledger, so a verdict reached on this turn is what the gates see.
@@ -571,13 +567,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + spawn_overlap_violations(
             turn.entries, {sid: s.constraints for sid, s in sessions.items()
                            if state.is_active(sid)}
-        ) + sh_update_violations(
-            turn.entries, ledger,
-            # A premise established by a sibling is still evidence, so the quote is
-            # checked against every senior's reports and clarify replies.
-            reports_of=lambda sid: "\n".join(
-                [r.get("report", "") for r in all_reports]
-                + sum(clarify_text.values(), [])),
         ) + premise_audit_violations(
             turn.entries, ledger
         ) + ledger_violations(turn.entries, ledger, state)

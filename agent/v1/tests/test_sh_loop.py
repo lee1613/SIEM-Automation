@@ -12,7 +12,7 @@ from sh_loop import NO_ANSWER, render_wave, run_question
 BLANK = {
     "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
-    "open_question_answers": [], "new_premises": [], "premise_updates": [],
+    "open_question_answers": [], "new_premises": [],
     "answer_premise_ids": [],
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
@@ -814,22 +814,26 @@ def test_a_premise_is_validated_once_not_every_wave(tmp_path):
     assert len(pool.validator_messages) == 1
 
 
-def test_a_premise_sh_settles_on_the_answer_turn_is_still_validated(tmp_path):
-    """Q216 v1.4.3 r1's second move. Validators run after a wave and no wave follows an
-    ANSWER, so the premises SH filed and verified on its answering turn - one of them in
-    that single turn - were never seen by a validator. The answer's cited premises are
-    now validated before the gates read the ledger."""
+def test_a_premise_sh_files_on_the_answer_turn_is_never_silently_verified(tmp_path):
+    """Q216 v1.4.3 r1's second move depended on SH being able to settle a premise on
+    its own ANSWER turn, where no wave follows and so no validator could ever see it.
+    That move is closed at the root now, not patched at the validator: `apply` refuses
+    author="sh" outright, so a premise SH files here - however good its own quote looks
+    - starts and stays UNVERIFIED, and is never handed to a validator as if it had
+    already been settled."""
     pool = _Validating()
     late = _answer(new_premises=[PremiseDraft(
         text="coverage: the duration is the whole of it", kind="coverage",
         load_bearing=True, quote="The duration is 1367.875.",
         evidence="s1's report states it")])
-    llm = _LLM([_turn(_spawn()), _turn(late), _turn(_answer()), _turn(_answer())])
-    _run(llm, pool, tmp_path)
+    llm = _LLM([_turn(_spawn()), _turn(late), _turn(_answer()), _turn(_answer()), _turn(_answer())])
+    out = _run(llm, pool, tmp_path, points=100)
 
+    filed = [p for p in out["ledger"].premises.values()
+             if p.text == "coverage: the duration is the whole of it"]
+    assert filed and filed[0].status == "UNVERIFIED"
     briefed = "\n".join(pool.validator_messages)
-    assert "coverage: the duration is the whole of it" in briefed, (
-        "a premise settled on the ANSWER turn escaped validation")
+    assert "coverage: the duration is the whole of it" not in briefed
 
 
 def test_a_validators_verdict_is_not_reported_as_a_refused_update(tmp_path):

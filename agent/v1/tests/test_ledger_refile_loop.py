@@ -52,7 +52,7 @@ def test_a_settled_premise_does_not_block_a_later_one_of_the_same_kind():
     led = _ledger_with_open_sh_selection()
     led.apply([PremiseUpdate(id="p1", status="VERIFIED", quote=REPORT,
                              evidence="the dp enumeration shows 3333 is the only pool port")],
-              author="sh", corpus=[REPORT], round_n=5)
+              author="s1", corpus=[REPORT], round_n=5)
 
     filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True, rival=RIVAL)],
                     author="sh", round_n=8)
@@ -79,16 +79,18 @@ def test_a_draft_carrying_a_quote_is_settled_as_it_is_filed():
     filing this turn in `premise_updates`. The auto-link then makes that premise an
     instant load-bearing blocker on the very ANSWER that filed it. Filing with the quote
     already attached is the way out, and it weakens nothing - the quote runs the same
-    corpus and circularity checks."""
+    corpus and circularity checks. (SH cannot use this door at all now - `apply` refuses
+    author="sh" outright, including the settle call `add` makes internally - so this is
+    exercised by a senior, the only author for whom the deadlock still applies.)"""
     led = PremiseLedger()
 
     filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL,
                                   quote=REPORT,
                                   evidence="dp=3333 is the only Monero pool port present")],
-                    author="sh", round_n=4, corpus=[REPORT])
+                    author="s1", round_n=4, corpus=[REPORT])
 
     assert filed[0].status == "VERIFIED"
-    assert filed[0].verified_by == "sh"
+    assert filed[0].verified_by == "s1"
     assert [h["status"] for h in filed[0].history] == ["UNVERIFIED", "VERIFIED"]
 
 
@@ -149,7 +151,7 @@ def test_another_author_s_settled_premises_are_not_carried_to_a_senior():
             author="sh", round_n=4)
     led.apply([PremiseUpdate(id="p1", status="VERIFIED", quote=REPORT,
                              evidence="the dp enumeration settles it")],
-              author="sh", corpus=[REPORT], round_n=5)
+              author="s2", corpus=[REPORT], round_n=5)
     led.add([PremiseDraft(text="s1 open", kind="coverage", load_bearing=True)],
             author="s1", round_n=5)
 
