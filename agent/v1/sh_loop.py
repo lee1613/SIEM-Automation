@@ -29,6 +29,7 @@ from conversation import (
     open_question_violations,
     premise_audit_violations,
     spawn_overlap_violations,
+    stamp_violations,
 )
 from conversation_log import ConversationLog
 from grounding import is_grounded
@@ -569,6 +570,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                            if state.is_active(sid)}
         ) + premise_audit_violations(
             turn.entries, ledger
+        ) + stamp_violations(
+            turn.entries, ledger
         ) + ledger_violations(turn.entries, ledger, state)
         # A refused update is not a gate violation, so without this SH is told
         # nothing and re-sends the same malformed update until the turns run out,
@@ -597,6 +600,12 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             for a in e.open_question_answers:
                 if a.id in owned:
                     ledger.answer(a.id, a.answer)
+        # The stamp is recorded only on an accepted turn, like the open-question
+        # answers: a rejected turn's stamps would burn the one chance each premise gets.
+        for e in turn.entries:
+            for s in e.premise_stamps:
+                ledger.stamp_premise(s.id, establishes=s.establishes, reason=s.reason,
+                                     round_n=state.turns_used)
         grades.extend(rows)
         unread = {}
 

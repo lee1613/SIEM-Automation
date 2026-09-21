@@ -6,6 +6,7 @@ is easy to wave through. "Does this quote establish this claim as written", aske
 one named premise one round before the answering turn, is the bet.
 """
 
+from conversation import PremiseStamp, SeniorDirective, stamp_violations
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 
 QUOTE = '{"da": "45.77.53.176", "count": "4832", "dp": ["3333", "443", "80"]}'
@@ -89,3 +90,87 @@ def test_the_stamp_is_in_the_table_and_the_dump():
     [rec] = led.to_records("Q216")
     assert rec["stamp"] == "false" and rec["stamp_reason"] == "no"
     assert rec["rival"] == "the other flows in the window"
+
+
+BLANK = {
+    "senior_id": "", "r1_scope_alignment": "NA", "r2_progress": "NA",
+    "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
+    "open_question_answers": [], "new_premises": [], "answer_premise_ids": [],
+    "premise_stamps": [], "nominate_premise_id": "",
+    "decision": "", "rationale": "", "directive": "",
+    "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
+    "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
+    "clarify_reason": "", "questions": [],
+    "constraints": {"sourcetypes": [], "sources": [], "fields": []},
+    "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
+    "deviation": "", "inherited_entities": "",
+    "value": "", "value_kind": "", "source_senior": "", "justification": "",
+    "case_updates": [],
+}
+
+
+def entry(**kw) -> SeniorDirective:
+    return SeniorDirective(**{**BLANK, **kw})
+
+
+def _command(**kw):
+    return entry(**{"route": "COMMAND", "senior_id": "s1", "decision": "continue",
+                    "directive": "go further", "r1_scope_alignment": "PASS",
+                    "r2_progress": "PASS", "r3_answer_readiness": "WEAK",
+                    "r4_premise_verification": "WEAK", **kw})
+
+
+def test_a_turn_leaving_a_new_verification_unstamped_is_rejected():
+    led = _verified_by()
+    out = stamp_violations([_command()], led)
+    assert out and "p1" in out[0]
+
+
+def test_a_stamped_verification_passes_the_gate():
+    led = _verified_by()
+    out = stamp_violations(
+        [_command(premise_stamps=[PremiseStamp(
+            id="p1", establishes=False,
+            reason="the claim says route (c) was not searched; the quote is the "
+                   "result of searching it")])],
+        led)
+    assert out == []
+
+
+def test_a_stamp_needs_a_reason():
+    led = _verified_by()
+    out = stamp_violations(
+        [_command(premise_stamps=[PremiseStamp(id="p1", establishes=True, reason="  ")])],
+        led)
+    assert out and "no reason" in out[0]
+
+
+def test_a_premise_stamped_in_an_earlier_turn_is_not_restamped():
+    led = _verified_by()
+    led.stamp_premise("p1", establishes=True, reason="it does", round_n=2)
+    out = stamp_violations(
+        [_command(premise_stamps=[PremiseStamp(id="p1", establishes=False,
+                                               reason="second thoughts")])],
+        led)
+    assert out and "earlier turn" in out[0]
+
+
+def test_a_stamp_on_an_unknown_id_is_rejected():
+    led = _verified_by()
+    out = stamp_violations(
+        [_command(premise_stamps=[PremiseStamp(id="p9", establishes=True,
+                                               reason="it does")])],
+        led)
+    assert out and "not a premise" in out[0]
+
+
+def test_a_stamp_may_arrive_on_a_different_entry_of_the_same_turn():
+    """The turn is judged as a whole: SH may stamp in one entry and route in another."""
+    led = _verified_by()
+    out = stamp_violations(
+        [entry(route="RETIRE", senior_id="s1", reason="done",
+               premise_stamps=[PremiseStamp(id="p1", establishes=True,
+                                            reason="the census covers it")]),
+         _command(senior_id="s2")],
+        led)
+    assert out == []

@@ -64,6 +64,21 @@ class QuestionAnswer(BaseModel):
     answer: str = Field(description="Your answer. If you cannot settle it, say what would.")
 
 
+class PremiseStamp(BaseModel):
+    """SH's reading of one newly-claimed verification. An annotation, not an edit."""
+
+    id: str = Field(description="The premise id, e.g. 'p3'. Copy it exactly.")
+    establishes: bool = Field(
+        description="Does that quote establish THIS claim, AS WRITTEN? Read the claim's "
+                    "own words before the quote: a claim that states its own limit - a "
+                    "route not searched, a case not checked, a choice unresolved - is "
+                    "NOT established by evidence that walks past the limit. True or "
+                    "false, not a grade.")
+    reason: str = Field(
+        description="One or two sentences: what the quote shows, and why that does or "
+                    "does not establish the claim as written.")
+
+
 class SeniorDirective(BaseModel):
     """One graded route aimed at one senior (or, for SPAWN/ANSWER, at the question)."""
 
@@ -161,6 +176,18 @@ class SeniorDirective(BaseModel):
         description="ANSWER only. Every premise id the value rests on. The runner "
                     "checks each is VERIFIED, and refuses an answer resting on a "
                     "REFUTED one however little budget is left.")
+    premise_stamps: list[PremiseStamp] = Field(
+        description="One entry for EVERY premise a report in this wave newly claims "
+                    "VERIFIED, for the senior this route addresses. You do not settle "
+                    "premises; you read the senior's claim against its own quote and "
+                    "record whether it holds. A turn that leaves a new verification "
+                    "unstamped is rejected. Premises settled in an earlier turn are not "
+                    "re-stamped. A FALSE stamp retires that senior and spawns a "
+                    "validator - it is not free, and it is on the record.")
+    nominate_premise_id: str = Field(
+        description="Required on a turn carrying a FALSE stamp, empty otherwise: the ONE "
+                    "premise an independent validator will settle. Choose from what you "
+                    "stamped false or what that senior left UNVERIFIED.")
     case_updates: list[str] = Field(
         description="ANSWER only. Durable incident facts for the case file, each in the form "
                     "'entity <type> <value>' or 'finding [verified|hypothesis] <claim> | evidence: <spl>'.")
@@ -399,6 +426,45 @@ def open_question_violations(entries: list[SeniorDirective], ledger) -> list[str
         if missing:
             out.append(f"{sid} is waiting on {', '.join(missing)} - answer each by id "
                        "in open_question_answers")
+    return out
+
+
+def stamp_violations(entries: list, ledger) -> list[str]:
+    """Every verification a senior newly claims is read by SH, once, the turn it is
+    claimed.
+
+    What this replaces: across three runs and six seniors, R4 flipped to PASS on the
+    turn SH stopped investigating, without exception. One word about a whole report is
+    easy to wave through. The bet is that a specific per-premise question - does this
+    quote establish this claim as written - asked one round before the answering turn
+    is materially harder.
+
+    The turn is judged as a whole, so SH may stamp in one entry and route in another.
+    """
+    out, stamped = [], set()
+    for e in entries:
+        for s in e.premise_stamps:
+            p = ledger.premises.get(s.id)
+            if p is None:
+                out.append(f"stamp names {s.id}, which is not a premise on this question")
+            elif p.stamp:
+                out.append(f"{s.id} was stamped in an earlier turn - a stamp is recorded "
+                           "once, when the verification is first claimed")
+            elif not s.reason.strip():
+                out.append(f"stamp on {s.id} gives no reason - say what the quote shows, "
+                           "and why that does or does not establish the claim as written")
+            else:
+                stamped.add(s.id)
+    addressed = {(e.source_senior if e.route == "ANSWER" else e.senior_id)
+                 for e in entries}
+    for sid in sorted(a for a in addressed if a):
+        missing = sorted((p.id for p in ledger.unstamped(sid) if p.id not in stamped),
+                         key=lambda i: int(i[1:]))
+        if missing:
+            out.append(
+                f"{sid} newly claims {', '.join(missing)} VERIFIED and you have not read "
+                "them - one `premise_stamps` entry each: does that quote establish that "
+                "claim as written, and why")
     return out
 
 

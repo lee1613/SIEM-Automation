@@ -23,6 +23,7 @@ BLANK = {
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
     "open_question_answers": [], "new_premises": [],
     "answer_premise_ids": [],
+    "premise_stamps": [], "nominate_premise_id": "",
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},

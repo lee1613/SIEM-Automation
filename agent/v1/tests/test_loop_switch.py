@@ -88,6 +88,7 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
         r3_answer_readiness="NA", r4_premise_verification="NA", route="ANSWER",
         open_question_answers=[], new_premises=[],
         answer_premise_ids=["p1"],
+        premise_stamps=[], nominate_premise_id="",
         decision="", rationale="", directive="", basis="", flaw="",
         why_it_fails="", fix_directive="",
         scope_change={"sourcetypes": [], "sources": [], "fields": []},

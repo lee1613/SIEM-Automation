@@ -1,7 +1,7 @@
 # agent/v1/tests/test_sh_loop.py
 import os
 
-from conversation import SeniorDirective, SHTurn
+from conversation import PremiseStamp, SeniorDirective, SHTurn
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from sh_loop import NO_ANSWER, render_wave, run_question
 
@@ -14,6 +14,7 @@ BLANK = {
     "r3_answer_readiness": "NA", "r4_premise_verification": "NA", "route": "RETIRE",
     "open_question_answers": [], "new_premises": [],
     "answer_premise_ids": [],
+    "premise_stamps": [], "nominate_premise_id": "",
     "decision": "", "rationale": "", "directive": "",
     "basis": "", "flaw": "", "why_it_fails": "", "fix_directive": "",
     "scope_change": {"sourcetypes": [], "sources": [], "fields": []},
@@ -111,10 +112,19 @@ def _spawn(**kw):
     return entry(**base)
 
 
+def _stamp_p1():
+    """p1 is VERIFIED from round 1 on (the fake senior's fixed UPDATES), so the first
+    turn to read that wave owes it a stamp. Only one turn per test may carry this -
+    stamp_premise is once-only - so later turns pass premise_stamps=[] instead."""
+    return [PremiseStamp(id="p1", establishes=True,
+                         reason="the 22-value port listing covers every route")]
+
+
 def _answer(value="1367.875", **kw):
     base = dict(route="ANSWER", value=value, value_kind="duration_seconds",
                 source_senior="s1", justification="s1 round 1 showed it.",
                 answer_premise_ids=["p1"],
+                premise_stamps=_stamp_p1(),
                 r1_scope_alignment="PASS", r2_progress="PASS", r3_answer_readiness="PASS",
                 r4_premise_verification="PASS")
     base.update(kw)
@@ -157,7 +167,7 @@ def test_iterations_are_reported_against_the_tier_ceiling(tmp_path):
 def test_an_ungrounded_answer_is_pushed_back_once_then_gives_no_answer(tmp_path):
     llm = _LLM([_turn(_spawn()),
                 _turn(_answer(value="999.999")),
-                _turn(_answer(value="888.888"))])
+                _turn(_answer(value="888.888", premise_stamps=[]))])
     out = _run(llm, _Pool(), tmp_path)
     assert out["end_reason"] == "ungrounded"
     # Neither of SH's values was grounded; the senior's value was never SH's answer.
@@ -190,9 +200,10 @@ def test_running_out_of_turns_ends_the_question_with_no_answer(tmp_path):
 def test_a_clarify_consumes_a_turn_but_no_wave(tmp_path):
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
                     questions=["Was the window mine?"], r1_scope_alignment="PASS",
-                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
+                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS",
+                    premise_stamps=_stamp_p1())
     pool = _Pool()
-    llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, pool, tmp_path)
     assert pool.rounds == 1, "a clarify must not run a round"
     assert out["waves"] == 1
@@ -239,8 +250,9 @@ def test_a_repeated_round_is_graded_r2_fail_by_code(tmp_path):
     cont = entry(senior_id="s1", route="COMMAND", decision="continue",
                  rationale="keep going", directive="Go one step further.",
                  r1_scope_alignment="PASS", r2_progress="PASS",
-                 r3_answer_readiness="WEAK", r4_premise_verification="PASS")
-    llm = _LLM([_turn(_spawn()), _turn(cont), _turn(_answer())])
+                 r3_answer_readiness="WEAK", r4_premise_verification="PASS",
+                 premise_stamps=_stamp_p1())
+    llm = _LLM([_turn(_spawn()), _turn(cont), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, _Pool(), tmp_path)
     second = [g for g in out["grades"] if g["round"] == 2][0]
     assert second["r2_effective"] == "FAIL", "SH graded PASS; code overrides it"
@@ -320,8 +332,9 @@ def test_a_failed_clarify_is_fed_back_and_the_question_continues(tmp_path):
 
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
                     questions=["Was the window mine?"], r1_scope_alignment="PASS",
-                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS")
-    llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer())])
+                    r2_progress="PASS", r3_answer_readiness="WEAK", r4_premise_verification="PASS",
+                    premise_stamps=_stamp_p1())
+    llm = _LLM([_turn(_spawn()), _turn(clarify), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, _BrokenClarify(), tmp_path)
     assert out["answer"] == "1367.875"
     assert any("clarify failed" in str(m.content) for m in llm.seen[-1])
@@ -354,8 +367,9 @@ def test_anti_thrash_sees_the_grades_of_the_report_being_read(tmp_path):
     # I1: rounds 2 and 3 repeat round 1's SPL -> both code-FAIL. The continue on turn 4
     # reads round 3, so the streak is already 2 and it must be refused.
     pool = _Pool()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()),
-                _turn(_continue()), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(_continue(premise_stamps=_stamp_p1())),
+                _turn(_continue()),
+                _turn(_continue()), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, pool, tmp_path)
     assert pool.rounds == 3, "a third consecutive continue must not run round 4"
     assert out["answer"] == "1367.875"
@@ -364,7 +378,8 @@ def test_anti_thrash_sees_the_grades_of_the_report_being_read(tmp_path):
 
 def test_sh_reads_and_can_answer_from_the_final_wave(tmp_path):
     # I2: 100pt has 3 rounds; the third wave must still be read by SH.
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(_continue(premise_stamps=_stamp_p1())),
+                _turn(_continue()), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, _Pool(), tmp_path, points=100)
     assert out["end_reason"] == "answer"
     assert len(out["grades"]) == 3
@@ -448,7 +463,8 @@ def test_a_clarify_to_a_retired_senior_is_rejected(tmp_path):
     clarify = entry(senior_id="s1", route="CLARIFY", clarify_reason="suspect",
                     questions=["Sure?"])
     pool = _Pool()
-    llm = _LLM([_turn(_spawn()), _turn(_retire()), _turn(clarify), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(_retire(premise_stamps=_stamp_p1())),
+                _turn(clarify), _turn(_answer(premise_stamps=[]))])
     _run(llm, pool, tmp_path)
     assert pool.clarifies == 0
     assert "s1 is not an active senior" in _conversation(tmp_path)
@@ -457,7 +473,8 @@ def test_a_clarify_to_a_retired_senior_is_rejected(tmp_path):
 def test_no_value_anywhere_ends_with_the_honest_marker(tmp_path):
     # report text is never submitted, and neither is an empty string
     pool = _Pool(value="", insight="NOT_FOUND")
-    llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
+    llm = _LLM([_turn(_spawn()), _turn(_retire(premise_stamps=_stamp_p1()))]
+              + [_turn() for _ in range(3)])
     out = _run(llm, pool, tmp_path, points=100)
     assert out["end_reason"] == "rounds"   # the one slot is spent and retired
     assert out["answer"] == NO_ANSWER
@@ -467,7 +484,8 @@ def test_a_value_sh_never_answered_with_is_not_submitted(tmp_path):
     # Q217 (test_20260918_113209): SH retired its seniors "rather than force an
     # unsupported answer", then the old fallback submitted a senior's value anyway.
     # The senior's report here holds a value and is graded R1 PASS.
-    llm = _LLM([_turn(_spawn()), _turn(_retire())] + [_turn() for _ in range(3)])
+    llm = _LLM([_turn(_spawn()), _turn(_retire(premise_stamps=_stamp_p1()))]
+              + [_turn() for _ in range(3)])
     out = _run(llm, _Pool(), tmp_path, points=100)
     assert out["end_reason"] == "rounds"
     assert out["answer"] == NO_ANSWER
@@ -554,8 +572,10 @@ class _Asking(_Recording):
 def test_ignoring_a_seniors_open_question_is_rejected(tmp_path):
     pool = _Asking()
     answered = _continue(open_question_answers=[
-        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}])
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(answered), _turn(_answer())])
+        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}],
+        premise_stamps=_stamp_p1())
+    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(answered),
+                _turn(_answer(premise_stamps=[]))])
     _run(llm, pool, tmp_path)
     assert pool.rounds == 2, "the ignoring turn must not run a round"
     assert "waiting on q1" in _conversation(tmp_path)
@@ -567,8 +587,9 @@ def test_an_answered_question_is_not_owed_again(tmp_path):
     # Settled in the ledger, so the ANSWER turn that follows owes nothing.
     pool = _Asking()
     answered = _continue(open_question_answers=[
-        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}])
-    llm = _LLM([_turn(_spawn()), _turn(answered), _turn(_answer())])
+        {"id": "q1", "answer": "Yes: host A is the endpoint in scope."}],
+        premise_stamps=_stamp_p1())
+    llm = _LLM([_turn(_spawn()), _turn(answered), _turn(_answer(premise_stamps=[]))])
     out = _run(llm, pool, tmp_path)
     assert out["end_reason"] == "answer"
     assert out["ledger"].open_questions_for("s1") == []
@@ -594,8 +615,9 @@ def test_the_runner_carries_the_unresolved_premises_into_the_next_round(tmp_path
     # Replaces the verify-first prefix: the runner prepends p2 (still UNVERIFIED)
     # to round 2 itself, so SH's grade cannot decide whether the senior is reminded.
     pool = _Recording()
-    llm = _LLM([_turn(_spawn()), _turn(_continue(r4_premise_verification="WEAK")),
-                _turn(_answer())])
+    llm = _LLM([_turn(_spawn()),
+                _turn(_continue(r4_premise_verification="WEAK", premise_stamps=_stamp_p1())),
+                _turn(_answer(premise_stamps=[]))])
     _run(llm, pool, tmp_path)
     assert "YOUR UNRESOLVED PREMISES" in pool.messages[1]
     assert "p2" in pool.messages[1]
@@ -605,7 +627,8 @@ def test_the_carry_forward_does_not_depend_on_shs_r4_grade(tmp_path):
     # v1.4.2: the old reminder fired on WEAK/FAIL R4 only, and SH grades all-PASS
     # when it wants to answer.
     pool = _Recording()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
+    llm = _LLM([_turn(_spawn()), _turn(_continue(premise_stamps=_stamp_p1())),
+                _turn(_answer(premise_stamps=[]))])
     _run(llm, pool, tmp_path)
     assert "YOUR UNRESOLVED PREMISES" in pool.messages[1]
 
@@ -696,8 +719,10 @@ def test_retiring_a_retired_senior_again_gets_a_reminder(tmp_path):
     # Q217 smoke5_r1: SH retired the same senior ten times over.
     retire = entry(senior_id="s1", route="RETIRE", reason="scope exhausted",
                    r1_scope_alignment="PASS", r2_progress="WEAK",
-                   r3_answer_readiness="WEAK", r4_premise_verification="PASS")
-    llm = _LLM([_turn(_spawn()), _turn(retire), _turn(retire), _turn(_answer())])
+                   r3_answer_readiness="WEAK", r4_premise_verification="PASS",
+                   premise_stamps=_stamp_p1())
+    llm = _LLM([_turn(_spawn()), _turn(retire), _turn(retire),
+                _turn(_answer(premise_stamps=[]))])
     _run(llm, _Pool(), tmp_path)
     assert "s1 is already retired or was never spawned" in _conversation(tmp_path)
 
