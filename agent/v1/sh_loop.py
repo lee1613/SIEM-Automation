@@ -24,6 +24,7 @@ from case_file import parse_case_updates
 from conversation import (
     directive_violations,
     effective_r2,
+    grade_ceiling_violations,
     grade_violations,
     ledger_violations,
     open_question_violations,
@@ -119,7 +120,7 @@ GRADE EVERY REPORT YOU READ — four enums per senior, alongside the route:
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
 Each is PASS, WEAK or FAIL.
-R4 is a grade; the gate is the ledger. The runner already hands each senior its own unsettled premises at the start of every round, so R4 is your reading of the chain, not the reminder. You cannot answer past a load-bearing UNVERIFIED premise while the source senior has rounds left or a senior slot is free; only once both are spent may you answer on one — say so in `justification`. Grade honestly: the grades are counted after the run, and an all-PASS column means the rubric was inert.
+R4 IS A CEILING THE RUNNER HOLDS, not a free grade. You may write PASS only when that senior has no load-bearing premise still UNVERIFIED and no stamp of yours on its verifications reads false; a REFUTED load-bearing premise forces FAIL. Grade lower than the ceiling whenever you mean it — you may never grade above it, and a turn that does is rejected. Across three earlier runs R4 flipped to PASS on the turn SH stopped investigating, every time, without exception: the ceiling is what that measurement bought.
 
 ANSWER EVERY OPEN QUESTION, BY ID. A senior's open questions reach you with an id (q1, q2...). Put one entry per open question in `open_question_answers`, naming its id and your answer. They reach the senior with its next instruction. Answer from the case, the question text and sibling reports; if you cannot, say what would settle it - that is still an answer. A turn that leaves one unanswered is rejected. Keep each to a line or two.
 
@@ -571,6 +572,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + premise_audit_violations(
             turn.entries, ledger
         ) + stamp_violations(
+            turn.entries, ledger
+        ) + grade_ceiling_violations(
             turn.entries, ledger
         ) + ledger_violations(turn.entries, ledger, state)
         # A refused update is not a gate violation, so without this SH is told

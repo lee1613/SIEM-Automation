@@ -96,12 +96,14 @@ class SeniorDirective(BaseModel):
     r3_answer_readiness: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
         description="Is there a candidate in submittable shape, or prose / a hedge / nothing?")
     r4_premise_verification: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
-        description="Is every premise the senior's conclusion or direction rests on backed by "
-                    "a result shown in the report? PASS: each has a query and result behind "
-                    "it. WEAK: minor premises untested, the chain holds without them. FAIL: "
-                    "the candidate or the direction depends on a premise nobody tested. A "
-                    "WEAK/FAIL is your reading of the chain; the ANSWER gate is the "
-                    "ledger, not this grade.")
+        description="Is every premise the senior's conclusion or direction rests on "
+                    "backed by a result shown in the report? PASS: each has a query and "
+                    "result behind it. WEAK: minor premises untested, the chain holds "
+                    "without them. FAIL: the candidate or the direction depends on a "
+                    "premise nobody tested. The runner CAPS this: PASS is refused while "
+                    "that senior has a load-bearing UNVERIFIED premise or a stamp of "
+                    "yours reads false, and a REFUTED one forces FAIL. Grade lower than "
+                    "the cap whenever you mean it; you may never grade above it.")
     open_question_answers: list[QuestionAnswer] = Field(
         description="One entry per OPEN question the senior you are addressing has "
                     "asked (for ANSWER: the source senior's). Each names the question's "
@@ -465,6 +467,50 @@ def stamp_violations(entries: list, ledger) -> list[str]:
                 f"{sid} newly claims {', '.join(missing)} VERIFIED and you have not read "
                 "them - one `premise_stamps` entry each: does that quote establish that "
                 "claim as written, and why")
+    return out
+
+
+def r4_ceiling(sid: str, entry, ledger) -> str:
+    """The highest R4 SH may write for this senior: FAIL, WEAK or PASS.
+
+    R4 was a permission slip. Across three runs and six seniors it flipped to PASS on
+    the turn SH stopped investigating, without exception, and `premise.py` predicted
+    that in prose a version earlier. PASS is a claim about the ground the senior stands
+    on, and the runner holds the facts that decide it; the grade now records rather than
+    triggers.
+
+    This turn's stamps count, not only the ledger's: SH cannot stamp a verification
+    false and grade the same senior's ground sound in the same breath.
+    """
+    if any(p.load_bearing and p.status == "REFUTED"
+           for p in ledger.premises.values()
+           if p.author == sid or p.verified_by == sid):
+        return "FAIL"
+    if any(s.establishes is False for s in entry.premise_stamps):
+        return "WEAK"
+    if any(p.load_bearing and p.status == "UNVERIFIED"
+           for p in ledger.premises.values() if p.author == sid):
+        return "WEAK"
+    if ledger.false_stamped(sid):
+        return "WEAK"
+    return "PASS"
+
+
+def grade_ceiling_violations(entries: list, ledger) -> list[str]:
+    """SH may always grade lower than the ceiling, never above it."""
+    rank = {"FAIL": 0, "WEAK": 1, "PASS": 2}
+    out = []
+    for e in entries:
+        sid = e.source_senior if e.route == "ANSWER" else e.senior_id
+        if not sid or e.r4_premise_verification == NA:
+            continue
+        cap = r4_ceiling(sid, e, ledger)
+        if rank.get(e.r4_premise_verification, 2) > rank[cap]:
+            why = ("a load-bearing premise of its is REFUTED" if cap == "FAIL" else
+                   "it has a load-bearing premise still UNVERIFIED, or you stamped one "
+                   "of its verifications false")
+            out.append(f"{sid}: R4 cannot be {e.r4_premise_verification} - {why}. "
+                       f"The most you may write is {cap}; lower is always yours.")
     return out
 
 

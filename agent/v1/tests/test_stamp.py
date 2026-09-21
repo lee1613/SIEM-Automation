@@ -6,7 +6,13 @@ is easy to wave through. "Does this quote establish this claim as written", aske
 one named premise one round before the answering turn, is the bet.
 """
 
-from conversation import PremiseStamp, SeniorDirective, stamp_violations
+from conversation import (
+    PremiseStamp,
+    SeniorDirective,
+    grade_ceiling_violations,
+    r4_ceiling,
+    stamp_violations,
+)
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 
 QUOTE = '{"da": "45.77.53.176", "count": "4832", "dp": ["3333", "443", "80"]}'
@@ -174,3 +180,56 @@ def test_a_stamp_may_arrive_on_a_different_entry_of_the_same_turn():
          _command(senior_id="s2")],
         led)
     assert out == []
+
+
+def test_pass_is_refused_while_a_load_bearing_premise_is_unverified():
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="every route enumerated", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    e = _command(r4_premise_verification="PASS")
+    assert r4_ceiling("s1", e, led) == "WEAK"
+    assert grade_ceiling_violations([e], led)
+
+
+def test_pass_is_refused_on_a_turn_carrying_a_false_stamp():
+    led = _verified_by()
+    e = _command(r4_premise_verification="PASS",
+                 premise_stamps=[PremiseStamp(id="p1", establishes=False,
+                                              reason="it walks past its own limit")])
+    assert r4_ceiling("s1", e, led) == "WEAK"
+    assert grade_ceiling_violations([e], led)
+
+
+def test_a_refuted_load_bearing_premise_forces_fail():
+    led = _verified_by()
+    led.apply([PremiseUpdate(id="p1", status="REFUTED", quote=QUOTE,
+                             evidence="my own scan of the whole feed")],
+              author="v1", corpus=[QUOTE], round_n=4)
+    assert r4_ceiling("s1", _command(), led) == "FAIL"
+    assert grade_ceiling_violations([_command(r4_premise_verification="WEAK")], led)
+    assert grade_ceiling_violations([_command(r4_premise_verification="FAIL")], led) == []
+
+
+def test_pass_is_allowed_on_clean_ground():
+    led = _verified_by()
+    e = _command(r4_premise_verification="PASS",
+                 premise_stamps=[PremiseStamp(id="p1", establishes=True,
+                                              reason="the census covers every route")])
+    assert r4_ceiling("s1", e, led) == "PASS"
+    assert grade_ceiling_violations([e], led) == []
+
+
+def test_sh_may_always_grade_below_the_ceiling():
+    led = _verified_by()
+    e = _command(r4_premise_verification="FAIL",
+                 premise_stamps=[PremiseStamp(id="p1", establishes=True,
+                                              reason="the census covers every route")])
+    assert grade_ceiling_violations([e], led) == []
+
+
+def test_an_ungraded_entry_has_no_ceiling():
+    """A SPAWN grades NA, and an exploration worker is never graded at all."""
+    led = _verified_by()
+    assert grade_ceiling_violations(
+        [entry(route="SPAWN", spawn_type="senior", subquestion="go", deviation="x")],
+        led) == []
