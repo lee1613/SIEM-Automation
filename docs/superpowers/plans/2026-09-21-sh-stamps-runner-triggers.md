@@ -2338,7 +2338,17 @@ WHAT A VERDICT MEANS. VERIFIED: your doubt is independently dismissed — the pr
 
 - [ ] **Step 5: Update the gates list**
 
-In the `THE GATES YOU MUST RESPECT` block, delete the last bullet (`* Quoted evidence: ...`) and append:
+In the `THE GATES YOU MUST RESPECT` block, first restore one sentence Task 7 removed with the R4 paragraph. Amend the existing `* Unverified premises:` bullet to end:
+
+```
+  * Unverified premises: an ANSWER resting on a load-bearing UNVERIFIED premise is rejected while the source senior has rounds left OR a senior slot is free. Once both are spent you may answer on one — say so in `justification`, so the record shows you knew.
+```
+
+That last clause lived in the old R4 paragraph, which Task 7 replaced wholesale. The rule
+itself survived in this bullet; the instruction to *account for it in writing* did not, and
+it is what makes an answer on unsettled ground legible in the log afterwards.
+
+Then delete the last bullet (`* Quoted evidence: ...`) and append:
 
 ```
   * Stamps: every verification a report newly claims is stamped in the same turn, or the turn is rejected.
