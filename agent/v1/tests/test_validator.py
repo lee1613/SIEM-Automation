@@ -8,7 +8,6 @@ the result of searching route (c) — 4,832 flows where the answer assumed one.
 
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from validator import (
-    MAX_VALIDATORS_PER_QUESTION,
     brief_for,
     refusal_reason,
     validate,
@@ -181,5 +180,8 @@ def test_a_circular_quote_is_refused():
     assert refusal_reason(out["update"], out["corpus"]) == "quoted SH as the authority"
 
 
-def test_the_question_budget_is_a_real_number():
-    assert MAX_VALIDATORS_PER_QUESTION >= 3, "Q216 r2 produced 3 load-bearing premises"
+def test_the_budget_is_the_senior_pool():
+    """No constant caps validators any more. Retiring the senior costs a spawn slot, so
+    the mechanism self-caps at the tier's senior count - three, and r2 used one."""
+    import validator
+    assert not hasattr(validator, "MAX_VALIDATORS_PER_QUESTION")

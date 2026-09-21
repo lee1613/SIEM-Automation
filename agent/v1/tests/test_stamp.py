@@ -10,6 +10,7 @@ from conversation import (
     PremiseStamp,
     SeniorDirective,
     grade_ceiling_violations,
+    nomination_violations,
     r4_ceiling,
     stamp_violations,
 )
@@ -233,3 +234,45 @@ def test_an_ungraded_entry_has_no_ceiling():
     assert grade_ceiling_violations(
         [entry(route="SPAWN", spawn_type="senior", subquestion="go", deviation="x")],
         led) == []
+
+
+def _false_stamp(**kw):
+    return _command(premise_stamps=[PremiseStamp(
+        id="p1", establishes=False,
+        reason="the claim says route (c) was not searched and the quote is the "
+               "result of searching it")], **kw)
+
+
+def test_a_false_stamp_without_a_nomination_is_rejected():
+    led = _verified_by()
+    out = nomination_violations([_false_stamp()], led)
+    assert out and "nominate_premise_id" in out[0]
+
+
+def test_a_false_stamp_with_a_nomination_passes():
+    led = _verified_by()
+    assert nomination_violations([_false_stamp(nominate_premise_id="p1")], led) == []
+
+
+def test_a_nomination_outside_the_doubt_is_rejected():
+    """It may not range wider: the false stamp is what fired the mechanism."""
+    led = _verified_by()
+    led.add([PremiseDraft(text="someone else's open claim", kind="coverage",
+                          load_bearing=True)], author="s2", round_n=2)
+    out = nomination_violations([_false_stamp(nominate_premise_id="p2")], led)
+    assert out and "p2" in out[0]
+
+
+def test_an_unverified_premise_of_the_same_senior_may_be_nominated():
+    led = _verified_by()
+    led.add([PremiseDraft(text="this flow and not the CoinHive six", kind="selection",
+                          load_bearing=True, rival="the six ws*.coinhive.com flows")],
+            author="s1", round_n=2)
+    assert nomination_violations([_false_stamp(nominate_premise_id="p2")], led) == []
+
+
+def test_a_nomination_without_a_false_stamp_is_rejected():
+    """A validator is spawned by a false stamp and by nothing else."""
+    led = _verified_by()
+    out = nomination_violations([_command(nominate_premise_id="p1")], led)
+    assert out and "no false stamp" in out[0]

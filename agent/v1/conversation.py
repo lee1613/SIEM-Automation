@@ -470,6 +470,37 @@ def stamp_violations(entries: list, ledger) -> list[str]:
     return out
 
 
+def nomination_violations(entries: list, ledger) -> list[str]:
+    """A false stamp fires the mechanism, and the mechanism needs an aim.
+
+    The nomination is drawn from premises SH stamped false, or premises that senior
+    left UNVERIFIED. It may not range wider: the false stamp is what fired this, so
+    letting SH aim the validator elsewhere would retire the senior and leave the
+    triggering doubt unexamined.
+    """
+    out = []
+    for e in entries:
+        sid = e.source_senior if e.route == "ANSWER" else e.senior_id
+        false_here = [s.id for s in e.premise_stamps if s.establishes is False]
+        pid = e.nominate_premise_id.strip()
+        if not false_here:
+            if pid:
+                out.append("nominate_premise_id is set with no false stamp on this turn "
+                           "- a validator is spawned by a false stamp and by nothing else")
+            continue
+        allowed = {p.id for p in ledger.nominatable(sid)} | set(false_here)
+        if not pid:
+            out.append(
+                f"you stamped {', '.join(false_here)} false, so {sid} is retired and one "
+                "independent validator is spawned - name the ONE premise it should "
+                f"settle in nominate_premise_id (from {', '.join(sorted(allowed))})")
+        elif pid not in allowed:
+            out.append(
+                f"nominate_premise_id {pid} is neither a premise you stamped false nor "
+                f"one {sid} left open - choose from {', '.join(sorted(allowed))}")
+    return out
+
+
 def r4_ceiling(sid: str, entry, ledger) -> str:
     """The highest R4 SH may write for this senior: FAIL, WEAK or PASS.
 

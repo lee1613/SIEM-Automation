@@ -28,10 +28,6 @@ from __future__ import annotations
 from premise import CIRCULAR, PremiseUpdate, quote_supported
 from senior_session import tool_outputs
 
-# Spec 2 §7, set 2026-09-21 from the Q216 runs. Q216 r2 produced 3 premises, all
-# load-bearing, so 6 is never the binding constraint; it exists to stop a pathological
-# question spawning validators without limit.
-MAX_VALIDATORS_PER_QUESTION = 6
 VALIDATOR_ROUNDS = 1
 VALIDATOR_ITERS = 8
 

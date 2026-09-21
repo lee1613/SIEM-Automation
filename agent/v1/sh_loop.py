@@ -27,6 +27,7 @@ from conversation import (
     grade_ceiling_violations,
     grade_violations,
     ledger_violations,
+    nomination_violations,
     open_question_violations,
     premise_audit_violations,
     spawn_overlap_violations,
@@ -45,7 +46,6 @@ from senior_report import REPORT_WORD_CAP
 from senior_session import SeniorSession
 from usage_tracker import context_window
 from validator import (
-    MAX_VALIDATORS_PER_QUESTION,
     VALIDATOR_ITERS,
     refusal_reason,
     validate,
@@ -546,21 +546,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 e.answer_premise_ids = list(e.answer_premise_ids) + [
                     p.id for p in filed if p.id not in e.answer_premise_ids]
 
-        # v1.4.3: an ANSWER's cited premises are validated BEFORE the gates read the
-        # ledger, so a verdict reached on this turn is what the gates see.
-        answer_cited = {i for e in turn.entries if e.route == "ANSWER"
-                        for i in e.answer_premise_ids}
-        # These are verdict lines for SH to read, NOT refusals of its updates, so they
-        # are kept out of `ledger_notes` - folding them in turned every successful
-        # validation into a spurious turn rejection ("the runner refused a premise
-        # update: --- v6 | INDEPENDENT VALIDATION of p6 | VERIFIED -> VERIFIED").
-        answer_verdicts = []
-        if answer_cited:
-            answer_verdicts = _run_validators(
-                pool, ledger, None, qid=qid, log=log, spent=validators,
-                round_n=state.turns_used, max_parallel=max_parallel,
-                cited=answer_cited)
-
         problems = grade_violations(
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
@@ -572,6 +557,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + premise_audit_violations(
             turn.entries, ledger
         ) + stamp_violations(
+            turn.entries, ledger
+        ) + nomination_violations(
             turn.entries, ledger
         ) + grade_ceiling_violations(
             turn.entries, ledger
@@ -585,13 +572,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
-            # The verdicts go with the rejection: when a validator is why the ANSWER is
-            # blocked, SH cannot act on the block without reading what it found.
-            msgs.append(HumanMessage(content="\n\n".join(
-                [render_rejection(problems), *answer_verdicts])))
+            msgs.append(HumanMessage(content=render_rejection(problems)))
             continue
-        if answer_verdicts:
-            msgs.append(HumanMessage(content="\n\n".join(answer_verdicts)))
         # Answers are recorded only once the turn is accepted, and only for the
         # senior the entry addresses. Written before the gates they close the
         # questions that `open_question_violations` reads, so the gate sees nothing
@@ -609,6 +591,26 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             for s in e.premise_stamps:
                 ledger.stamp_premise(s.id, establishes=s.establishes, reason=s.reason,
                                      round_n=state.turns_used)
+        # The trigger. A false stamp is SH stating in writing that this premise's
+        # evidence does not establish its claim, so the runner acts on it without
+        # asking: the senior is retired and the premise SH nominated goes to a reader
+        # that wants nothing. Retiring costs a spawn slot, which is the whole budget.
+        for e in turn.entries:
+            sid = e.source_senior if e.route == "ANSWER" else e.senior_id
+            if not sid or not any(s.establishes is False for s in e.premise_stamps):
+                continue
+            sess = sessions.get(sid)
+            if sess and state.is_active(sid):
+                log.write_handoff(sid, sess.handoff(
+                    "retired: SH stamped one of its verifications false"))
+            state.retire(sid)
+            log.note(f"{sid} retired on a false stamp; validating "
+                     f"{e.nominate_premise_id}")
+            said = _run_validators(pool, ledger, [e.nominate_premise_id], qid=qid,
+                                   log=log, spent=validators,
+                                   round_n=state.turns_used, max_parallel=max_parallel)
+            if said:
+                msgs.append(HumanMessage(content="\n\n".join(said)))
         grades.extend(rows)
         unread = {}
 
@@ -639,6 +641,12 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                                        rounds_remaining=max(0, state.rounds_left_for(sid) - 1))
 
             elif e.route in ("COMMAND", "CRITIC"):
+                if not state.is_active(e.senior_id):
+                    # Retired by the false-stamp trigger after the gates ran. SH's route
+                    # for it was legal when written and is simply spent.
+                    log.note(f"{e.senior_id} was retired this turn; its {e.route} "
+                             "is dropped")
+                    continue
                 pending[e.senior_id] = partial(sessions[e.senior_id].work, _directive_text(e),
                                                rounds_remaining=max(0, state.rounds_left_for(e.senior_id) - 1))
 
@@ -706,9 +714,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         if not pending:
             continue
 
-        # v1.4.3 §3.1: the validator trigger is "settled this wave", so the statuses
-        # have to be read before the wave writes to the ledger.
-        pre_status = {pid: p.status for pid, p in ledger.premises.items()}
         wave = _run_wave(pending, max_parallel=max_parallel)
         # Rounds are senior rounds (§4.2); a scout-only wave costs SH's turn, not a round.
         if any(kinds[sid] != "exploration" for sid in wave):
@@ -772,17 +777,13 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 result["rounds_left"] = state.rounds_left_for(sid)
                 unread[sid] = result
 
-        verdicts = _run_validators(pool, ledger, pre_status, qid=qid, log=log,
-                                   spent=validators, round_n=state.turns_used,
-                                   max_parallel=max_parallel)
-
-        if unread or scouted or failures or verdicts:
+        if unread or scouted or failures:
             head = (render_wave(unread, slots_remaining=state.slots_remaining,
                                 turns_remaining=state.turns_remaining,
                                 ledger=ledger) if unread
                     else _budget_line(state.slots_remaining, state.turns_remaining))
             msgs.append(HumanMessage(content="\n\n".join(
-                [head, *scouted, *failures, *verdicts])))
+                [head, *scouted, *failures])))
 
     if not answer:
         answer = NO_ANSWER
@@ -831,44 +832,27 @@ def _timed(run) -> dict:
     return {**result, "duration_s": round(time.perf_counter() - t0, 3)}
 
 
-def _run_validators(pool, ledger, pre_status, *, qid: str, log, spent: list,
-                    round_n: int, max_parallel: int, cited=()) -> list[str]:
-    """Spec 2 §3.1, settle-time trigger: validate every load-bearing premise at the
-    moment it stops being UNVERIFIED, before that status is allowed to stick.
+def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
+                    round_n: int, max_parallel: int) -> list[str]:
+    """Run one validator per nominated premise.
 
-    SH is not asked and cannot decline. That is the point — both Q216 ledger runs
-    failed here, and in both the party holding the candidate was also the only
-    witness for the premise the candidate rested on (r2: s1 filed 3 and verified 3
-    of its own; r1: SH filed 18 and verified 15 of its own).
+    The trigger is a false stamp and nothing else - no clock, no conjunction with
+    R1/R2/R3. A false stamp is SH stating in writing that a specific premise's evidence
+    does not establish its claim, and that is a defect the moment it is written.
+    Requiring a candidate to be ready first only waits for the senior to finish tidying
+    up, which is when it settles its own premises.
 
-    The senior is NOT retired and the wave is not interrupted. The original spec
-    retired it, which suited a trigger that fired late in a senior's life; this one
-    fires the round after a premise is filed, so retiring would end every senior in
-    round 2.
+    No constant caps this. Retiring the senior costs a spawn slot, so the senior pool IS
+    the budget - three at the 1000pt tier, and r2 used one senior of three, so in
+    practice this is one validator.
 
     Returns one line per verdict for SH's next turn, or [] when nothing qualified.
     """
     done = {v["premise_id"] for v in spent}
-    if pre_status is None:
-        # ANSWER turn: validate what the answer CITES, whatever wave settled it.
-        # Validators normally run after a wave, and no wave follows an ANSWER - so in
-        # Q216 v1.4.3 r1 the two premises SH settled on its answering turn (one of them
-        # filed and verified in that same turn) were never seen by a validator, which
-        # is how a chain a validator had already refuted reached the scoreboard.
-        due = [p for pid, p in ledger.premises.items()
-               if p.load_bearing and p.status == "VERIFIED" and pid in cited
-               and pid not in done]
-    else:
-        due = [p for pid, p in ledger.premises.items()
-               if p.load_bearing and p.status in ("VERIFIED", "REFUTED")
-               and pre_status.get(pid) != p.status and pid not in done]
-    room = MAX_VALIDATORS_PER_QUESTION - len(spent)
-    if not due or room <= 0:
-        if due:
-            log.note(f"{len(due)} premise(s) settled unvalidated — the question's "
-                     f"validator budget ({MAX_VALIDATORS_PER_QUESTION}) is spent")
+    due = [ledger.premises[i] for i in pids
+           if i in ledger.premises and i not in done]
+    if not due:
         return []
-    due = due[:room]
 
     jobs, targets = {}, {}
     for n, p in enumerate(due, start=len(spent) + 1):

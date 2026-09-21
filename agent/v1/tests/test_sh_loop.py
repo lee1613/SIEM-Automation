@@ -842,50 +842,6 @@ class _Validating(_Recording):
         return r
 
 
-def test_a_settled_load_bearing_premise_is_validated_without_sh_being_asked(tmp_path):
-    pool = _Validating()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
-    out = _run(llm, pool, tmp_path)
-
-    # p1 is the premise the fake senior VERIFIES on round 1 (UPDATES, above).
-    assert pool.validator_messages, "no validator ran"
-    assert out["ledger"].premises["p1"].status == "REFUTED"
-    assert out["ledger"].premises["p1"].verified_by.startswith("v")
-
-
-def test_the_validator_is_shown_the_claim_and_not_the_question(tmp_path):
-    pool = _Validating()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer())])
-    _run(llm, pool, tmp_path, question="How long was the flow?")
-
-    brief = pool.validator_messages[0]
-    assert "mining could surface as stratum or DNS" in brief
-    assert "How long was the flow" not in brief
-    assert "1367.875" not in brief, "the candidate must not leak into the briefing"
-
-
-def test_a_refuted_premise_blocks_the_answer_that_rests_on_it(tmp_path):
-    """Spec 1's no-escape gate, now reachable: the author said VERIFIED, an
-    independent reader said REFUTED, and the ANSWER citing it cannot go through."""
-    pool = _Validating()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_answer()),
-                _turn(_answer()), _turn(_answer())])
-    out = _run(llm, pool, tmp_path)
-
-    assert out["answer"] == NO_ANSWER
-    assert "REFUTED" in _conversation(tmp_path)
-
-
-def test_a_premise_is_validated_once_not_every_wave(tmp_path):
-    pool = _Validating()
-    llm = _LLM([_turn(_spawn()), _turn(_continue()), _turn(_continue()),
-                _turn(_answer())])
-    _run(llm, pool, tmp_path)
-    # p1 and p2 are both VERIFIED in round 1 (v1.4.3: UPDATES settles both), so each
-    # is validated once - the invariant this test names is "once", not "once total".
-    assert len(pool.validator_messages) == 2
-
-
 def test_a_premise_sh_files_on_the_answer_turn_is_never_silently_verified(tmp_path):
     """Q216 v1.4.3 r1's second move depended on SH being able to settle a premise on
     its own ANSWER turn, where no wave follows and so no validator could ever see it.
@@ -936,3 +892,38 @@ class _Confirming(_Recording):
                 id="p", status="VERIFIED", quote='{"dest_port": "3333", "count": "3"}',
                 evidence="my own scan agrees")]
         return r
+
+
+# ── the trigger is a false stamp, alone ───────────────────────────────────────
+
+def test_a_false_stamp_retires_the_senior_and_spawns_one_validator(tmp_path):
+    """SH is not asked and cannot decline. The senior's route for this turn is dropped:
+    the runner retires it, and the premise SH named goes to a blind reader."""
+    pool = _Pool()
+    llm = _LLM([
+        _turn(_spawn()),
+        _turn(entry(route="COMMAND", senior_id="s1", decision="continue",
+                    directive="keep going",
+                    r1_scope_alignment="PASS", r2_progress="PASS",
+                    r3_answer_readiness="WEAK", r4_premise_verification="WEAK",
+                    nominate_premise_id="p1",
+                    premise_stamps=[
+                        PremiseStamp(id="p1", establishes=False,
+                                     reason="the listing does not cover DNS at all"),
+                        PremiseStamp(id="p2", establishes=True,
+                                     reason="the only endpoint in the listing")])),
+        _turn(_spawn(deviation="read the proxy feed, not cisco:nvm")),
+        _turn(_answer(source_senior="s2", premise_stamps=[],
+                      r4_premise_verification="WEAK")),
+    ])
+    out = _run(llm, pool, tmp_path)
+    assert pool.validations == 1, "exactly one validator, for the nominated premise"
+    assert pool.rounds == 2, "s1 got its first round only; its COMMAND was dropped"
+    assert out["spawns_used"] == 2
+
+
+def test_a_true_stamp_spawns_no_validator(tmp_path):
+    pool = _Pool()
+    llm = _LLM([_turn(_spawn()), _turn(_answer())])
+    _run(llm, pool, tmp_path)
+    assert pool.validations == 0
