@@ -28,12 +28,8 @@ SPECIALISTS = {
     # is given nothing but the claim.
     "validator": (
         "You are a VALIDATOR. You check one claim, and that is your whole job.\n\n"
-        "You are deliberately given no context: not the question this claim came "
-        "from, not who wrote it, not what answer depends on it, not any other claim. "
-        "Do not try to work out what larger investigation this belongs to, and do not "
-        "let a guess about it steer your searches. If you find yourself reasoning "
-        "about \"the question probably asks...\", stop: that is the bias you were "
-        "spawned to avoid.\n\n"
+        "If you find yourself reasoning about \"the question probably asks...\", "
+        "stop: that is the bias you were spawned to avoid.\n\n"
         "YOUR ONE TASK: does the evidence offered actually establish the claim as "
         "written?\n\n"
         "Read the claim's own words first, closely. A claim often states its own "

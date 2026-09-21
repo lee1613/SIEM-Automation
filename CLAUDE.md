@@ -117,8 +117,16 @@ When a new version (e.g. `v1.x`, `v2.x`) is run **against the full scoreboard**:
 Logging rules:
 - **Only full runs are logged** under `log/v1/run_1.x/` (auto-incrementing). Run with
   `python agent/v1/run_all_v1.py` (no `--ids`/`--limit`).
-- **Test/smoke runs** (`--ids` or `--limit`) go to `log/temp/` and are NOT versioned, NOT
-  compared in docs, and NOT cost-tracked.
+- **Test/smoke runs** (`--ids` or `--limit`) are written to `log/temp/` by the runner and
+  are NOT cost-tracked. Once a run is finished it is **filed under its version** in
+  `log/v1/v1.<minor>/`:
+  - a smoke run covering **5 or more questions** sits at the version root
+    (`log/v1/v1.4/v1.4.1_glm-5.3_smoke5_r1/`) — that is the version's observable record;
+  - a run covering **fewer than 5 questions** goes in that version's `intermediate/`
+    subfolder (`log/v1/v1.4/intermediate/v1.4.3_validator_Q216_r2/`).
+
+  Filing is archival only — nothing reads these paths, and the runner still writes new runs
+  to `log/temp/`. Versions stay separate: v1.3 runs never sit under v1.4.
 - Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
   v1.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
   carries `failed_delegations` and each worker's full state).
