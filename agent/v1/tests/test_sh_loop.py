@@ -927,3 +927,43 @@ def test_a_true_stamp_spawns_no_validator(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(_answer())])
     _run(llm, pool, tmp_path)
     assert pool.validations == 0
+
+
+def test_a_false_stamp_on_the_last_senior_ends_the_question_with_nothing(tmp_path):
+    """The whole mechanism, end to end: SH stamps a verification false, the runner
+    retires that senior without being asked and spawns the one reader that wants
+    nothing, that reader overturns the senior's own verdict, and - the last slot now
+    spent on ground known to be false - the question returns no answer at all.
+
+    Every step of this was covered in isolation and the chain was not. Each isolated
+    piece would still pass with the trigger unwired, the verdict discarded, or the gate
+    reading a status nobody writes.
+
+    No answer and a wrong answer both score zero, so ending with nothing costs nothing
+    and keeps a known-false premise out of the case file that later questions read.
+    """
+    pool = _Validating()
+    llm = _LLM([
+        _turn(_spawn()),
+        _turn(entry(route="COMMAND", senior_id="s1", decision="continue",
+                    directive="keep going",
+                    r1_scope_alignment="PASS", r2_progress="PASS",
+                    r3_answer_readiness="WEAK", r4_premise_verification="WEAK",
+                    nominate_premise_id="p1",
+                    premise_stamps=[
+                        PremiseStamp(id="p1", establishes=False,
+                                     reason="the listing does not cover DNS at all"),
+                        PremiseStamp(id="p2", establishes=True,
+                                     reason="the only endpoint in the listing")])),
+    ])
+    out = _run(llm, pool, tmp_path, points=100)
+
+    p1 = out["ledger"].premises["p1"]
+    assert p1.status == "REFUTED", "the validator overturned the senior's own verdict"
+    assert p1.verified_by == "v1", "and it was the validator that did it, not SH"
+    assert p1.stamp == "false", "SH's reading stands beside the status, not instead of it"
+    assert pool.validations == 1
+    # The 100pt tier grants one senior, so retiring it spends the pool - which IS the
+    # budget for validators, and the endgame when the ground it leaves is refuted.
+    assert out["end_reason"] == "rounds"
+    assert out["answer"] == NO_ANSWER
