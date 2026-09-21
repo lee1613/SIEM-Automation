@@ -128,6 +128,8 @@ class Premise(BaseModel):
     verified_by: str = ""
     quote: str = ""
     evidence: str = ""
+    stamp: Literal["", "true", "false"] = ""
+    stamp_reason: str = ""
     history: list[dict] = Field(default_factory=list)
 
 
@@ -293,6 +295,40 @@ class PremiseLedger:
     def refuted(self) -> list[Premise]:
         return [p for p in self.premises.values() if p.status == "REFUTED"]
 
+    def unstamped(self, author: str | None = None) -> list[Premise]:
+        """Verifications by a SENIOR that SH has not yet read against their quote.
+
+        Not a validator's: the validator is what outranks the stamp, not something for
+        SH to grade. Not SH's own either - it files no verdicts any more.
+        """
+        return [p for p in self.premises.values()
+                if p.status == "VERIFIED" and not p.stamp
+                and p.verified_by and p.verified_by != "sh"
+                and not is_validator(p.verified_by)
+                and (author is None or p.verified_by == author)]
+
+    def false_stamped(self, author: str) -> list[Premise]:
+        """Premises this senior claimed VERIFIED and SH read as not establishing them.
+
+        Keyed on `verified_by`, not `author`: the stamp is on the CLAIM, and a senior
+        that settles a sibling's premise is the party that claimed it.
+        """
+        return [p for p in self.premises.values()
+                if p.stamp == "false" and p.verified_by == author]
+
+    def nominatable(self, author: str) -> list[Premise]:
+        """What SH may point a validator at once it has stamped one of this senior's
+        verifications false: what it stamped false, or what this senior left open.
+
+        It may not range wider. The false stamp is what fired the mechanism, so letting
+        SH aim the validator elsewhere would retire the senior and leave the triggering
+        doubt unexamined.
+        """
+        by_id = {p.id: p for p in self.false_stamped(author)}
+        by_id.update({p.id: p for p in self.premises.values()
+                      if p.author == author and p.status == "UNVERIFIED"})
+        return sorted(by_id.values(), key=lambda p: int(p.id[1:]))
+
     def open_questions_for(self, author: str) -> list[OpenQuestion]:
         return [q for q in self.questions.values()
                 if q.author == author and not q.answer.strip()]
@@ -359,6 +395,25 @@ class PremiseLedger:
                 p.history.append({"round": round_n, "status": u.status,
                                   "by": author, "quote": u.quote, "evidence": u.evidence})
         return notes
+
+    def stamp_premise(self, pid: str, *, establishes: bool, reason: str,
+                      round_n: int) -> bool:
+        """Record SH's reading of one newly-claimed verification. False when the id is
+        unknown or already stamped - a stamp is recorded once, when the verification is
+        first claimed.
+
+        An annotation, never an edit: the status is untouched. A false-stamped premise
+        stays VERIFIED, because status belongs to the quote rule and the validator,
+        while the stamp is SH's reading of it.
+        """
+        p = self.premises.get(pid)
+        if p is None or p.stamp:
+            return False
+        p.stamp = "true" if establishes else "false"
+        p.stamp_reason = reason
+        p.history.append({"round": round_n, "status": p.status, "by": "sh-stamp",
+                          "quote": "", "evidence": f"stamp={p.stamp}: {reason}"})
+        return True
 
     def answer(self, question_id: str, text: str) -> bool:
         """Record SH's answer to one open question.
@@ -430,13 +485,14 @@ class PremiseLedger:
         if not self.premises:
             return "PREMISE LEDGER - no premises filed yet."
         rows = ["PREMISE LEDGER",
-                f"{'id':<4} {'kind':<11} {'status':<11} {'LB':<3} {'since':<6} who / text"]
+                f"{'id':<4} {'kind':<10} {'status':<11} {'LB':<3} {'stamp':<6} "
+                f"{'since':<6} who / text"]
         for p in self.premises.values():
             by = f"[{p.verified_by}] " if p.verified_by else ""
             text = p.text if len(p.text) <= 70 else p.text[:70] + "…"
-            rows.append(f"{p.id:<4} {p.kind:<11} {p.status:<11} "
-                        f"{'Y' if p.load_bearing else 'n':<3} r{p.round_first_seen:<5} "
-                        f"{by}{p.author}: {text}")
+            rows.append(f"{p.id:<4} {p.kind:<10} {p.status:<11} "
+                        f"{'Y' if p.load_bearing else 'n':<3} {p.stamp or '-':<6} "
+                        f"r{p.round_first_seen:<5} {by}{p.author}: {text}")
         return "\n".join(rows)
 
     def render_refuted(self) -> str:
@@ -463,6 +519,11 @@ class PremiseLedger:
         trigger is "load-bearing, UNVERIFIED for N rounds, candidate unchanged" -
         a report shows only where a premise finished, so without this the single
         reading that decides whether that trigger is aimed correctly is lost.
+
+        `rival` is carried here for the same reason it exists at all: it holds the
+        second live record set, so a losing candidate is recorded as data instead of
+        staying prose in a report where it can be argued away. Left out of the dump
+        it would be unreadable in exactly the post-run analysis it serves.
         """
         return [{
             "qid": qid,
@@ -475,6 +536,9 @@ class PremiseLedger:
             "status": p.status,
             "verified_by": p.verified_by,
             "evidence": p.evidence,
+            "rival": p.rival,
+            "stamp": p.stamp,
+            "stamp_reason": p.stamp_reason,
             "history": list(p.history),
             "candidate_at_each_round": {str(r): v for r, v
                                         in sorted(self.candidates
