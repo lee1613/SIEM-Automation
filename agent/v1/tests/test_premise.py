@@ -18,7 +18,7 @@ def test_a_draft_carries_only_what_the_senior_decides():
     assert d.load_bearing and d.kind == "other"
 
 
-def test_a_draft_rejects_a_kind_outside_the_four():
+def test_a_draft_rejects_a_kind_outside_the_three():
     with pytest.raises(ValidationError):
         PremiseDraft(text="x", kind="guesswork", load_bearing=False)
 
@@ -39,6 +39,13 @@ def test_min_quote_chars_is_defined_here_now():
 
 
 def _draft(text, kind="other", lb=True, rival=""):
+    """A draft for tests where the draft itself is not what is under test.
+
+    It auto-fills `rival` on a selection, because `add()` refuses a selection that
+    names none and most tests here are about ids, dedupe or status rather than that
+    rule. So a test OF that rule must build its own `PremiseDraft` directly - go
+    through this helper and it will hand you a rival and pass for the wrong reason.
+    """
     if kind == "selection" and not rival:
         rival = "the other candidate this one beats"
     return PremiseDraft(text=text, kind=kind, load_bearing=lb, rival=rival)
