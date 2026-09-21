@@ -38,8 +38,10 @@ def test_min_quote_chars_is_defined_here_now():
     assert MIN_QUOTE_CHARS == 12
 
 
-def _draft(text, kind="other", lb=True):
-    return PremiseDraft(text=text, kind=kind, load_bearing=lb)
+def _draft(text, kind="other", lb=True, rival=""):
+    if kind == "selection" and not rival:
+        rival = "the other candidate this one beats"
+    return PremiseDraft(text=text, kind=kind, load_bearing=lb, rival=rival)
 
 
 def test_the_runner_assigns_ids_the_author_never_picks_one():
@@ -453,3 +455,54 @@ def test_a_senior_still_saying_definition_keeps_its_claim_as_other():
     [d] = _drafts([{"text": "the measure is the wall-clock span", "kind": "definition"}])
     assert d.kind == "other"
     assert d.text == "the measure is the wall-clock span"
+
+
+def test_a_selection_premise_without_a_rival_is_not_filed():
+    """r1's s1 held two live record sets - the dp=3333 flow and the six CoinHive flows.
+    The ledger could hold one, so the other stayed prose in a report and was argued
+    away. A selection that names no rival is a first match, not a choice."""
+    led = PremiseLedger()
+    notes = []
+    out = led.add([PremiseDraft(text="the 3333 flow is the mining activity",
+                                kind="selection", load_bearing=True)],
+                  author="s1", round_n=1, notes=notes)
+    assert out == []
+    assert led.premises == {}
+    assert any("rival" in n for n in notes), notes
+
+
+def test_a_selection_premise_with_a_rival_is_filed():
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="the 3333 flow is the mining activity", kind="selection",
+                          load_bearing=True,
+                          rival="the six ws*.coinhive.com HTTPS flows")],
+            author="s1", round_n=1)
+    assert led.premises["p1"].rival == "the six ws*.coinhive.com HTTPS flows"
+
+
+def test_absorption_into_an_open_premise_of_the_same_kind_is_reported_back():
+    """The kind is singular, so a second open one is a re-file - but the draft's text
+    is discarded, and an author never told that believes it filed a claim that does
+    not exist."""
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="mining surfaces on the stratum port", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    notes = []
+    out = led.add([PremiseDraft(text="mining could also surface in DNS", kind="coverage",
+                                load_bearing=True)],
+                  author="s1", round_n=2, notes=notes)
+    assert out[0].id == "p1", "still handed back the premise it owns"
+    assert len(led.premises) == 1
+    assert any("p1" in n and "discarded" in n for n in notes), notes
+
+
+def test_refiling_the_same_text_is_silent():
+    """The carry-forward block hands a senior its own open premises back every round,
+    so re-filing one verbatim is the expected case and not worth a note."""
+    led = PremiseLedger()
+    draft = PremiseDraft(text="mining surfaces on the stratum port", kind="coverage",
+                         load_bearing=True)
+    led.add([draft], author="s1", round_n=1)
+    notes = []
+    led.add([draft], author="s1", round_n=2, notes=notes)
+    assert notes == []

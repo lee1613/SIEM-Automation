@@ -133,11 +133,15 @@ def submit_finding(insight: str, value: str = "", value_kind: str = "",
       to plan the next round.
     - new_premises: the premises you are filing THIS round, each an object
       {"text": ..., "kind": "coverage"|"selection"|"other",
-       "load_bearing": true|false, "quote": ..., "evidence": ...}. Do NOT re-send
-      premises you filed earlier - the runner holds them and shows them back to
-      you every round, and a second open premise of a kind you already have open
-      is read as a re-file and handed back to you. `text` is immutable once filed,
-      so write it as you want it read in five rounds' time. `load_bearing` is true
+       "load_bearing": true|false, "rival": ..., "quote": ..., "evidence": ...}.
+       `rival` is REQUIRED on a "selection" premise: another record set that could
+       fit and that this one beats, with the query that ruled it out. A selection
+       naming no rival is not filed, and the runner says so.
+      Do NOT re-send premises you filed earlier - the runner holds them and shows
+      them back to you every round, and a second open premise of a kind you
+      already have open is read as a re-file and handed back to you. `text` is
+      immutable once filed, so write it as you want it read in five rounds' time.
+      `load_bearing` is true
       only when the answer breaks if this premise is false; marking everything
       load-bearing is the same as marking nothing.
       `quote`/`evidence` are optional and go together: leave them empty to file a
@@ -199,6 +203,7 @@ def _drafts(value) -> list:
             out.append(PremiseDraft(text=text,
                                     kind=kind if kind in KINDS else "other",
                                     load_bearing=bool(d.get("load_bearing", False)),
+                                    rival=str(d.get("rival", "") or "").strip(),
                                     quote=str(d.get("quote", "") or "").strip(),
                                     evidence=str(d.get("evidence", "") or "").strip()))
         except ValidationError:

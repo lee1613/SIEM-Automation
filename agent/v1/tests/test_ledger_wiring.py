@@ -35,7 +35,8 @@ def test_a_circular_quote_is_refused_by_apply_not_only_by_the_gate():
     the laundered VERIFIED standing. This is the v1.4.2 Q216 loss exactly."""
     ledger = PremiseLedger()
     p = ledger.add([PremiseDraft(text="the 3333 flow is a download", kind="selection",
-                             load_bearing=True)], author="s1", round_n=1)[0]
+                             load_bearing=True, rival="the coinhive HTTPS flows")],
+                   author="s1", round_n=1)[0]
 
     notes = ledger.apply(
         [PremiseUpdate(id=p.id, status="VERIFIED",
@@ -52,7 +53,8 @@ def test_a_genuine_quote_still_settles_the_premise():
     """The guard above must not swallow the honest path."""
     ledger = PremiseLedger()
     p = ledger.add([PremiseDraft(text="dest_port 3333 carries 5.7MB inbound",
-                             kind="selection", load_bearing=True)],
+                             kind="selection", load_bearing=True,
+                             rival="the coinhive HTTPS flows")],
                    author="s1", round_n=1)[0]
 
     notes = ledger.apply(

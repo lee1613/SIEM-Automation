@@ -39,7 +39,7 @@ REPORT = ("# s1 - Q216 - Round 1\n**Insight:** FOUND\n\n## Prior rounds\n- r1\n\
 PREMISES = [PremiseDraft(text="mining could surface as stratum or DNS", kind="coverage",
                          load_bearing=True),
             PremiseDraft(text="this endpoint and not another", kind="selection",
-                         load_bearing=True)]
+                         load_bearing=True, rival="the two other hosts in the window")]
 UPDATES = [PremiseUpdate(id="p1", status="VERIFIED", quote="dest_port=3333 count=3",
                          evidence="the full 22-value listing")]
 # The tool output those quotes are checked against (SeniorSession.tool_outputs).

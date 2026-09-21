@@ -82,6 +82,12 @@ class PremiseDraft(BaseModel):
     load_bearing: bool = Field(
         description="True when the answer breaks if this premise is false. Be honest: "
                     "marking everything load-bearing is the same as marking nothing.")
+    rival: str = Field(
+        default="",
+        description="Required on a 'selection' premise: at least one OTHER record set "
+                    "that could fit the question and that you are claiming this one "
+                    "beats, and the query that ruled it out. A selection naming no "
+                    "rival is a first match, not a choice.")
     quote: str = Field(
         default="",
         description="Leave empty when you are filing a hypothesis. When a result you "
@@ -117,6 +123,7 @@ class Premise(BaseModel):
     text: str
     status: Literal["UNVERIFIED", "VERIFIED", "REFUTED"] = "UNVERIFIED"
     load_bearing: bool = False
+    rival: str = ""
     round_first_seen: int = 0
     verified_by: str = ""
     quote: str = ""
@@ -197,22 +204,50 @@ class PremiseLedger:
         load-bearing blocker on the very ANSWER that filed it. A draft carrying
         its own quote breaks that deadlock and weakens nothing, because the quote
         runs the same corpus and circularity checks `apply` runs.
+
+        Absorption into an existing open premise of the same kind is reported back
+        in `notes`, naming the id it was folded into - the draft's text is
+        discarded there, and an author never told believes it filed a claim that
+        does not exist. Re-filing the exact same text stays silent: the
+        carry-forward block hands a senior its own open premises back every
+        round, so that case is expected, not an error.
         """
         out = []
         for d in drafts or []:
+            rival = (getattr(d, "rival", "") or "").strip()
+            if d.kind == "selection" and not rival:
+                if notes is not None:
+                    notes.append(
+                        "selection premise not filed: name in `rival` at least one other "
+                        "record set that could fit and that this one beats, with the "
+                        "query that ruled it out - a selection naming no rival is a "
+                        f'first match, not a choice. Your text: "{d.text[:80]}"')
+                continue
             key = _match_form(d.text)
-            existing = next((p for p in self.premises.values()
-                             if p.author == author and _match_form(p.text) == key), None)
-            if existing is None:
-                existing = next((p for p in self.premises.values()
+            same_text = next((p for p in self.premises.values()
+                              if p.author == author and _match_form(p.text) == key), None)
+            if same_text is not None:
+                # The carry-forward block hands a senior its own open premises back
+                # every round, so re-filing one verbatim is expected, not an error.
+                out.append(same_text)
+                continue
+            open_of_kind = next((p for p in self.premises.values()
                                  if p.author == author and p.kind == d.kind
                                  and p.status == "UNVERIFIED"), None)
-            if existing is not None:
-                out.append(existing)
+            if open_of_kind is not None:
+                # No silent absorption. The draft's text is discarded here, and an
+                # author never told that believes it filed a claim that does not exist.
+                if notes is not None:
+                    notes.append(
+                        f"{d.kind} premise not filed: you already have an open {d.kind} "
+                        f"premise {open_of_kind.id} - amend or settle that one. The text "
+                        f'you sent was discarded: "{d.text[:80]}"')
+                out.append(open_of_kind)
                 continue
             self._n += 1
             p = Premise(id=f"p{self._n}", author=author, kind=d.kind, text=d.text,
-                        load_bearing=bool(d.load_bearing), round_first_seen=round_n,
+                        load_bearing=bool(d.load_bearing), rival=rival,
+                        round_first_seen=round_n,
                         history=[{"round": round_n, "status": "UNVERIFIED",
                                   "by": author, "quote": "", "evidence": ""}])
             self.premises[p.id] = p

@@ -21,10 +21,13 @@ SELECTION_R8 = ("Selection: The duration to report should come from the single d
 REPORT = ('s1 round 2: `| stats count dc(sa) as endpoints values(pn) as processes by dp` '
           '-> {"dp": "3333", "count": "1", "endpoints": "1", "processes": "powershell.exe"}')
 
+# The rival every SELECTION_R4/R8 draft below names - the change under test requires one.
+RIVAL = "the six ws*.coinhive.com HTTPS flows, ruled out for carrying no stratum handshake"
+
 
 def _ledger_with_open_sh_selection():
     led = PremiseLedger()
-    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True)],
+    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL)],
             author="sh", round_n=4)
     return led
 
@@ -35,7 +38,7 @@ def test_sh_cannot_open_a_second_premise_of_a_kind_it_already_has_open():
     ('a coverage premise... a selection premise... a definition premise')."""
     led = _ledger_with_open_sh_selection()
 
-    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True)],
+    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True, rival=RIVAL)],
                     author="sh", round_n=8)
 
     assert len(led.premises) == 1, "a reworded re-file must not mint a second id"
@@ -51,7 +54,7 @@ def test_a_settled_premise_does_not_block_a_later_one_of_the_same_kind():
                              evidence="the dp enumeration shows 3333 is the only pool port")],
               author="sh", corpus=[REPORT], round_n=5)
 
-    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True)],
+    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True, rival=RIVAL)],
                     author="sh", round_n=8)
 
     assert len(led.premises) == 2
@@ -62,7 +65,7 @@ def test_a_different_author_is_not_blocked_by_sh_s_open_premise():
     """Cross-author agreement is meaningful and stays its own row."""
     led = _ledger_with_open_sh_selection()
 
-    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True)],
+    filed = led.add([PremiseDraft(text=SELECTION_R8, kind="selection", load_bearing=True, rival=RIVAL)],
                     author="s1", round_n=8)
 
     assert len(led.premises) == 2
@@ -79,7 +82,7 @@ def test_a_draft_carrying_a_quote_is_settled_as_it_is_filed():
     corpus and circularity checks."""
     led = PremiseLedger()
 
-    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True,
+    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL,
                                   quote=REPORT,
                                   evidence="dp=3333 is the only Monero pool port present")],
                     author="sh", round_n=4, corpus=[REPORT])
@@ -92,7 +95,7 @@ def test_a_draft_carrying_a_quote_is_settled_as_it_is_filed():
 def test_a_draft_quote_that_is_in_no_result_leaves_the_premise_unverified():
     led = PremiseLedger()
 
-    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True,
+    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL,
                                   quote="dp=9999 was the only pool port in the feed",
                                   evidence="made up")],
                     author="sh", round_n=4, corpus=[REPORT])
@@ -105,7 +108,7 @@ def test_a_draft_quote_that_cites_sh_leaves_the_premise_unverified():
     led = PremiseLedger()
     circular = "the attribution was established by SH outside this feed"
 
-    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True,
+    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL,
                                   quote=circular, evidence="SH settled it")],
                     author="sh", round_n=4, corpus=[circular])
 
@@ -114,7 +117,7 @@ def test_a_draft_quote_that_cites_sh_leaves_the_premise_unverified():
 
 def test_a_draft_with_no_quote_is_filed_unverified_as_before():
     led = PremiseLedger()
-    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True)],
+    filed = led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL)],
                     author="sh", round_n=4)
     assert filed[0].status == "UNVERIFIED"
 
@@ -127,7 +130,7 @@ def test_a_senior_is_shown_the_load_bearing_premises_it_is_told_to_settle():
     settled another author's premise - the path exists in the gates and is unreachable
     in the prompt."""
     led = PremiseLedger()
-    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True)],
+    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL)],
             author="sh", round_n=4)
     led.add([PremiseDraft(text="s1's own open premise", kind="coverage",
                           load_bearing=True)], author="s1", round_n=4)
@@ -142,7 +145,7 @@ def test_a_senior_is_shown_the_load_bearing_premises_it_is_told_to_settle():
 def test_another_author_s_settled_premises_are_not_carried_to_a_senior():
     """Only what is still open and load-bearing. A settled premise is noise."""
     led = PremiseLedger()
-    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True)],
+    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=True, rival=RIVAL)],
             author="sh", round_n=4)
     led.apply([PremiseUpdate(id="p1", status="VERIFIED", quote=REPORT,
                              evidence="the dp enumeration settles it")],
@@ -157,7 +160,7 @@ def test_another_author_s_settled_premises_are_not_carried_to_a_senior():
 
 def test_another_author_s_non_load_bearing_premises_are_not_carried():
     led = PremiseLedger()
-    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=False)],
+    led.add([PremiseDraft(text=SELECTION_R4, kind="selection", load_bearing=False, rival=RIVAL)],
             author="sh", round_n=4)
     led.add([PremiseDraft(text="s1 open", kind="coverage", load_bearing=True)],
             author="s1", round_n=4)
