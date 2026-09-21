@@ -47,6 +47,7 @@ from senior_session import SeniorSession
 from usage_tracker import context_window
 from validator import (
     VALIDATOR_ITERS,
+    as_refutation,
     refusal_reason,
     validate,
 )
@@ -882,7 +883,14 @@ def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
             out.append(f"--- {vid} | validated {p.id} | NO VERDICT ({why}). "
                        f"{p.id} keeps {was}.")
             continue
-        notes = ledger.apply([res["update"]], author=vid, corpus=res["corpus"],
+        # An UNVERIFIED verdict is a refutation (two readers could not stand the claim
+        # up) - but a REFUTED status needs a quote the validator actually ran, and an
+        # UNVERIFIED verdict usually carries none, so `apply` will refuse the converted
+        # update below and the premise keeps its status. That is the correct
+        # conservative outcome: the quote rule is not weakened for a verdict with no
+        # evidence behind it.
+        verdict = as_refutation(res["update"])
+        notes = ledger.apply([verdict], author=vid, corpus=res["corpus"],
                              round_n=round_n)
         if notes:
             log.note(f"{vid} on {p.id}: ledger refused the verdict — {notes[0]}")
@@ -895,8 +903,8 @@ def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
             f'Premise: "{p.text}"\n'
             f"The validator was shown this claim and the evidence offered for it, and "
             f"nothing else — not the question, not the reports, not the candidate.\n"
-            f"Its quote: {res['update'].quote}\n"
-            f"Its reason: {res['update'].evidence}")
+            f"Its quote: {verdict.quote}\n"
+            f"Its reason: {verdict.evidence}")
     return out
 
 

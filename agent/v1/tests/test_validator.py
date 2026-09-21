@@ -8,6 +8,7 @@ the result of searching route (c) — 4,832 flows where the answer assumed one.
 
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from validator import (
+    as_refutation,
     brief_for,
     refusal_reason,
     validate,
@@ -185,3 +186,51 @@ def test_the_budget_is_the_senior_pool():
     the mechanism self-caps at the tier's senior count - three, and r2 used one."""
     import validator
     assert not hasattr(validator, "MAX_VALIDATORS_PER_QUESTION")
+
+
+# -- an UNVERIFIED verdict is a refutation ---------------------------------------
+
+def test_an_unverified_verdict_becomes_a_refutation():
+    """Two readers could not stand the claim up. Without this the premise keeps the
+    status it had - which, on the premise SH just stamped false, is VERIFIED."""
+    out = as_refutation(PremiseUpdate(id="p1", status="UNVERIFIED", quote="",
+                                      evidence="a full-feed census would settle it"))
+    assert out.status == "REFUTED"
+    assert "could not be settled" in out.evidence
+    assert out.id == "p1"
+
+
+def test_a_verified_or_refuted_verdict_passes_through_untouched():
+    for status in ("VERIFIED", "REFUTED"):
+        u = PremiseUpdate(id="p1", status=status, quote=VALIDATOR_CORPUS[0],
+                          evidence="why")
+        assert as_refutation(u) is u
+
+
+def test_no_verdict_at_all_is_not_a_refutation():
+    """A validator that filed nothing, or quoted something it did not run, or died in
+    transport, has not ruled on anything - a transport failure is not a reasoning
+    outcome."""
+    assert as_refutation(None) is None
+
+
+# -- the validator's second mode --------------------------------------------------
+
+def test_an_offered_quote_asks_whether_it_establishes_the_claim():
+    p = _settled_ledger().premises["p1"]
+    brief = brief_for(p)
+    assert "does that evidence establish this claim as written" in brief.lower()
+    assert P1_QUOTE in brief
+
+
+def test_no_offered_quote_asks_it_to_settle_the_claim_itself():
+    """The mode that worked. Handed r2's p1 with nothing attached, the obvious move is
+    to go and search route (c) - which is what v1 did with its full-feed dh scan, the
+    one time this architecture found the right lead."""
+    led = PremiseLedger()
+    led.add([PremiseDraft(text=P1_TEXT, kind="coverage", load_bearing=True)],
+            author="s1", round_n=2)
+    brief = brief_for(led.premises["p1"])
+    assert "settle this claim from the data yourself" in brief.lower()
+    assert "no evidence has been offered" in brief.lower()
+    assert P1_TEXT in brief

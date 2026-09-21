@@ -37,21 +37,41 @@ VALIDATOR_ITERS = 8
 PLACEHOLDER_ID = "p"
 
 def brief_for(premise) -> str:
-    """The validator's entire briefing: one claim and the evidence offered for it.
+    """The validator's entire briefing: one claim, and the evidence offered for it when
+    there is any.
 
-    Everything that could identify the question is left out, including the premise's
-    `kind` (coverage/selection/definition names the shape of the investigation) and
-    its id.
+    Two modes, because a nomination has two sources:
+      * an offered quote - does this evidence establish this claim as written?
+      * no quote (a premise its senior left UNVERIFIED) - settle it from the data.
+
+    The second is the mode that worked. Handed r2's `p1` - "(c) flows to pool IP
+    45.77.53.176 on any port - NOT yet searched" - with nothing attached and told to
+    settle it, the obvious move is to go and search route (c). That is what `v1` did in
+    v1.4.3 r1 with its full-feed `dh` scan, the one time this architecture found the
+    right lead. It also answers the standing question about the briefing: both r2
+    validator failures were "quoted something it did not run", the validator echoing
+    the evidence it was handed, and this mode hands it nothing to echo.
+
+    Everything that could identify the question is left out either way, including the
+    premise's `kind` (coverage/selection names the shape of the investigation) and its
+    id.
     """
     parts = [f'THE CLAIM TO CHECK, word for word:\n\n  "{premise.text}"\n']
     if premise.quote:
         parts.append("THE EVIDENCE ITS AUTHOR OFFERED, which you are checking - it is "
                      "a claim about the data, not a fact:\n\n"
                      f"  {premise.quote}\n")
-    if premise.evidence:
-        parts.append(f"WHY ITS AUTHOR SAID THAT SETTLES IT:\n\n  {premise.evidence}\n")
-    parts.append("Check the claim against its own words, then against the data. "
-                 "File your verdict with submit_finding.")
+        if premise.evidence:
+            parts.append(f"WHY ITS AUTHOR SAID THAT SETTLES IT:\n\n  {premise.evidence}\n")
+        parts.append("YOUR TASK: does that evidence establish this claim as written? "
+                     "Check the claim against its own words first, then against the "
+                     "data - your own results decide, not the author's.")
+    else:
+        parts.append("No evidence has been offered for it. YOUR TASK: settle this claim "
+                     "from the data yourself - run the searches that show it true or "
+                     "false. If the claim names something as not yet searched, or not "
+                     "yet checked, search it.")
+    parts.append("File your verdict with submit_finding.")
     return "\n".join(parts)
 
 
@@ -112,3 +132,23 @@ def refusal_reason(update, corpus: list[str]) -> str:
     if not update.evidence.strip():
         return "gave no reason the quote settles it"
     return ""
+
+
+def as_refutation(update):
+    """An UNVERIFIED verdict is a refutation; anything else passes through.
+
+    Two readers could not stand the claim up, and the premise is not left looking
+    settled because the second one ran out of room. Without this the mechanism costs a
+    senior slot and changes nothing: the premise SH stamped false is VERIFIED, and a
+    validator that shrugs leaves it VERIFIED.
+
+    `None` - no usable verdict, a quote it did not run, a crash in transport - is NOT
+    a refutation. That validator ruled on nothing, and a transport failure is not a
+    reasoning outcome.
+    """
+    if update is None or update.status != "UNVERIFIED":
+        return update
+    return PremiseUpdate(
+        id=update.id, status="REFUTED", quote=update.quote,
+        evidence="the claim could not be settled by an independent reader: "
+                 + (update.evidence or "no reason given"))
