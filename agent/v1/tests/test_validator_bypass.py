@@ -101,3 +101,35 @@ def test_an_author_refuting_its_own_premise_does_not_block_anything():
               author="s1", corpus=[RESULT], round_n=2)
 
     assert ledger_violations([_answer(["p2"])], led, _state()) == []
+
+
+def test_the_refuted_block_does_not_lift_when_the_budget_runs_out():
+    """The UNVERIFIED block lifts once there is nothing left to try; this one never
+    does. No answer and a wrong answer both score 0, so answering on dead ground buys
+    nothing and writes a known-false premise into the case file for every later
+    question on the dataset."""
+    led = _ledger_with_validator_refutation()
+    spent = QuestionState(points=1000)
+    for sid in ("s1", "s2", "s3"):
+        spent.open_senior(sid)
+        spent.used[sid] = spent.granted[sid]
+        spent.retire(sid)
+    assert spent.slots_remaining == 0
+    assert spent.exhausted() == "rounds"
+
+    assert ledger_violations([_answer(["p1"])], led, spent), \
+        "a refuted premise blocks with every budget spent"
+
+
+def test_an_unverified_block_does_lift_when_the_budget_runs_out():
+    """The contrast that gives the sentence above its meaning."""
+    led = PremiseLedger()
+    led.add([PremiseDraft(text="every route was enumerated", kind="coverage",
+                          load_bearing=True)], author="s1", round_n=1)
+    spent = QuestionState(points=1000)
+    for sid in ("s1", "s2", "s3"):
+        spent.open_senior(sid)
+        spent.used[sid] = spent.granted[sid]
+        spent.retire(sid)
+
+    assert ledger_violations([_answer(["p1"])], led, spent) == []

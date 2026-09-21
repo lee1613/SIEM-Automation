@@ -39,12 +39,14 @@ def test_the_senior_brief_carries_the_report_template_and_the_reply_shapes():
     assert str(REPORT_WORD_CAP) in SENIOR_BRIEF
 
 
-def test_sh_is_told_how_to_write_to_the_ledger_and_what_it_may_quote():
-    for field in ("new_premises", "premise_updates", "answer_premise_ids",
+def test_sh_is_told_how_to_write_to_the_ledger_and_what_it_may_stamp():
+    # SH no longer settles a premise by quoting a senior's report (that was
+    # `premise_updates`, now deleted) - it stamps a report's own new claim instead.
+    for field in ("new_premises", "premise_stamps", "answer_premise_ids",
                   "open_question_answers"):
         assert field in SH_SYSTEM_PROMPT
-    assert "REFUTED" in SH_SYSTEM_PROMPT          # the no-escape gate
-    assert "never evidence" in SH_SYSTEM_PROMPT   # SH may not quote itself
+    assert "REFUTED" in SH_SYSTEM_PROMPT              # the no-escape gate
+    assert "YOU DO NOT SETTLE PREMISES" in SH_SYSTEM_PROMPT
 
 
 def test_the_senior_is_told_intent_not_the_rubric():
@@ -99,3 +101,16 @@ def test_a_rejection_tells_sh_exactly_what_to_fix():
     text = render_rejection(["s1 has no rounds left — RETIRE or ANSWER"])
     assert "REJECTED" in text
     assert "no rounds left" in text
+
+
+def test_the_prompt_does_not_invite_sh_to_settle_a_premise():
+    from sh_loop import SH_SYSTEM_PROMPT
+    assert "premise_updates" not in SH_SYSTEM_PROMPT
+    assert "YOU DO NOT SETTLE PREMISES" in SH_SYSTEM_PROMPT
+
+
+def test_the_prompt_teaches_the_stamp_and_what_a_false_one_costs():
+    from sh_loop import SH_SYSTEM_PROMPT
+    assert "premise_stamps" in SH_SYSTEM_PROMPT
+    assert "nominate_premise_id" in SH_SYSTEM_PROMPT
+    assert "RETIRES THAT SENIOR" in SH_SYSTEM_PROMPT

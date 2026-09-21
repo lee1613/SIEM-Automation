@@ -869,7 +869,10 @@ def test_a_validators_verdict_is_not_reported_as_a_refused_update(tmp_path):
     """Q216 v1.4.3 r2 logged: "the runner refused a premise update: --- v6 | INDEPENDENT
     VALIDATION of p6 | VERIFIED -> VERIFIED". The ANSWER-turn verdicts were folded into
     `ledger_notes`, which the gate block turns into rejections, so every successful
-    validation rejected the turn it belonged to."""
+    validation rejected the turn it belonged to. The ANSWER-cited validation pass this
+    described is gone now that SH cannot settle premises at all; what this test still
+    holds is the surviving property: a confirming validator's verdict never turns into
+    a turn rejection."""
     pool = _Confirming()
     late = _answer(new_premises=[PremiseDraft(
         text="coverage: the duration is the whole of it", kind="coverage",
