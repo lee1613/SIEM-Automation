@@ -273,19 +273,21 @@ def test_quote_supported_floor_still_applies_after_normalisation():
 
 
 # -- FIX 2: the carry-forward block never tells a senior to settle a REFUTED ----
+# (v1.4.3: it now DOES tell the senior the premise is dead, via render_refuted() -
+# that block is a "do not rebuild on this", not a "go settle this".)
 
-def test_a_refuted_premise_does_not_appear_in_the_carry_forward_block():
+def test_a_refuted_premise_is_not_offered_up_to_settle_again():
     led = _led()
     led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
               author="v1", corpus=CORPUS, round_n=2)
-    assert "p1" not in led.render_for_senior("s1")
+    assert "YOUR UNRESOLVED PREMISES" not in led.render_for_senior("s1")
 
 
-def test_the_carry_forward_block_is_empty_when_the_only_premise_is_refuted():
+def test_the_carry_forward_block_carries_only_the_disproven_notice_when_that_is_all_there_is():
     led = _led()
     led.apply([_upd("p1", "REFUTED", "ibc=5782875 obc=177")],
               author="v1", corpus=CORPUS, round_n=2)
-    assert led.render_for_senior("s1") == ""
+    assert "PREMISES ALREADY DISPROVEN" in led.render_for_senior("s1")
 
 
 # -- FIX 3: re-filing the same premise text dedupes per author -------------------

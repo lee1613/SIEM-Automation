@@ -95,6 +95,7 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
         clarify_reason="", questions=[],
         constraints={"sourcetypes": [], "sources": [], "fields": []},
         technique="", spawn_type="", subquestion="", reason="",
+        deviation="", inherited_entities="",
         value="42", value_kind="count", source_senior="s1", justification="",
         case_updates=[],
     )

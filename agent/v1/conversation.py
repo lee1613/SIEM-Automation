@@ -159,6 +159,17 @@ class SeniorDirective(BaseModel):
     reason: str = Field(
         description="SPAWN: why the current seniors' constraints cannot cover this. "
                     "RETIRE: why this senior is done.")
+    deviation: str = Field(
+        description="SPAWN. Where the evidence may sit if the retired senior's reading "
+                    "was wrong: the fields, feeds or entities it did not touch, and what "
+                    "NOT to re-walk. Required on any SPAWN made while a load-bearing "
+                    "premise is REFUTED. The deviation can be small - the same feed read "
+                    "through a different field is a different direction; the same field "
+                    "re-read is not.")
+    inherited_entities: str = Field(
+        description="SPAWN. Entities the retired senior ESTABLISHED - a host, account, "
+                    "file, window - that carry forward. Dropping a proven entity because "
+                    "it was found in another feed is how a stuck question is lost.")
 
     # ANSWER
     value: str = Field(description="ANSWER only. The bare value, exactly as the scoreboard wants it.")
@@ -499,6 +510,25 @@ def nomination_violations(entries: list, ledger) -> list[str]:
                 f"nominate_premise_id {pid} is neither a premise you stamped false nor "
                 f"one {sid} left open - choose from {', '.join(sorted(allowed))}")
     return out
+
+
+def deviation_violations(entries: list, ledger) -> list[str]:
+    """A replacement spawned onto ground that is already known dead is a wasted slot.
+
+    `deviation` is what makes a SPAWN an alternative rather than a retry. The third
+    thing a replacement needs - what NOT to rebuild on - is filled by the runner from
+    the ledger, so SH cannot omit it or soften it.
+    """
+    if not any(p.load_bearing and p.status == "REFUTED"
+               for p in ledger.premises.values()):
+        return []
+    return [f'SPAWN "{e.subquestion[:50]}" needs a `deviation`: a load-bearing premise '
+            "is REFUTED, so a replacement needs a direction that does not need it - name "
+            "the fields, feeds or entities the retired senior did not touch, and what "
+            "not to re-walk"
+            for e in entries
+            if e.route == "SPAWN" and e.spawn_type == "senior"
+            and not e.deviation.strip()]
 
 
 def r4_ceiling(sid: str, entry, ledger) -> str:

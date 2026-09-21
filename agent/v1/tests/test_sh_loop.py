@@ -21,6 +21,7 @@ BLANK = {
     "clarify_reason": "", "questions": [],
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
+    "deviation": "", "inherited_entities": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
     "case_updates": [],
 }

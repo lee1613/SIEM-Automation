@@ -441,7 +441,9 @@ class PremiseLedger:
         `apply()` refuses every update to a REFUTED premise, so listing one here
         and then telling the senior to "settle" it tells it to do something that
         is rejected every time, and the rejection note lands in SH's report.
-        `render_refuted()` already tells the senior which premises are dead.
+        `render_refuted()` is rendered at the head of this block, for EVERY senior and
+        not only a replacement: before this it had no caller at all, so no senior was
+        ever told which premises were dead.
         """
         open_ = [p for p in self.unresolved_for(author) if p.status == "UNVERIFIED"]
         # Premises someone else filed that this senior is expected to settle. Without
@@ -452,10 +454,15 @@ class PremiseLedger:
         # is noise in a senior's round.
         others = [p for p in self.premises.values()
                   if p.author != author and p.load_bearing and p.status == "UNVERIFIED"]
-        if not open_ and not others:
+        dead = self.render_refuted()
+        if not open_ and not others and not dead:
             return ""
         lines = []
+        if dead:
+            lines.append(dead)
         if open_:
+            if lines:
+                lines.append("")
             lines.append("YOUR UNRESOLVED PREMISES - carried forward by the runner, "
                          "in your own words:")
             for p in open_:
@@ -496,10 +503,11 @@ class PremiseLedger:
         return "\n".join(rows)
 
     def render_refuted(self) -> str:
-        """What a replacement senior must not rebuild on. Empty when nothing is refuted.
+        """What a senior must not rebuild on. Empty when nothing is refuted.
 
-        ponytail: no caller until spec 2's alternative-agent brief. Four lines, and
-        the ledger already holds everything it needs - delete it if spec 2 slips.
+        Carried into every senior's round by `render_for_senior`, and into a
+        replacement's first instruction by `sh_loop._spawn_directive`. SH does not
+        write this and cannot soften it.
         """
         dead = self.refuted()
         if not dead:

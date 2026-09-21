@@ -22,6 +22,7 @@ from functools import partial
 
 from case_file import parse_case_updates
 from conversation import (
+    deviation_violations,
     directive_violations,
     effective_r2,
     grade_ceiling_violations,
@@ -90,8 +91,8 @@ RETIRE and SPAWN in the SAME turn (a hand-over, not a parallel run) as soon as a
   * the senior's own report shows its current constraints cannot hold the answer — the feed carries no such field, no content, no coverage of the window or entity. A round spent establishing that is a round well spent; what must not follow it is another round inside the same dead scope. Hand over as soon as the evidence is in;
   * its candidate is still UNVERIFIED after a round aimed at verifying it;
   * it keeps returning to the same narrowed lead without settling it.
-Brief the replacement on the question as asked, then state the deviation you want. The new direction must not re-walk the retired senior's path: name fields, feeds or entities it did not touch, and say where evidence of the ACT the question names would sit if the first reading was wrong. The deviation can be small — the same feed read through a different field is a different direction; the same field re-read is not. Say what to avoid ("do not re-test <retired scope>") as well as what to try. Do not hand over the retired senior's candidate to confirm: it must reach its own answer, and two seniors arriving at the same value independently is verification, while one senior repeating itself is not.
-What the replacement DOES inherit is any entity the retired senior established — a host, account, file or window. Carrying a proven entity into the feed the question names is the most common way a stuck question is solved; dropping it because it was found elsewhere is how one is lost.
+Brief the replacement on the question as asked, then fill two fields. `deviation`: where the evidence may sit if the retired reading was wrong — the fields, feeds or entities it did not touch, and what not to re-walk. The deviation can be small; the same feed read through a different field is a different direction, the same field re-read is not. `inherited_entities`: what the retired senior ESTABLISHED — a host, account, file, window — that carries forward. Carrying a proven entity into the feed the question names is the most common way a stuck question is solved; dropping it because it was found elsewhere is how one is lost. A SPAWN made while a load-bearing premise is REFUTED is rejected without a `deviation`.
+The third thing a replacement needs — what NOT to rebuild on — the runner fills from the ledger. You do not write it and cannot soften it. Do not hand over the retired senior's candidate to confirm: it must reach its own answer, and two seniors arriving at the same value independently is verification, while one senior repeating itself is not.
 
 YOUR SIX ROUTES
   SPAWN    — another senior. Only with a stated reason the current senior's constraints cannot cover. In parallel only under the PARALLEL SENIORS rule above. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope; it costs no senior slot and is capped at one per question.
@@ -381,6 +382,29 @@ def _route_directive(e) -> str:
             f"{e.fix_directive}{answers}{scope}")
 
 
+def _spawn_directive(e, ledger) -> str:
+    """A new senior's first instruction: SH's reason, the deviation it wants and the
+    entities the replacement inherits, then the refuted block the RUNNER fills.
+
+    This is the whole of what makes a senior an "alternative agent". It is not a new
+    agent type - duplicating the senior stack to add one prompt section would buy
+    nothing. Divergence is not checked: the brief states plainly that a line of
+    reasoning needing a refuted premise is already known wrong, and whether the
+    replacement obeys is an observation for the run log, not a gate.
+    """
+    parts = [("Begin. " + e.reason) if e.reason else "Begin."]
+    if e.deviation.strip():
+        parts.append("THE DEVIATION SH WANTS - a direction the retired senior did not "
+                     f"walk:\n{e.deviation.strip()}")
+    if e.inherited_entities.strip():
+        parts.append("ENTITIES ALREADY ESTABLISHED - carry these forward, do not spend "
+                     f"a round rediscovering them:\n{e.inherited_entities.strip()}")
+    dead = ledger.render_refuted()
+    if dead:
+        parts.append(dead)
+    return "\n\n".join(parts)
+
+
 def _apply_case_updates(case_file, lines: list, qid: str) -> int:
     """SH's `case_updates` reuse the existing CASE UPDATES grammar verbatim."""
     if not case_file or not lines:
@@ -555,6 +579,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + spawn_overlap_violations(
             turn.entries, {sid: s.constraints for sid, s in sessions.items()
                            if state.is_active(sid)}
+        ) + deviation_violations(
+            turn.entries, ledger
         ) + premise_audit_violations(
             turn.entries, ledger
         ) + stamp_violations(
@@ -638,7 +664,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                     rounds_granted=grant, idx=counter, constraints=e.constraints,
                     iters=ROUND_ITERS, ledger=ledger)
                 pending[sid] = partial(sessions[sid].work,
-                                       ("Begin. " + e.reason) if e.reason else "Begin.",
+                                       _spawn_directive(e, ledger),
                                        rounds_remaining=max(0, state.rounds_left_for(sid) - 1))
 
             elif e.route in ("COMMAND", "CRITIC"):
