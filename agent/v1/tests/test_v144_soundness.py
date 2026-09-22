@@ -252,3 +252,22 @@ def test_a_question_with_no_file_yet_still_reaches_the_merged_view(tmp_path):
     dump_ledgers(str(merged), {"Q329": _ledger()}, run_dir=str(tmp_path))
     qids = {r["qid"] for r in json.loads(merged.read_text(encoding="utf-8"))}
     assert qids == {"Q329"}
+
+
+def test_the_wave_also_names_the_open_questions_owed_an_answer():
+    """The same fault as the stamp, and a larger one: unanswered open questions
+    rejected 17 turns in the v1.4.3 smoke run to the stamp's 11, and
+    `open_question_violations` reads exactly this list to write its rejection."""
+    led = _ledger()
+    led.ask(["which endpoint do you mean?"], author="s1", round_n=1)
+    wave = render_wave({"s1": {"report": "found it", "novel_spl_count": 3}},
+                       slots_remaining=1, turns_remaining=4, ledger=led)
+    assert "ANSWER BY ID" in wave
+    assert "s1 asks q1" in wave
+
+
+def test_a_wave_with_no_open_questions_says_nothing_about_them():
+    led = _ledger()
+    wave = render_wave({"s1": {"report": "found it", "novel_spl_count": 3}},
+                       slots_remaining=1, turns_remaining=4, ledger=led)
+    assert "ANSWER BY ID" not in wave

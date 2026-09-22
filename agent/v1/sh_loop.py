@@ -296,6 +296,20 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int,
     else:
         stamp_first = ""
 
+    # Same fault, larger: unanswered open questions rejected 17 turns in the v1.4.3
+    # smoke run to the stamp's 11, and `open_question_violations` reads exactly this
+    # list to write its rejection. Both are requirements the runner can state before
+    # the turn and was stating only after it, at the price of a turn each time.
+    asked = {sid: [q.id for q in ledger.open_questions_for(sid)] for sid in reports}
+    asked = {sid: ids for sid, ids in asked.items() if ids}
+    if asked:
+        stamp_first += ("\n\nANSWER BY ID — these are open and owed an answer this turn "
+                        "in `open_question_answers`, on the route addressed to that "
+                        "senior: "
+                        + "; ".join(f"{sid} asks {', '.join(ids)}"
+                                    for sid, ids in sorted(asked.items()))
+                        + ". A turn that leaves one unanswered is rejected.")
+
     return (_budget_line(slots_remaining, turns_remaining) + "\n\n"
             + "\n\n".join(blocks)
             + "\n\n" + ledger.render_table()
