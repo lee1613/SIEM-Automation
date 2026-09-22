@@ -119,7 +119,8 @@ def build_sh_message(qid, qtext, guidance, points=0):
 
 
 def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations,
-                      stage_ms, usage_by_role, question_text="", hint_cost=0):
+                      stage_ms, usage_by_role, question_text="", hint_cost=0,
+                      usage_by_worker=None):
     """Assemble one per-question metrics row (pure data — unit-testable).
 
     `grounded` reuses grounding.is_grounded (component-wise for comma-joined
@@ -155,6 +156,15 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
         },
         "cost_by_role": {r: round(v.get("estimated_usd", 0.0), 6)
                          for r, v in usage_by_role.items()},
+        # One row per senior/validator/scout. cost_by_role cannot say WHICH worker
+        # spent a question's senior budget, which is the only question worth asking
+        # of it when one worker runs away or a provider caches unevenly.
+        "cost_by_worker": {w: {"usd": round(v.get("estimated_usd", 0.0), 6),
+                               "in": v.get("input_tokens", 0),
+                               "cached": v.get("cached_tokens", 0),
+                               "out": v.get("output_tokens", 0),
+                               "cache_hit_pct": v.get("cache_hit_pct", 0.0)}
+                           for w, v in sorted((usage_by_worker or {}).items())},
     }
 
 
@@ -654,10 +664,12 @@ def main():
         # ── Events + per-question metrics row ─────────────────────────────────────
         verdict_str = "correct" if sb_correct else "wrong"
         ubr = tracker.by_question().get(qid, {})
+        ubw = tracker.by_worker().get(qid, {})
         row = build_metrics_row(
             qid=qid, points=points, verdict=verdict_str, earned=pts_earned,
             clean_answer=clean, delegations=ctx.q_delegations,
-            stage_ms=stage_ms, usage_by_role=ubr, question_text=qtext,
+            stage_ms=stage_ms, usage_by_role=ubr, usage_by_worker=ubw,
+            question_text=qtext,
             hint_cost=hint_cost,
         )
         logger.events.emit("submit", qid=qid, verdict=verdict_str, earned=pts_earned,

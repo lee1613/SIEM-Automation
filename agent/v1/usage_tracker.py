@@ -78,6 +78,15 @@ PRICES_PER_1M: dict[str, dict] = {
     "nvidia/nemotron-3-super-120b-a12b": {
         "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
+    # Vision, for the decode-and-look questions (see agent/v1/vision.py). Priced at 0
+    # like every other NIM row, by the same standing decision - so a run's totals
+    # understate true spend by whatever NIM would bill for these calls.
+    "meta/llama-3.2-90b-vision-instruct": {
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
+    },
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
+    },
 }
 
 
@@ -161,9 +170,13 @@ class UsageTracker(BaseCallbackHandler):
         self._sh_cum  = _empty_bucket()         # cumulative SH totals for the whole run
         self._sh_snap = _empty_bucket()         # snapshot at start of current question
         self._by_q: dict[tuple[str, str], dict] = {}   # (qid, role) -> bucket
+        # (qid, worker) -> bucket. One senior per key, so a single worker burning
+        # the question's budget is visible instead of averaged into "senior".
+        self._by_worker: dict[tuple[str, str], dict] = {}
 
     # ── Per-(qid, role) attribution ───────────────────────────────────────────
-    def _add_by_q(self, qid: str, role: str, inp: int, cached: int, out: int, usd: float) -> None:
+    def _add_by_q(self, qid: str, role: str, inp: int, cached: int, out: int,
+                  usd: float, sid: str = "") -> None:
         if not qid:
             return
         b = self._by_q.setdefault((qid, role), _empty_bucket())
@@ -171,6 +184,12 @@ class UsageTracker(BaseCallbackHandler):
         b["cached_tokens"] += cached
         b["output_tokens"] += out
         b["estimated_usd"] += usd
+        if sid:
+            w = self._by_worker.setdefault((qid, sid), _empty_bucket())
+            w["input_tokens"]  += inp
+            w["cached_tokens"] += cached
+            w["output_tokens"] += out
+            w["estimated_usd"] += usd
 
     # ── LangChain callback ────────────────────────────────────────────────────
     def on_llm_end(self, response: LLMResult, **kwargs) -> None:
@@ -244,7 +263,11 @@ class UsageTracker(BaseCallbackHandler):
                     "exploration" if is_explore else
                     "sh" if is_sh else "other")
             qid  = next((tg for tg in tags if isinstance(tg, str) and tg.startswith("Q")), "")
-            self._add_by_q(qid, role, inp, cached, out, usd)
+            # `sid:s2` is set by SplunkWorkerPool._run / .clarify. SH has none - it is
+            # one agent - so its calls simply never open a worker bucket.
+            sid  = next((tg[4:] for tg in tags
+                         if isinstance(tg, str) and tg.startswith("sid:")), "")
+            self._add_by_q(qid, role, inp, cached, out, usd, sid=sid)
 
     # ── NIM / raw-SDK helper ──────────────────────────────────────────────────
     def add_nim_usage(self, model: str, inp: int, cached: int, out: int,
@@ -317,6 +340,30 @@ class UsageTracker(BaseCallbackHandler):
                     "cached_tokens": b["cached_tokens"],
                     "output_tokens": b["output_tokens"],
                     "estimated_usd": round(b["estimated_usd"], 6),
+                }
+        return out
+
+    def by_worker(self) -> dict:
+        """Return {qid: {worker_id: bucket}}: one row per senior, validator or scout.
+
+        `by_question()` buckets everything a question spent on seniors into one
+        "senior" row, which cannot answer the only question worth asking of it - WHICH
+        senior spent it. The v1.4.3 smoke run's Q329 shows why: four workers, 11
+        delegations, $1.58, and no way to tell from any artifact whether that was four
+        workers costing $0.40 each or one runaway.
+        """
+        out: dict[str, dict] = {}
+        with self._lock:
+            for (qid, sid), b in self._by_worker.items():
+                out.setdefault(qid, {})[sid] = {
+                    "input_tokens":  b["input_tokens"],
+                    "cached_tokens": b["cached_tokens"],
+                    "output_tokens": b["output_tokens"],
+                    "estimated_usd": round(b["estimated_usd"], 6),
+                    # The number the caching question is actually asked of. A worker
+                    # whose provider caches alternately shows up here and nowhere else.
+                    "cache_hit_pct": (round(100 * b["cached_tokens"] / b["input_tokens"], 1)
+                                      if b["input_tokens"] else 0.0),
                 }
         return out
 

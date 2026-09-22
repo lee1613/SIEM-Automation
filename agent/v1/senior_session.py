@@ -120,7 +120,8 @@ class SeniorSession:
 
         result = self.pool.run_round(
             thread_id=self.thread_id, message=message, qid=self.qid,
-            idx=self.idx, technique=self.technique, max_iter=self.iters)
+            idx=self.idx, technique=self.technique, max_iter=self.iters,
+            sid=self.sid)
 
         self.rounds_used += 1
         round_iterations = int(result.get("iterations", 0))

@@ -87,9 +87,12 @@ def test_the_spawn_directive_carries_the_deviation_and_the_inherited_entities():
 def test_the_runner_fills_the_refuted_block_and_sh_cannot_soften_it():
     """SH does not write this and cannot alter it: it is rendered from the ledger."""
     d = _spawn_directive(_spawn(deviation="elsewhere"), _refuted_ledger())
-    assert "PREMISES ALREADY DISPROVEN" in d
+    assert "WHAT WAS DISPROVEN" in d
     assert "byte profile shows submission" in d
     assert "ibc" in d, "the evidence that disproved it travels with the claim"
+    # It leads the brief. A replacement exists BECAUSE something did not hold, so the
+    # ground it must avoid cannot sit below SH's prose as a footnote.
+    assert d.index("WHAT WAS DISPROVEN") < d.index("THE DEVIATION SH WANTS")
 
 
 def test_every_senior_is_told_which_premises_are_dead():

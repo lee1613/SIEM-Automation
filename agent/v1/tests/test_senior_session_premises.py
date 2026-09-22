@@ -24,7 +24,8 @@ class _Pool:
         self.result = result
         self.messages = []
 
-    def run_round(self, *, thread_id, message, qid, idx, technique, max_iter):
+    def run_round(self, *, thread_id, message, qid, idx, technique, max_iter,
+                  sid=""):
         self.messages.append(message)
         return dict(self.result)
 

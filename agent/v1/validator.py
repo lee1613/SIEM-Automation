@@ -147,7 +147,8 @@ def validate(pool, premise, *, vid: str, qid: str, idx: int,
     rival = rival_mode(premise)
     brief = brief_for_rival(premise) if rival else brief_for(premise)
     result = pool.run_round(thread_id=f"{qid}-{vid}", message=brief,
-                            qid=qid, idx=idx, technique="validator", max_iter=iters)
+                            qid=qid, idx=idx, technique="validator", max_iter=iters,
+                            sid=vid)
     update = _verdict_from(result)
     if update is not None:
         update = PremiseUpdate(id=premise.id, status=update.status,

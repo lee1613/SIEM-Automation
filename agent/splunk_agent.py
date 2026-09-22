@@ -404,6 +404,54 @@ def make_tools(splunk: SplunkClient) -> list:
                                       keyword=keyword, count=n, source=source)
         return _format_result(result, keep_raw=True)
 
+    @tool
+    def read_image_in_field(spl: str, field: str, question: str) -> str:
+        """LOOK AT an image that exists only as base64 inside a Splunk field, and answer
+        one question about what it shows. Use this when the answer is a property of the
+        PICTURE — a chart type, a colour, which word is biggest, what a screenshot says —
+        and no text in the dataset states it.
+
+        `spl`      a search returning ONE event that holds the image, e.g.
+                   index=botsv3 sourcetype=stream:smtp "image001.jpg"
+        `field`    the field holding the base64, e.g. attach_content
+        `question` ONE narrow question about what is VISIBLE ("what kind of chart is
+                   this?", "which word is in the largest font?"). Never hand it the
+                   investigation's question — you do the reasoning, this only reports
+                   what is on screen.
+
+        It describes what it sees in ordinary language. Mapping that onto a product's
+        own vocabulary is YOUR job, not its: if the answer must be a name from some
+        tool's menu, ask about the VISIBLE PROPERTY that distinguishes those names
+        (orientation, stacking, axis) and do the naming yourself.
+
+        The image is decoded and sent onward server-side, so the base64 never enters this
+        conversation: calling this costs you one short answer and nothing more."""
+        try:
+            result = splunk.search(spl, max_results=1)
+        except Exception as exc:                      # noqa: BLE001
+            return f"Search failed: {type(exc).__name__}: {str(exc)[:200]}"
+        rows = (result or {}).get("results") or []
+        if not rows:
+            return ("That search returned no events. Narrow it to the one event holding "
+                    "the image, then call this again.")
+        value = rows[0].get(field) or ""
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        if not value:
+            present = ", ".join(sorted(k for k in rows[0] if not k.startswith("_")))
+            return f"Field {field!r} is empty on that event. Fields present: {present[:300]}"
+        # Imported here, not at module scope: agent/v1 is only on sys.path for the v1
+        # runner, and a missing openai/NIM key must not break importing this module.
+        try:
+            import vision
+        except ImportError:
+            return "Image reading is not available in this deployment."
+        try:
+            raw, mime = vision.decode_field(str(value))
+            return vision.describe(raw, mime, question)
+        except (ValueError, RuntimeError) as exc:
+            return f"Could not read that image: {exc}"
+
     return [
         get_source_types,
         get_sources,
@@ -413,6 +461,7 @@ def make_tools(splunk: SplunkClient) -> list:
         sample_events,
         run_splunk_search,
         get_raw_events,
+        read_image_in_field,
     ]
 
 # ── System prompt ──────────────────────────────────────────────────────────────

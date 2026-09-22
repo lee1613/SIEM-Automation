@@ -521,6 +521,52 @@ class PremiseLedger:
                         f"r{p.round_first_seen:<5} {by}{p.author}: {text}")
         return "\n".join(rows)
 
+    def disproven(self) -> list:
+        """Everything a replacement must not rebuild on: REFUTED premises, AND premises
+        SH stamped false.
+
+        The two were never the same set, and only the first ever reached a replacement.
+        A false stamp deliberately does NOT change status - `stamp_premise` is an
+        annotation, never an edit - so a premise SH read as not holding stayed VERIFIED,
+        `refuted()` stayed empty, `render_refuted()` returned "", and the alternative
+        agent was briefed on nothing the runner enforced. Its whole brief was SH's own
+        prose. That is how v1.4.3's Q216 replacement was handed the incumbent's reading
+        and came back with the incumbent's answer.
+        """
+        out = {p.id: p for p in self.premises.values() if p.status == "REFUTED"}
+        out.update({p.id: p for p in self.premises.values() if p.stamp == "false"})
+        return sorted(out.values(), key=lambda p: int(p.id[1:]))
+
+    def render_disproven(self) -> str:
+        """The disproven set, for a replacement's first instruction. Empty when nothing
+        is disproven.
+
+        This is the basis a `deviation` is written against: SH is told to read this block
+        and name a direction that needs none of it to be true.
+        """
+        dead = self.disproven()
+        if not dead:
+            return ""
+        lines = ["WHAT WAS DISPROVEN — the ground the retired senior stood on, and why "
+                 "it did not hold. Your direction must not need any of it to be true:"]
+        for p in dead:
+            if p.status == "REFUTED":
+                lines.append(f'[{p.id}] REFUTED by {p.verified_by} — "{p.text}"')
+                if p.quote:
+                    lines.append(f"     disproven by: {p.quote}")
+            else:
+                why = ("the claim is not right about the question"
+                       if p.stamp_holds == "false"
+                       else "the quote does not establish it")
+                lines.append(f'[{p.id}] read as NOT HOLDING by SH ({why}) — "{p.text}"')
+                if p.stamp_reason:
+                    lines.append(f"     SH's reading: {p.stamp_reason}")
+                if p.holds_reason:
+                    lines.append(f"     the rival it failed against: {p.holds_reason}")
+        lines.append("\nA line of reasoning that needs one of these is already known "
+                     "wrong. Where the evidence may sit INSTEAD is what you are for.")
+        return "\n".join(lines)
+
     def render_refuted(self) -> str:
         """What a senior must not rebuild on. Empty when nothing is refuted.
 

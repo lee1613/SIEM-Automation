@@ -113,4 +113,8 @@ def test_the_prompt_teaches_the_stamp_and_what_a_false_one_costs():
     from sh_loop import SH_SYSTEM_PROMPT
     assert "premise_stamps" in SH_SYSTEM_PROMPT
     assert "nominate_premise_id" in SH_SYSTEM_PROMPT
-    assert "RETIRES THAT SENIOR" in SH_SYSTEM_PROMPT
+    assert "RETIRES that senior" in SH_SYSTEM_PROMPT
+    # The runner fires the mechanism; SH only names the premise. Leaving that
+    # ambiguous invites SH to burn a SPAWN slot on a validator it cannot spawn.
+    assert "THE RUNNER ACTS AUTOMATICALLY" in SH_SYSTEM_PROMPT
+    assert "you do NOT spawn anything" in SH_SYSTEM_PROMPT

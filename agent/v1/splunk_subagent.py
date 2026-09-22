@@ -212,7 +212,8 @@ class SplunkWorkerPool:
                 "full_state": [], "iterations": 0, "cap_hit": False}
 
     def run_round(self, *, thread_id: str, message: str, qid: str, idx: int,
-                  technique: str = "senior", max_iter: int = 8) -> dict:
+                  technique: str = "senior", max_iter: int = 8,
+                  sid: str = "") -> dict:
         """One round of a LIVE senior: resume `thread_id` with a new directive.
 
         The thread is the whole point. `run_agent_traced` seeds `step_count: 0`
@@ -228,10 +229,11 @@ class SplunkWorkerPool:
         """
         graph = self._graph_for(technique, max_iter)
         return self._run("senior", graph, self.senior_model, message, qid, idx,
-                         max_iter=max_iter, thread_id=thread_id)
+                         max_iter=max_iter, thread_id=thread_id, sid=sid)
 
     def clarify(self, *, thread_id: str, qid: str, idx: int, questions: list,
-                technique: str = "senior", max_iter: int = 8, preface: str = "") -> str:
+                technique: str = "senior", max_iter: int = 8, preface: str = "",
+                sid: str = "") -> str:
         """Answer SH's clarifying questions from the senior's existing context.
         `preface` (SH's answers to the senior's own open questions) precedes them.
 
@@ -254,8 +256,9 @@ class SplunkWorkerPool:
                                    "orchestrator. Be brief and concrete.")]
             + history + [ask],
             config={"callbacks": [self.tracker] if self.tracker else [],
-                    "tags": ["senior", qid],
-                    "metadata": {"role": "senior", "qid": qid, "idx": idx}},
+                    "tags": ["senior", qid] + ([f"sid:{sid}"] if sid else []),
+                    "metadata": {"role": "senior", "qid": qid, "idx": idx,
+                                 "sid": sid}},
         )
         text = (reply.content or "").strip()
         graph.update_state(config, {"messages": [ask, reply]})
@@ -263,7 +266,8 @@ class SplunkWorkerPool:
 
     def _run(self, role: str, graph, model: str,
              subquestion: str, parent_qid: str, idx: int,
-             max_iter: int = MAX_ITER, thread_id: str | None = None) -> dict:
+             max_iter: int = MAX_ITER, thread_id: str | None = None,
+             sid: str = "") -> dict:
         thread_id  = thread_id or f"{role}_{parent_qid}_{idx}_{uuid.uuid4().hex[:8]}"
         run_name   = f"{role.capitalize()}-{idx}-{parent_qid}"
         api_failed = False
@@ -284,8 +288,11 @@ class SplunkWorkerPool:
             answer, state = agent_mod.run_agent_traced(
                 graph, subquestion, thread_id,
                 run_name=run_name,
-                tags=[role, parent_qid],
-                metadata={"role": role, "qid": parent_qid, "idx": idx},
+                # `sid:<worker>` is what lets the tracker bill a call to ONE worker.
+                # Without it every senior on a question lands in one bucket, and a
+                # single senior burning the budget is invisible in the totals.
+                tags=[role, parent_qid] + ([f"sid:{sid}"] if sid else []),
+                metadata={"role": role, "qid": parent_qid, "idx": idx, "sid": sid},
                 tracker=self.tracker,
                 max_iter=max_iter,
             )

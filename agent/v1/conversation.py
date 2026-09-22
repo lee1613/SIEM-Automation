@@ -623,8 +623,11 @@ def deviation_violations(entries: list, ledger) -> list[str]:
     thing a replacement needs - what NOT to rebuild on - is filled by the runner from
     the ledger, so SH cannot omit it or soften it.
     """
-    if not any(p.load_bearing and p.status == "REFUTED"
-               for p in ledger.premises.values()):
+    # Keyed on `disproven`, not `refuted`: a false stamp is SH stating in writing that
+    # the ground does not hold, and it is the commonest reason a replacement exists at
+    # all. Keying only on REFUTED left the one field that makes a SPAWN an *alternative*
+    # optional on exactly the trigger that needed it most.
+    if not any(p.load_bearing for p in ledger.disproven()):
         return []
     return [f'SPAWN "{e.subquestion[:50]}" needs a `deviation`: a load-bearing premise '
             "is REFUTED, so a replacement needs a direction that does not need it - name "
