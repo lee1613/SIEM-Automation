@@ -21,6 +21,7 @@ equivalent of the rule that stops SH citing itself.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Literal
 
@@ -130,6 +131,11 @@ class Premise(BaseModel):
     evidence: str = ""
     stamp: Literal["", "true", "false"] = ""
     stamp_reason: str = ""
+    # SH's second reading: is the CLAIM right, set aside whether its quote was read
+    # correctly. `stamp` is the machinery's single verdict (false if either reading
+    # failed); these two say which one failed and what rival was weighed.
+    stamp_holds: Literal["", "true", "false"] = ""
+    holds_reason: str = ""
     history: list[dict] = Field(default_factory=list)
 
 
@@ -397,7 +403,8 @@ class PremiseLedger:
         return notes
 
     def stamp_premise(self, pid: str, *, establishes: bool, reason: str,
-                      round_n: int) -> bool:
+                      round_n: int, claim_holds: bool = True,
+                      holds_reason: str = "") -> bool:
         """Record SH's reading of one newly-claimed verification. False when the id is
         unknown or already stamped - a stamp is recorded once, when the verification is
         first claimed.
@@ -405,14 +412,26 @@ class PremiseLedger:
         An annotation, never an edit: the status is untouched. A false-stamped premise
         stays VERIFIED, because status belongs to the quote rule and the validator,
         while the stamp is SH's reading of it.
+
+        BOTH readings are kept, separately. `stamp` stays the single true/false the rest
+        of the machinery keys on, and is false when EITHER reading failed; `stamp_holds`
+        and `holds_reason` record which one. Collapsing them at write time would make the
+        post-run reading that motivated the second question - how often is a claim validly
+        cited and still wrong - unanswerable from the ledger, which is the one artifact
+        that outlives the run.
         """
         p = self.premises.get(pid)
         if p is None or p.stamp:
             return False
-        p.stamp = "true" if establishes else "false"
+        p.stamp = "true" if (establishes and claim_holds) else "false"
         p.stamp_reason = reason
+        p.stamp_holds = "true" if claim_holds else "false"
+        p.holds_reason = holds_reason
         p.history.append({"round": round_n, "status": p.status, "by": "sh-stamp",
-                          "quote": "", "evidence": f"stamp={p.stamp}: {reason}"})
+                          "quote": "",
+                          "evidence": f"stamp={p.stamp} (establishes={establishes}, "
+                                      f"holds={claim_holds}): {reason} "
+                                      f"| rival: {holds_reason}"})
         return True
 
     def answer(self, question_id: str, text: str) -> bool:
@@ -547,6 +566,8 @@ class PremiseLedger:
             "rival": p.rival,
             "stamp": p.stamp,
             "stamp_reason": p.stamp_reason,
+            "stamp_holds": p.stamp_holds,
+            "holds_reason": p.holds_reason,
             "history": list(p.history),
             "candidate_at_each_round": {str(r): v for r, v
                                         in sorted(self.candidates
@@ -554,8 +575,56 @@ class PremiseLedger:
         } for p in self.premises.values()]
 
 
-def dump_ledgers(path: str, ledgers: dict) -> None:
-    """Write every question's ledger to one file. `ledgers` maps qid -> PremiseLedger."""
-    records = [r for qid, led in ledgers.items() for r in led.to_records(qid)]
+def ledger_dir(run_dir: str) -> str:
+    return os.path.join(run_dir, "premise_ledgers")
+
+
+def dump_question_ledger(run_dir: str, qid: str, ledger) -> str:
+    """Write ONE question's ledger, the moment that question finishes.
+
+    Three faults die here, all of them costing the v1.4.3 smoke run's Q216 and Q217
+    ledgers outright:
+
+      1. The whole-run dump ran once, at the end of main(), outside any try/finally.
+         A RunPaused unwound main() before it, so every ledger the process held went
+         with it. A question's ledger is now durable the moment the question ends.
+      2. A resumed process starts with `ledgers = {}` and cannot re-derive an earlier
+         segment's premises, so a single shared file could only ever be rewritten with
+         less than it held. One file per question cannot be rewritten by a question
+         that is not it.
+      3. The merged view is rebuilt by reading this directory, so it gains the prior
+         segment's questions instead of losing them.
+    """
+    d = ledger_dir(run_dir)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{qid}.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(ledger.to_records(qid), fh, indent=2, ensure_ascii=False)
+    return path
+
+
+def dump_ledgers(path: str, ledgers: dict, run_dir: str | None = None) -> int:
+    """Write the merged view, and return how many premises it holds.
+
+    `ledgers` (qid -> PremiseLedger) is only this process's questions. When `run_dir`
+    is given the per-question files are the source of truth instead, so a resumed run's
+    merged file covers the whole run rather than the segment that happened to finish it.
+    """
+    records: list[dict] = []
+    seen: set[str] = set()
+    d = ledger_dir(run_dir) if run_dir else ""
+    if d and os.path.isdir(d):
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".json"):
+                continue
+            with open(os.path.join(d, name), "r", encoding="utf-8") as fh:
+                records.extend(json.load(fh))
+            seen.add(name[:-5])
+    # A question this process holds but never wrote a file for (an unfinished
+    # question, or a caller that passes no run_dir) is still better in than out.
+    for qid, led in ledgers.items():
+        if qid not in seen:
+            records.extend(led.to_records(qid))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(records, fh, indent=2, ensure_ascii=False)
+    return len(records)

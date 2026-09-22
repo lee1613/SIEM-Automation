@@ -124,7 +124,7 @@ def _spawn(**kw):
 def _stamp_p1_only():
     """p1 alone: for the tests that run against P1_ONLY_UPDATE and deliberately leave
     p2 UNVERIFIED - the ceiling caps those turns at WEAK, so p2 is never owed a stamp."""
-    return [PremiseStamp(id="p1", establishes=True,
+    return [PremiseStamp(id="p1", establishes=True, claim_holds=True, holds_reason="no rival",
                          reason="the 22-value port listing covers every route")]
 
 
@@ -134,9 +134,9 @@ def _stamp_p1_and_p2():
     UNVERIFIED premise caps R4 at WEAK (v1.4.3's ceiling), so leaving p2 unstamped
     would cap every PASS-graded turn below. Only one turn per test may carry this -
     stamp_premise is once-only - so later turns pass premise_stamps=[] instead."""
-    return [PremiseStamp(id="p1", establishes=True,
+    return [PremiseStamp(id="p1", establishes=True, claim_holds=True, holds_reason="no rival",
                          reason="the 22-value port listing covers every route"),
-            PremiseStamp(id="p2", establishes=True,
+            PremiseStamp(id="p2", establishes=True, claim_holds=True, holds_reason="no rival",
                          reason="the listing shows no other endpoint")]
 
 
@@ -946,9 +946,9 @@ def test_a_false_stamp_retires_the_senior_and_spawns_one_validator(tmp_path):
                     r3_answer_readiness="WEAK", r4_premise_verification="WEAK",
                     nominate_premise_id="p1",
                     premise_stamps=[
-                        PremiseStamp(id="p1", establishes=False,
+                        PremiseStamp(id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
                                      reason="the listing does not cover DNS at all"),
-                        PremiseStamp(id="p2", establishes=True,
+                        PremiseStamp(id="p2", establishes=True, claim_holds=True, holds_reason="no rival",
                                      reason="the only endpoint in the listing")])),
         _turn(_spawn(deviation="read the proxy feed, not cisco:nvm")),
         _turn(_answer(source_senior="s2", premise_stamps=[],
@@ -989,9 +989,9 @@ def test_a_false_stamp_on_the_last_senior_ends_the_question_with_nothing(tmp_pat
                     r3_answer_readiness="WEAK", r4_premise_verification="WEAK",
                     nominate_premise_id="p1",
                     premise_stamps=[
-                        PremiseStamp(id="p1", establishes=False,
+                        PremiseStamp(id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
                                      reason="the listing does not cover DNS at all"),
-                        PremiseStamp(id="p2", establishes=True,
+                        PremiseStamp(id="p2", establishes=True, claim_holds=True, holds_reason="no rival",
                                      reason="the only endpoint in the listing")])),
     ])
     out = _run(llm, pool, tmp_path, points=100)

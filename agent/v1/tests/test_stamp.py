@@ -39,7 +39,7 @@ def test_a_stamp_is_an_annotation_never_an_edit():
     """A false-stamped premise stays VERIFIED. Status belongs to the quote rule and the
     validator; the stamp is SH's reading of it, recorded beside it."""
     led = _verified_by()
-    assert led.stamp_premise("p1", establishes=False,
+    assert led.stamp_premise("p1", establishes=False, claim_holds=True, holds_reason="no rival",
                              reason="the claim says route (c) was not searched and the "
                                     "quote is the result of searching it",
                              round_n=3) is True
@@ -50,15 +50,18 @@ def test_a_stamp_is_an_annotation_never_an_edit():
 
 def test_a_premise_is_stamped_once():
     led = _verified_by()
-    led.stamp_premise("p1", establishes=True, reason="it does", round_n=3)
-    assert led.stamp_premise("p1", establishes=False, reason="changed my mind",
+    led.stamp_premise("p1", establishes=True, claim_holds=True,
+                      holds_reason="no rival", reason="it does", round_n=3)
+    assert led.stamp_premise("p1", establishes=False, claim_holds=True,
+                             holds_reason="no rival", reason="changed my mind",
                              round_n=4) is False
     assert led.premises["p1"].stamp == "true"
 
 
 def test_a_stamped_premise_is_no_longer_owed_one():
     led = _verified_by()
-    led.stamp_premise("p1", establishes=True, reason="it does", round_n=3)
+    led.stamp_premise("p1", establishes=True, claim_holds=True,
+                      holds_reason="no rival", reason="it does", round_n=3)
     assert led.unstamped("s1") == []
 
 
@@ -79,8 +82,9 @@ def test_nominatable_is_what_sh_stamped_false_or_what_the_senior_left_open():
     """It may not range wider: the false stamp is what fired the mechanism, so aiming
     the validator elsewhere would leave the triggering doubt unexamined."""
     led = _verified_by()
-    led.stamp_premise("p1", establishes=False, reason="it walks past its own limit",
-                      round_n=3)
+    led.stamp_premise("p1", establishes=False, claim_holds=True,
+                      holds_reason="no rival",
+                      reason="it walks past its own limit", round_n=3)
     led.add([PremiseDraft(text="this flow and not the CoinHive six", kind="selection",
                           load_bearing=True, rival="the six ws*.coinhive.com flows")],
             author="s1", round_n=3)
@@ -91,7 +95,7 @@ def test_nominatable_is_what_sh_stamped_false_or_what_the_senior_left_open():
 
 def test_the_stamp_is_in_the_table_and_the_dump():
     led = _verified_by()
-    led.stamp_premise("p1", establishes=False, reason="no", round_n=3)
+    led.stamp_premise("p1", establishes=False, claim_holds=True, holds_reason="no rival", reason="no", round_n=3)
     assert "stamp" in led.render_table()
     assert "false" in led.render_table()
     [rec] = led.to_records("Q216")
@@ -137,7 +141,7 @@ def test_a_stamped_verification_passes_the_gate():
     led = _verified_by()
     out = stamp_violations(
         [_command(premise_stamps=[PremiseStamp(
-            id="p1", establishes=False,
+            id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
             reason="the claim says route (c) was not searched; the quote is the "
                    "result of searching it")])],
         led)
@@ -147,16 +151,18 @@ def test_a_stamped_verification_passes_the_gate():
 def test_a_stamp_needs_a_reason():
     led = _verified_by()
     out = stamp_violations(
-        [_command(premise_stamps=[PremiseStamp(id="p1", establishes=True, reason="  ")])],
+        [_command(premise_stamps=[PremiseStamp(
+            id="p1", establishes=True, claim_holds=True,
+            holds_reason="no rival", reason="  ")])],
         led)
     assert out and "no reason" in out[0]
 
 
 def test_a_premise_stamped_in_an_earlier_turn_is_not_restamped():
     led = _verified_by()
-    led.stamp_premise("p1", establishes=True, reason="it does", round_n=2)
+    led.stamp_premise("p1", establishes=True, claim_holds=True, holds_reason="no rival", reason="it does", round_n=2)
     out = stamp_violations(
-        [_command(premise_stamps=[PremiseStamp(id="p1", establishes=False,
+        [_command(premise_stamps=[PremiseStamp(id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
                                                reason="second thoughts")])],
         led)
     assert out and "earlier turn" in out[0]
@@ -165,7 +171,7 @@ def test_a_premise_stamped_in_an_earlier_turn_is_not_restamped():
 def test_a_stamp_on_an_unknown_id_is_rejected():
     led = _verified_by()
     out = stamp_violations(
-        [_command(premise_stamps=[PremiseStamp(id="p9", establishes=True,
+        [_command(premise_stamps=[PremiseStamp(id="p9", establishes=True, claim_holds=True, holds_reason="no rival",
                                                reason="it does")])],
         led)
     assert out and "not a premise" in out[0]
@@ -176,7 +182,7 @@ def test_a_stamp_may_arrive_on_a_different_entry_of_the_same_turn():
     led = _verified_by()
     out = stamp_violations(
         [entry(route="RETIRE", senior_id="s1", reason="done",
-               premise_stamps=[PremiseStamp(id="p1", establishes=True,
+               premise_stamps=[PremiseStamp(id="p1", establishes=True, claim_holds=True, holds_reason="no rival",
                                             reason="the census covers it")]),
          _command(senior_id="s2")],
         led)
@@ -195,7 +201,7 @@ def test_pass_is_refused_while_a_load_bearing_premise_is_unverified():
 def test_pass_is_refused_on_a_turn_carrying_a_false_stamp():
     led = _verified_by()
     e = _command(r4_premise_verification="PASS",
-                 premise_stamps=[PremiseStamp(id="p1", establishes=False,
+                 premise_stamps=[PremiseStamp(id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
                                               reason="it walks past its own limit")])
     assert r4_ceiling("s1", e, led) == "WEAK"
     assert grade_ceiling_violations([e], led)
@@ -214,7 +220,7 @@ def test_a_refuted_load_bearing_premise_forces_fail():
 def test_pass_is_allowed_on_clean_ground():
     led = _verified_by()
     e = _command(r4_premise_verification="PASS",
-                 premise_stamps=[PremiseStamp(id="p1", establishes=True,
+                 premise_stamps=[PremiseStamp(id="p1", establishes=True, claim_holds=True, holds_reason="no rival",
                                               reason="the census covers every route")])
     assert r4_ceiling("s1", e, led) == "PASS"
     assert grade_ceiling_violations([e], led) == []
@@ -223,7 +229,7 @@ def test_pass_is_allowed_on_clean_ground():
 def test_sh_may_always_grade_below_the_ceiling():
     led = _verified_by()
     e = _command(r4_premise_verification="FAIL",
-                 premise_stamps=[PremiseStamp(id="p1", establishes=True,
+                 premise_stamps=[PremiseStamp(id="p1", establishes=True, claim_holds=True, holds_reason="no rival",
                                               reason="the census covers every route")])
     assert grade_ceiling_violations([e], led) == []
 
@@ -238,7 +244,7 @@ def test_an_ungraded_entry_has_no_ceiling():
 
 def _false_stamp(**kw):
     return _command(premise_stamps=[PremiseStamp(
-        id="p1", establishes=False,
+        id="p1", establishes=False, claim_holds=True, holds_reason="no rival",
         reason="the claim says route (c) was not searched and the quote is the "
                "result of searching it")], **kw)
 

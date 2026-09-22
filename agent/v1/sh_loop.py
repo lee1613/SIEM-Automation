@@ -32,7 +32,9 @@ from conversation import (
     open_question_violations,
     premise_audit_violations,
     spawn_overlap_violations,
+    stamp_is_false,
     stamp_violations,
+    unanswerable_violations,
 )
 from conversation_log import ConversationLog
 from grounding import is_grounded
@@ -49,6 +51,7 @@ from usage_tracker import context_window
 from validator import (
     VALIDATOR_ITERS,
     as_refutation,
+    as_rival_verdict,
     refusal_reason,
     validate,
 )
@@ -128,11 +131,13 @@ ANSWER EVERY OPEN QUESTION, BY ID. A senior's open questions reach you with an i
 
 THE PREMISE LEDGER. Every premise on this question lives in one ledger, shown to you in full each turn. The seniors file their own; you file the ones they missed, in `new_premises`. YOU DO NOT SETTLE PREMISES. You have no Splunk access, so "SH verified it" has only ever meant "SH read a report and decided" — and in the run this rule comes from, you settled 19 of 28 premises, including every one that lost the question. A premise reaches VERIFIED from the senior whose own search shows it, or from an independent validator, and from nobody else. A premise YOU file therefore starts UNVERIFIED and stays there until a senior settles it: the runner carries it to every active senior as a load-bearing premise filed by others, so FILE IT EARLY — one you file on your answering turn has nobody left to settle it.
 
-YOUR STAMP — this is what replaces settling. When a report in the wave you just read NEWLY claims a premise VERIFIED, you record your reading of it: one `premise_stamps` entry per premise, with `establishes` true or false and a reason. Read the claim's OWN WORDS before you read the quote. A claim that states its own limit — a route not searched, a case not checked, a choice left unresolved — is NOT established by evidence that walks past that limit, and that is the single most common way this system has gone wrong. A turn that leaves a new verification unstamped is rejected. A stamp is recorded once, when the verification is first claimed, and it never changes the status: the ledger keeps the senior's verdict with your reading beside it.
+YOUR STAMP — this is what replaces settling, and it is the FIRST thing you do on any turn that has one owed; the wave names the ids. When a report in the wave you just read NEWLY claims a premise VERIFIED, you record your reading of it: one `premise_stamps` entry per premise, answering TWO DIFFERENT QUESTIONS. `establishes` — is the citation sound: does that quote support this claim AS WRITTEN. `claim_holds` — is the claim RIGHT: set the quote aside and ask whether this claim is true of the question you are answering. These are not the same question. A claim can be cited perfectly from real rows read correctly and still be about the wrong endpoint, the wrong feed, or the wrong reading of the question's words — that is how this system lost Q216, where the endpoint the question meant was sitting in the very result set that "proved" a different one. So on `claim_holds`, name in `holds_reason` the strongest rival reading the evidence rules out; if the same results show a rival that fits the question's wording as well as your claim does, `claim_holds` is false. Either answer being false retires that senior and spawns a validator. Read the claim's OWN WORDS before you read the quote. A claim that states its own limit — a route not searched, a case not checked, a choice left unresolved — is NOT established by evidence that walks past that limit, and that is the single most common way this system has gone wrong. A turn that leaves a new verification unstamped is rejected. A stamp is recorded once, when the verification is first claimed, and it never changes the status: the ledger keeps the senior's verdict with your reading beside it.
 A FALSE STAMP RETIRES THAT SENIOR AND SPAWNS A VALIDATOR. You are stating in writing that its ground does not hold, and the runner acts on it without asking you: the senior is retired, and one independent validator — which sees the claim and nothing else, not the question, not the reports, not the candidate — settles the premise you name in `nominate_premise_id`, chosen from what you stamped false or what that senior left UNVERIFIED. Retiring costs a senior slot, so a false stamp is not free. Stamping true on a premise you do not believe is worse, and every stamp is on the record.
 WHAT A VERDICT MEANS. VERIFIED: your doubt is independently dismissed — the premise stands and you may proceed on it. REFUTED: a hard block. The answer resting on it is dead; SPAWN an alternative senior on ground that does not need it. UNVERIFIED: two readers could not stand the claim up — treat it as refuted.
 
 BEFORE ANY ANSWER, trace the chain yourself from the question's words to the value. FIRST READ THE LEDGER: it shows every premise with its id, and the one you are about to write is usually already there. If it is, cite its id in `answer_premise_ids` - do NOT file it again in different words, but stamp it if the wave you just read newly claims it VERIFIED. The runner reads a second open premise of a kind you already have open as a re-file and hands you back the one you own. Only file in `new_premises` a premise genuinely no one has. A premise you file is UNVERIFIED until a senior settles it, so file it while a senior still has rounds — one filed on the answering turn has nobody left to settle it and blocks the answer you filed it for. Open with a `coverage` premise: the key concept the question asks about, every way it could show up in the data, and whether the seniors' searches covered each - checked against the feed's own fields, not against a senior's list drawn from memory. Then a `selection` premise: why this entity and not another that could fit. Mark `load_bearing` true on any premise the answer breaks without. Then cite every premise the value rests on in `answer_premise_ids`.
+
+WHEN THE VALUE CANNOT BE READ AT ALL. Sometimes a senior finds the exact artifact holding the answer and the answer is not text — it is pixels in an image, or bytes in a file this system has no way to render. Hunting further is then not slow, it is finished, and spending the remaining seniors on feeds a senior has already shown cannot hold it wastes the question twice. To end it, ANSWER with `value_kind` = `not_answerable` and say in `justification` exactly which artifact holds the value and which capability is missing to read it. This is NOT a way out of a hard question and the runner will not take your word for it: it is a claim, so it needs the same proof as any other — a load-bearing premise, VERIFIED BY A SENIOR against a quote from output that senior actually received, and stamped true by you. You verify nothing yourself. If no senior has come back with that wall in a quote, you have not established it, and the honest move is to send one. A question that is merely hard, or where you are merely out of ideas, is not this: keep hunting.
 
 A candidate is never answerable because no rival turned up. A way nobody searched is UNVERIFIED however well the chosen candidate is verified, and a candidate can only win against candidates that were looked for. Every result a runner "Partial results" note lists was only partly read - a claim resting on one is UNVERIFIED.
 
@@ -271,9 +276,30 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int,
                     "and you cannot grade it otherwise."
         blocks.append(head + "\n" + (r.get("report") or "").strip())
 
+    # The runner already knows, BEFORE the turn, exactly which premises the stamp gate
+    # will demand - `stamp_violations` computes the same set afterwards to build its
+    # rejection. Telling SH only on the way out cost the v1.4.3 smoke run 8 turns across
+    # 5 questions, every one of them spent re-issuing a turn whose only fault was a
+    # missing stamp, and a rejected turn is not given back. The obligation is named
+    # first, by id, where the turn's instructions actually are.
+    owed = ledger.unstamped()
+    if owed:
+        ids = ", ".join(p.id for p in sorted(owed, key=lambda p: int(p.id[1:])))
+        stamp_first = (
+            f"\n\nSTAMP FIRST — {ids} {'is' if len(owed) == 1 else 'are'} newly claimed "
+            "VERIFIED and unread by you. Before you route anything, put one "
+            f"`premise_stamps` entry for each of {ids} in this turn, answering BOTH "
+            "questions on each: `establishes` — does the quote support the claim as "
+            "written — and `claim_holds` — is the claim RIGHT about this question, or "
+            "does the same evidence show a rival that fits the question's wording as "
+            "well. A turn missing any of them is rejected and is not given back.")
+    else:
+        stamp_first = ""
+
     return (_budget_line(slots_remaining, turns_remaining) + "\n\n"
             + "\n\n".join(blocks)
             + "\n\n" + ledger.render_table()
+            + stamp_first
             + "\n\nReview every report above as a senior threat hunter, grade it "
               "(R1/R2/R3/R4), answer every open question by id in "
               "open_question_answers, and emit exactly one route per senior. ANSWER "
@@ -596,7 +622,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             turn.entries, ledger
         ) + grade_ceiling_violations(
             turn.entries, ledger
-        ) + ledger_violations(turn.entries, ledger, state)
+        ) + ledger_violations(
+            turn.entries, ledger, state
+        ) + unanswerable_violations(turn.entries, ledger)
         # A refused update is not a gate violation, so without this SH is told
         # nothing and re-sends the same malformed update until the turns run out,
         # blocked each time by an ANSWER gate naming a premise it believes settled.
@@ -624,6 +652,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         for e in turn.entries:
             for s in e.premise_stamps:
                 ledger.stamp_premise(s.id, establishes=s.establishes, reason=s.reason,
+                                     claim_holds=s.claim_holds,
+                                     holds_reason=s.holds_reason,
                                      round_n=state.turns_used)
         # The trigger. A false stamp is SH stating in writing that this premise's
         # evidence does not establish its claim, so the runner acts on it without
@@ -631,7 +661,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         # that wants nothing. Retiring costs a spawn slot, which is the whole budget.
         for e in turn.entries:
             sid = e.source_senior if e.route == "ANSWER" else e.senior_id
-            if not sid or not any(s.establishes is False for s in e.premise_stamps):
+            if not sid or not any(stamp_is_false(s) for s in e.premise_stamps):
                 continue
             sess = sessions.get(sid)
             if sess and state.is_active(sid):
@@ -938,7 +968,24 @@ def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
         # update below and the premise keeps its status. That is the correct
         # conservative outcome: the quote rule is not weakened for a verdict with no
         # evidence behind it.
-        verdict = as_refutation(res["update"])
+        # In rival mode the validator settled the RIVAL, not this premise, so its
+        # verdict is translated before it reaches the ledger - and only ever downward.
+        # A rival it could not stand up leaves the premise untouched, because "no
+        # evidence for the rival" is not evidence for the incumbent.
+        if res.get("rival_mode"):
+            verdict = as_rival_verdict(res["update"])
+            if verdict is None:
+                log.note(f"{vid} on {p.id}: rival not stood up — {p.id} keeps {was} "
+                         "(not confirmed by it)")
+                out.append(
+                    f"--- {vid} | RIVAL TEST for {p.id} | the rival was NOT stood up. "
+                    f"{p.id} keeps {was}. Read this narrowly: an independent reader "
+                    "went looking for what would make the rival true and did not find "
+                    "it. That is not proof your selection is right — nobody has "
+                    "argued for it — it only means the rival did not displace it.")
+                continue
+        else:
+            verdict = as_refutation(res["update"])
         notes = ledger.apply([verdict], author=vid, corpus=res["corpus"],
                              round_n=round_n)
         if notes:
@@ -946,12 +993,17 @@ def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
             out.append(f"--- {vid} | validated {p.id} | verdict refused by the runner. "
                        f"{p.id} keeps {was}.")
             continue
-        log.note(f"{vid} on {p.id}: {was} -> {p.status}")
+        log.note(f"{vid} on {p.id}: {was} -> {p.status}"
+                 + (" (via rival test)" if res.get("rival_mode") else ""))
+        shown = ("the RIVAL reading of this premise, in its own words, and nothing "
+                 "else — it was never told what it was arguing against"
+                 if res.get("rival_mode") else
+                 "this claim and the evidence offered for it, and nothing else — not "
+                 "the question, not the reports, not the candidate")
         out.append(
             f"--- {vid} | INDEPENDENT VALIDATION of {p.id} | {was} -> {p.status}\n"
             f'Premise: "{p.text}"\n'
-            f"The validator was shown this claim and the evidence offered for it, and "
-            f"nothing else — not the question, not the reports, not the candidate.\n"
+            f"The validator was shown {shown}.\n"
             f"Its quote: {verdict.quote}\n"
             f"Its reason: {verdict.evidence}")
     return out

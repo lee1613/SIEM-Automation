@@ -36,6 +36,44 @@ VALIDATOR_ITERS = 8
 # many premises exist, in what order). The runner substitutes the real id.
 PLACEHOLDER_ID = "p"
 
+def brief_for_rival(premise) -> str:
+    """Hand the validator the RIVAL as the claim to settle, and never mention the
+    incumbent.
+
+    THE SHAPE IS PROOF BY CONTRADICTION (reductio ad absurdum): to test "the answer is
+    X", assume the strongest not-X and go looking for what would make it true. Popper's
+    falsification is the same move in empirical dress - you do not go out to confirm the
+    thing you believe, you go out to break it, and it earns its keep by surviving.
+
+    WHY IT IS NEEDED HERE. Checking the incumbent is a confirmation frame: the claim
+    arrives already argued for, with its evidence attached, and the reader's job is
+    phrased as agreeing or not. Q216 shows what that costs - "the endpoint is
+    192.168.70.186 because it alone has the pool-port flow" was re-checked round after
+    round and passed every time, while the endpoint the question actually meant sat two
+    rows below it in the same table and was never once made the subject of a search.
+    Nobody was ever asked to make the CoinHive host's case.
+
+    THE LIMIT, STATED SO IT IS NOT MISREAD. A validator that fails to stand the rival up
+    does NOT prove the incumbent. "No evidence was found for X" is not "X is false" -
+    treating it as proof is the argument from ignorance, and this function must never be
+    read as supplying one. It yields evidence in one direction only: a rival that IS
+    stood up refutes the incumbent outright, and a rival that is not merely leaves the
+    incumbent exactly where it already stood.
+
+    The blindness rule is unchanged: the validator gets the rival claim and nothing that
+    would identify the question, the incumbent, or whose side it is on.
+    """
+    return "\n".join([
+        f'THE CLAIM TO CHECK, word for word:\n\n  "{premise.rival.strip()}"\n',
+        "No evidence has been offered for it. YOUR TASK: settle this claim from the "
+        "data yourself - run the searches that would show it true, and report what you "
+        "find either way. Do not conclude it is false because it is unproven; go and "
+        "look. If it names something as not yet searched, or not yet checked, search "
+        "it.",
+        "File your verdict with submit_finding.",
+    ])
+
+
 def brief_for(premise) -> str:
     """The validator's entire briefing: one claim, and the evidence offered for it when
     there is any.
@@ -86,6 +124,17 @@ def _verdict_from(result: dict):
     return updates[0] if len(updates) == 1 else None
 
 
+def rival_mode(premise) -> bool:
+    """Check the rival instead of the incumbent when there IS a named rival.
+
+    Only `selection` premises are required to name one (`PremiseLedger.add` refuses a
+    selection premise with an empty `rival`), and a selection premise is precisely the
+    kind that picks one entity over another - the kind Q216 got wrong. A coverage or
+    other premise with no rival has nothing to steelman, so it keeps the original brief.
+    """
+    return premise.kind == "selection" and bool((premise.rival or "").strip())
+
+
 def validate(pool, premise, *, vid: str, qid: str, idx: int,
              iters: int = VALIDATOR_ITERS) -> dict:
     """Run one validator against one premise. Returns what the runner needs to log.
@@ -95,7 +144,9 @@ def validate(pool, premise, *, vid: str, qid: str, idx: int,
     received, never against the author's, or the check would be circular in the
     other direction.
     """
-    result = pool.run_round(thread_id=f"{qid}-{vid}", message=brief_for(premise),
+    rival = rival_mode(premise)
+    brief = brief_for_rival(premise) if rival else brief_for(premise)
+    result = pool.run_round(thread_id=f"{qid}-{vid}", message=brief,
                             qid=qid, idx=idx, technique="validator", max_iter=iters)
     update = _verdict_from(result)
     if update is not None:
@@ -104,6 +155,7 @@ def validate(pool, premise, *, vid: str, qid: str, idx: int,
     return {
         "vid": vid,
         "premise_id": premise.id,
+        "rival_mode": rival,
         "update": update,
         "corpus": tool_outputs(result.get("full_state")),
         "iterations": result.get("iterations", 0),
@@ -132,6 +184,31 @@ def refusal_reason(update, corpus: list[str]) -> str:
     if not update.evidence.strip():
         return "gave no reason the quote settles it"
     return ""
+
+
+def as_rival_verdict(update):
+    """Translate a verdict about the RIVAL into a verdict about the incumbent premise.
+
+    The validator was shown the rival's words and nothing else, so its status is a
+    statement about the rival:
+
+      * rival VERIFIED   -> the incumbent selection is REFUTED. Something that fits the
+                            question at least as well has been stood up from data, so
+                            the claim "it is this one and not another" is false.
+      * rival REFUTED     -> the incumbent is NOT confirmed. It is left alone. Concluding
+      * rival UNVERIFIED     otherwise would be the argument from ignorance: failing to
+                             make the rival's case is not making the incumbent's.
+
+    The asymmetry is deliberate and is the whole safety property of doing it this way -
+    the test can only ever take a claim DOWN, never prop one up, so a lazy or unlucky
+    validator cannot manufacture support for whatever SH already believed.
+    """
+    if update is None or update.status != "VERIFIED":
+        return None
+    return PremiseUpdate(
+        id=update.id, status="REFUTED", quote=update.quote,
+        evidence="an independent reader stood up the rival reading from data, so this "
+                 "selection does not hold: " + (update.evidence or "no reason given"))
 
 
 def as_refutation(update):

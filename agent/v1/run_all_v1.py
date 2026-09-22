@@ -43,6 +43,7 @@ for p in (AGENT_DIR, SCRIPT_DIR):
 
 from agent_logger import RunLogger
 from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
+from conversation import UNANSWERABLE_VALUE
 from dotenv import load_dotenv
 from finding import answer_shaped
 from grounding import best_candidate, is_grounded
@@ -50,7 +51,7 @@ from hint_client import HintBook
 from hitl import RunPaused
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
-from premise import dump_ledgers
+from premise import dump_ledgers, dump_question_ledger
 from sh_loop import run_question
 from splunk_pool import SplunkConnectionPool
 from splunk_subagent import SplunkWorkerPool
@@ -492,7 +493,16 @@ def main():
             # Routing it through fallback_answer() would risk picking a
             # delegation's `answer` field, which for conversational records is
             # the whole markdown report, not a bare value — never submit that.
-            if answer_shaped(sh_answer):
+            if sh_answer.strip() == UNANSWERABLE_VALUE:
+                # SH ended the question because a senior proved, with a quote, that the
+                # value is not readable by anything here (Q217/Q329: pixels in a base64
+                # image). Scores zero either way; recorded distinctly so the run record
+                # separates "could not hunt" from "could not read".
+                clean = ""
+                print(f"[SH CONV] {qid}: unanswerable with current capabilities — "
+                      "submitting blank")
+                logger.events.emit("sh_conv_unanswerable", qid=qid)
+            elif answer_shaped(sh_answer):
                 clean = sh_answer
             else:
                 clean = ""
@@ -658,6 +668,15 @@ def main():
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics_rows, f, indent=2, ensure_ascii=False)
 
+        # This question's premises, durable NOW rather than at the end of main().
+        # v1.4.3's smoke run lost Q216's and Q217's ledgers outright: the only dump sat
+        # past the end of the question loop, outside any try/finally, and a RunPaused
+        # from the HITL gate unwound main() before reaching it. Everything else here
+        # already survives a resume — metrics, summary, case file, scoreboard, token
+        # totals — and the ledger was the one artifact that did not.
+        if qid in ledgers:
+            dump_question_ledger(logger.run_dir, qid, ledgers[qid])
+
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump({
                 "schema_version":       1,
@@ -693,9 +712,12 @@ def main():
     # One file for the whole run. The per-premise status HISTORY is the point, not
     # the end state: the follow-up spec's trigger asks how long a premise sat
     # UNVERIFIED while the candidate held still, and a finished report cannot say.
+    # Merged from the per-question files on disk, not from this process's `ledgers`
+    # dict — on a resume that dict holds only the segment that just ran, so building
+    # the merged view from it would overwrite the earlier segment's premises with
+    # fewer of them. The per-question files are the record; this is a convenience view.
     ledger_path = os.path.join(logger.run_dir, "premise_ledger.json")
-    dump_ledgers(ledger_path, ledgers)
-    n_premises = sum(len(led.premises) for led in ledgers.values())
+    n_premises = dump_ledgers(ledger_path, ledgers, run_dir=logger.run_dir)
 
     print(f"\n{'='*80}\nFINAL — {logger.run_name}  ({run_label})")
     print(f"  Correct           : {correct_n}/{att}"

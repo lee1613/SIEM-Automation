@@ -65,18 +65,43 @@ class QuestionAnswer(BaseModel):
 
 
 class PremiseStamp(BaseModel):
-    """SH's reading of one newly-claimed verification. An annotation, not an edit."""
+    """SH's reading of one newly-claimed verification. An annotation, not an edit.
+
+    TWO QUESTIONS, and they are not the same one asked twice. `establishes` is
+    VALIDITY: does the offered quote support this claim as written, judged on the
+    claim's own words. `claim_holds` is SOUNDNESS: is the claim itself right about
+    the question being answered. An argument can be valid and still unsound, and
+    that is not a hypothetical here - Q216's selection premise ("the endpoint is
+    192.168.70.186 because it alone holds the sole pool-port flow") was cited with
+    genuine, verbatim, correctly-read rows and was false, because the endpoint the
+    question meant sat in the very same result set. Asking only `establishes` passed
+    it five times over. Only `claim_holds` can catch it.
+    """
 
     id: str = Field(description="The premise id, e.g. 'p3'. Copy it exactly.")
     establishes: bool = Field(
-        description="Does that quote establish THIS claim, AS WRITTEN? Read the claim's "
-                    "own words before the quote: a claim that states its own limit - a "
-                    "route not searched, a case not checked, a choice unresolved - is "
-                    "NOT established by evidence that walks past the limit. True or "
-                    "false, not a grade.")
+        description="VALIDITY. Does that quote establish THIS claim, AS WRITTEN? Read "
+                    "the claim's own words before the quote: a claim that states its own "
+                    "limit - a route not searched, a case not checked, a choice "
+                    "unresolved - is NOT established by evidence that walks past the "
+                    "limit. Judge the citation only; whether the claim is RIGHT is the "
+                    "next field. True or false, not a grade.")
     reason: str = Field(
         description="One or two sentences: what the quote shows, and why that does or "
                     "does not establish the claim as written.")
+    claim_holds: bool = Field(
+        description="SOUNDNESS - a different question from `establishes`, and the one "
+                    "this system has lost questions by not asking. Set aside whether the "
+                    "quote was read correctly and ask whether the CLAIM IS RIGHT about "
+                    "the question being answered. A claim can be flawlessly evidenced "
+                    "and still be about the wrong entity, the wrong feed, or the wrong "
+                    "reading of the question's words. If the same result set that proves "
+                    "this claim also shows a rival fitting the question's wording at "
+                    "least as well, this claim does not hold. True or false.")
+    holds_reason: str = Field(
+        description="One or two sentences naming the strongest rival reading of the "
+                    "question that this claim rules out, and what in the evidence rules "
+                    "it out. 'No rival' is a permitted answer, but say it deliberately.")
 
 
 class SeniorDirective(BaseModel):
@@ -425,6 +450,69 @@ def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:
     return out
 
 
+UNANSWERABLE = "not_answerable"
+# The only `value` this kind of ANSWER may carry. SeniorDirective refuses an ANSWER with
+# an empty value, and a free-text one here would be a guess with nothing stopping it
+# reaching the scoreboard. One fixed token is unmistakable to the runner and in the log.
+UNANSWERABLE_VALUE = "NOT_ANSWERABLE"
+
+
+def unanswerable_violations(entries: list, ledger) -> list[str]:
+    """"The value is not readable with the tools this system has" is a CLAIM, and it is
+    held to the standard every other claim is held to.
+
+    WHY IT EXISTS. Q217 and Q329 of the v1.4.3 smoke run both ended with a senior having
+    correctly located the artifact and correctly stated that the value lives only in
+    image pixels - the official hints for both say to decode the base64 and LOOK at the
+    image. SH treated each as a scope problem and spent the remaining seniors searching
+    feeds a senior had already shown could not hold it. Roughly half of each question's
+    budget went on hunting after the hunt was provably over.
+
+    WHY IT IS NOT A NEW ESCAPE HATCH. SH grades R4 PASS on the turn it wants to answer,
+    every time, across three runs and six seniors - a cheap exit would be taken early and
+    often, and "unanswerable" is the most attractive exit ever offered to it because
+    nothing can contradict it. So there is no new route and no new trust: this is an
+    ANSWER whose value happens to be a capability verdict, and it must rest on a
+    load-bearing premise that a SENIOR verified with a quote from output it actually
+    received, and that SH then stamped true. SH cannot verify premises. It therefore
+    cannot reach this conclusion by asserting it - only by having sent someone to find
+    the artifact and come back with the wall in a quote.
+
+    The question still scores zero. Nothing here buys points; it buys the seniors that
+    would have been spent proving a negative twice more, and a run record that separates
+    "could not hunt" from "could not read".
+    """
+    out = []
+    for e in entries:
+        if e.route != "ANSWER" or e.value_kind.strip().lower() != UNANSWERABLE:
+            continue
+        cited = [ledger.premises[i] for i in e.answer_premise_ids
+                 if i in ledger.premises]
+        proof = [p for p in cited
+                 if p.load_bearing and p.status == "VERIFIED"
+                 and p.stamp == "true" and p.verified_by
+                 and p.verified_by != "sh" and not is_validator(p.verified_by)]
+        if not proof:
+            out.append(
+                "an ANSWER of kind `not_answerable` is a claim like any other and needs "
+                "the same proof: cite in `answer_premise_ids` a load-bearing premise, "
+                "VERIFIED BY A SENIOR against a quote from a result it ran and stamped "
+                "true by you, saying where the value is and what about it cannot be "
+                "read. You verify nothing yourself, so if no senior has come back with "
+                "that wall in a quote, you have not established it - send one.")
+        if e.value.strip() != UNANSWERABLE_VALUE:
+            out.append(
+                f"an ANSWER of kind `not_answerable` carries `value` = "
+                f"{UNANSWERABLE_VALUE} and nothing else - any other value is a guess, "
+                "and a guess is what this route exists to avoid submitting.")
+        if len(e.justification.strip()) < 40:
+            out.append(
+                "`not_answerable` needs a justification naming the exact artifact that "
+                "holds the value and the capability that is missing to read it - one "
+                "line, so the run record says which wall this was.")
+    return out
+
+
 def open_question_violations(entries: list[SeniorDirective], ledger) -> list[str]:
     """SH answers every OPEN question, by id. The entry that owes the answers is the
     route addressed to that senior, or the ANSWER built on its report."""
@@ -440,6 +528,18 @@ def open_question_violations(entries: list[SeniorDirective], ledger) -> list[str
             out.append(f"{sid} is waiting on {', '.join(missing)} - answer each by id "
                        "in open_question_answers")
     return out
+
+
+def stamp_is_false(s) -> bool:
+    """A stamp fires the mechanism when EITHER question fails.
+
+    `establishes` false means the citation does not support the claim. `claim_holds`
+    false means the claim is wrong even though the citation is clean. Both are SH
+    saying the senior's ground will not carry an answer, so both retire it and both
+    spawn a validator. Keeping them separate in the schema and joined here is the
+    point: the ledger records which question failed, the machinery does not care.
+    """
+    return s.establishes is False or s.claim_holds is False
 
 
 def stamp_violations(entries: list, ledger) -> list[str]:
@@ -466,6 +566,10 @@ def stamp_violations(entries: list, ledger) -> list[str]:
             elif not s.reason.strip():
                 out.append(f"stamp on {s.id} gives no reason - say what the quote shows, "
                            "and why that does or does not establish the claim as written")
+            elif not s.holds_reason.strip():
+                out.append(f"stamp on {s.id} answers `establishes` but gives no "
+                           "`holds_reason` - name the strongest rival reading of the "
+                           "question this claim rules out, and what rules it out")
             else:
                 stamped.add(s.id)
     addressed = {(e.source_senior if e.route == "ANSWER" else e.senior_id)
@@ -492,7 +596,7 @@ def nomination_violations(entries: list, ledger) -> list[str]:
     out = []
     for e in entries:
         sid = e.source_senior if e.route == "ANSWER" else e.senior_id
-        false_here = [s.id for s in e.premise_stamps if s.establishes is False]
+        false_here = [s.id for s in e.premise_stamps if stamp_is_false(s)]
         pid = e.nominate_premise_id.strip()
         if not false_here:
             if pid:
@@ -547,7 +651,7 @@ def r4_ceiling(sid: str, entry, ledger) -> str:
            for p in ledger.premises.values()
            if p.author == sid or p.verified_by == sid):
         return "FAIL"
-    if any(s.establishes is False for s in entry.premise_stamps):
+    if any(stamp_is_false(s) for s in entry.premise_stamps):
         return "WEAK"
     if any(p.load_bearing and p.status == "UNVERIFIED"
            for p in ledger.premises.values() if p.author == sid):
