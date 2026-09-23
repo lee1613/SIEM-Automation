@@ -19,12 +19,14 @@ holds. A doubt that fits none of the five is a CLARIFY, not a critic.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Literal
 
 from premise import PremiseDraft, is_validator
 from pydantic import BaseModel, Field, model_validator
-from question_state import MAX_EXPLORATIONS, QuestionState
+from question_state import MAX_EXPLORATIONS, MAX_RECALLS, QuestionState
+from sh_memory import RECALL_WHAT
 
 GRADES = ("PASS", "WEAK", "FAIL")
 NA = "NA"
@@ -37,7 +39,7 @@ BASES = (
     "violates_question_constraint",  # e.g. "using Splunk commands only"
 )
 
-ROUTES = ("SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER")
+ROUTES = ("SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER", "RECALL")
 # hunter/content were pruned on 2026-09-18 smoke evidence: SH's per-round directives
 # already carry both rules. metrics stays — SH cannot enforce it mid-round.
 TECHNIQUES = ("metrics",)
@@ -127,7 +129,8 @@ class PremiseStamp(BaseModel):
 class SeniorDirective(BaseModel):
     """One graded route aimed at one senior (or, for SPAWN/ANSWER, at the question)."""
 
-    senior_id: str = Field(description="The senior this route addresses. Empty for SPAWN and ANSWER.")
+    senior_id: str = Field(description="The senior this route addresses. Empty for SPAWN, "
+                                       "ANSWER and RECALL.")
     r1_scope_alignment: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
         description="Did this round contribute anything toward identifying an entity the "
                     "answer depends on — a host, account, process, file, feed or field? "
@@ -155,8 +158,10 @@ class SeniorDirective(BaseModel):
                     "id and your answer. Answer from the case, the question text and "
                     "sibling reports; if you cannot, say what would settle it - that is "
                     "still an answer. Empty only when it has asked nothing.")
-    route: Literal["SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER"] = Field(
-        description="Exactly one route for this senior this wave.")
+    route: Literal["SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER",
+                   "RECALL"] = Field(
+        description="Exactly one route for this senior this wave. RECALL addresses no "
+                    "senior: it reads a past question from memory (B7).")
 
     # COMMAND
     decision: Literal["continue", "retry", ""] = Field(
@@ -215,6 +220,13 @@ class SeniorDirective(BaseModel):
         description="SPAWN. Entities the retired senior ESTABLISHED - a host, account, "
                     "file, window - that carry forward. Dropping a proven entity because "
                     "it was found in another feed is how a stuck question is lost.")
+
+    # RECALL
+    recall_qid: str = Field(
+        description="RECALL only. The earlier question to read, e.g. 'Q217'. Empty otherwise.")
+    recall_what: str = Field(
+        description="RECALL only. 'summary', 'conversation', 'ledger', or "
+                    "'report:<sid>:<round>' (e.g. 'report:s2:3'). Empty otherwise.")
 
     # ANSWER
     value: str = Field(description="ANSWER only. The bare value, exactly as the scoreboard wants it.")
@@ -290,6 +302,12 @@ class SeniorDirective(BaseModel):
         elif r == "RETIRE":
             if not self.reason.strip():
                 raise ValueError("RETIRE needs a reason")
+        elif r == "RECALL":
+            if not re.fullmatch(r"Q\d+", self.recall_qid.strip().upper()):
+                raise ValueError("RECALL needs recall_qid, a question id like 'Q217'")
+            if not RECALL_WHAT.match(self.recall_what.strip()):
+                raise ValueError("RECALL recall_what must be 'summary', 'conversation', "
+                                 "'ledger' or 'report:<sid>:<round>'")
         elif r == "ANSWER":
             if not self.value.strip():
                 raise ValueError("ANSWER needs a value")
@@ -786,3 +804,14 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
                                        "reply clears this block) or COMMAND one more round "
                                        "before answering from it"))
     return out
+
+
+def recall_violations(entries: list[SeniorDirective], state: QuestionState) -> list[str]:
+    """B7: a question gets at most MAX_RECALLS turns that read from memory. A RECALL
+    costs no turn, so without a cap it is a free loop."""
+    if not any(e.route == "RECALL" for e in entries):
+        return []
+    if state.recalls_used >= MAX_RECALLS:
+        return [f"this question has used its {MAX_RECALLS} RECALL turns - work from the "
+                "memory index and what you already recalled"]
+    return []

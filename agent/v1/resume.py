@@ -65,10 +65,14 @@ def clear(run_dir: str, qid: str) -> None:
     shutil.rmtree(snapshot_dir(run_dir, qid), ignore_errors=True)
 
 
-def save_history(run_dir: str, history: list) -> None:
-    """SH's cross-question memory, so a resumed process replays the same window."""
-    _write(os.path.join(run_dir, "sh_history.pkl"), list(history))
+def save_history(run_dir: str, history: dict) -> None:
+    """SH's cross-question memory, {qid: [messages]}, so a resumed process renders
+    the same memory (v1.4.5)."""
+    _write(os.path.join(run_dir, "sh_history.pkl"), dict(history))
 
 
-def load_history(run_dir: str) -> list:
-    return _read(os.path.join(run_dir, "sh_history.pkl")) or []
+def load_history(run_dir: str) -> dict:
+    """An old flat message list (before v1.4.5) loads as one unnamed segment: it has
+    no summary, so it is the first thing the memory swap drops."""
+    got = _read(os.path.join(run_dir, "sh_history.pkl")) or {}
+    return {"": list(got)} if isinstance(got, list) else got

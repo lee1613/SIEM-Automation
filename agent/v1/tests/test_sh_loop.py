@@ -23,7 +23,7 @@ BLANK = {
     "clarify_reason": "", "questions": [],
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
-    "deviation": "", "inherited_entities": "",
+    "deviation": "", "inherited_entities": "", "recall_qid": "", "recall_what": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
     "case_updates": [],
 }
@@ -432,30 +432,23 @@ def test_sh_is_told_about_a_transport_failed_round(tmp_path):
 
 
 def test_sh_remembers_earlier_questions_through_history(tmp_path):
-    # I4
-    history = []
+    # I4, v1.4.5: history is kept per question, so a swap removes exactly one.
+    history = {}
     _run(_LLM([_turn(_spawn()), _turn(_answer())]), _Pool(), tmp_path, history=history)
-    after_first = len(history)
-    assert after_first > 0
-    assert not any(type(m).__name__ == "SystemMessage" for m in history)
+    assert list(history) == ["Q216"] and history["Q216"]
+    assert not any(type(m).__name__ == "SystemMessage" for m in history["Q216"])
 
     llm2 = _LLM([_turn(_spawn()), _turn(_answer())])
     _run(llm2, _Pool(), tmp_path, qid="Q217", history=history)
     assert any("Q216" in str(m.content) for m in llm2.seen[0]), \
         "question 2's first SH call sees question 1"
-    assert len(history) > after_first
+    assert list(history) == ["Q216", "Q217"]
 
 
 def test_no_history_means_a_fresh_thread_per_question(tmp_path):
     llm = _LLM([_turn(_spawn()), _turn(_answer())])
     _run(llm, _Pool(), tmp_path)
     assert len(llm.seen[0]) == 2          # system prompt + opening only
-
-
-def test_the_history_window_mirrors_the_orchestrator():
-    import orchestrator
-    import sh_loop
-    assert sh_loop.MAX_HISTORY_MSGS == orchestrator.MAX_HISTORY_MSGS
 
 
 def test_a_malformed_sh_turn_is_fed_back_not_fatal(tmp_path):

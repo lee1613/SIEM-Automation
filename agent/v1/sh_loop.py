@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
 import resume
+import sh_memory
 from case_file import parse_case_updates
 from conversation import (
     at_step,
@@ -33,6 +34,7 @@ from conversation import (
     nomination_violations,
     open_question_violations,
     premise_audit_violations,
+    recall_violations,
     spawn_overlap_violations,
     stamp_is_false,
     stamp_violations,
@@ -46,7 +48,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from premise import PremiseLedger
 from pydantic import ValidationError
-from question_state import ROUND_ITERS, QuestionState
+from question_state import MAX_RECALLS, ROUND_ITERS, QuestionState
 from senior_report import REPORT_WORD_CAP
 from senior_session import SeniorSession
 from usage_tracker import context_window
@@ -64,15 +66,6 @@ MAX_PARALLEL = 6          # matches SplunkConnectionPool's default size
 # had deliberately declined (Q217, test_20260918_113209: `pwned.jpg`). The honest
 # record is that no answer was given; end_reason says why.
 NO_ANSWER = "SH retired without answering"
-# ponytail: mirrors orchestrator.MAX_HISTORY_MSGS/_window rather than importing them —
-# importing orchestrator drags the whole v1.3.0 compiler pipeline (~8s) into this loop.
-# test_the_history_window_mirrors_the_orchestrator keeps the two from drifting.
-MAX_HISTORY_MSGS = 24
-
-
-def _window(messages) -> list:
-    """Bounded cross-question history, same rule as orchestrator._window."""
-    return list(messages)[-MAX_HISTORY_MSGS:]
 
 SH_SYSTEM_PROMPT = f"""SITUATION. Frothly Corporation is a high-growth craft brewery. Its IT environment consists of corporate Windows and Linux endpoints, standard network infrastructure, and public cloud infrastructure on Amazon Web Services and Microsoft Azure. Management suspects a major, coordinated compromise is actively underway across both on-premises assets and cloud instances. The investigation traces malicious activity from initial access to data exfiltration, and builds its timeline entirely from factual evidence, with zero structural assumptions.
 
@@ -94,7 +87,7 @@ A1. Read the question's own words and fix, for yourself, the three things it bin
       · the ACT it asks about — what must actually have happened in the records;
       · the MEASURE — the unit and the span its wording gives, not a convention you or a senior remembers.
     Most lost questions are lost here, by answering about a neighbouring entity or measuring the wrong span.
-A2. Check your cross-question memory. Entities from earlier questions in this run — hosts, IPs, users, buckets, windows, feeds — carry forward, and must be spelled out inside every directive and spawn you write. Seniors share no memory with you or with each other.
+A2. Check your cross-question memory: the MEMORY INDEX (one card per earlier question — the question, the answer submitted, how it was reached), the KNOWLEDGE block, and any earlier transcripts still in context. Entities from earlier questions in this run — hosts, IPs, users, buckets, windows, feeds — carry forward, and must be spelled out inside every directive and spawn you write. Seniors share no memory with you or with each other; what an earlier question established reaches them only through you (B7).
 A3. Name the scope: which sourcetypes and sources can hold the ACT. If the question names a feed, that is where the MEASUREMENT is taken, even when the entity is recognised elsewhere.
 A4. Go to STAGE B.
 
@@ -109,6 +102,7 @@ B5. PARALLEL SENIORS are allowed only when all three hold:
       (c) `reason` states that suspicion and why it is worth a slot now.
     If you cannot state all three, spawn one at a time.
 B6. `spawn_type: exploration` is the one-shot scout for when you genuinely cannot name a scope. It costs no senior slot, is capped at one per question, and is not a substitute for doing A3.
+B7. RECALL BEFORE YOU PLAN. Read the memory index. If a past question shares this question's entities, feed or artifact, RECALL its summary (`route: RECALL`, `recall_qid`, `recall_what: summary`); RECALL its `conversation`, `ledger` or a `report:<sid>:<round>` only when the summary leaves out what you need. A turn made ONLY of RECALL entries costs no turn, and a wave waiting to be read waits for your next turn. At most 2 RECALL turns per question.
 
 ──── STAGE C — A WAVE COMES BACK. THIS IS THE STEP DONE WRONG MOST OFTEN. ────
 Do C1 through C8 IN THIS ORDER, inside the single turn you emit.
@@ -229,6 +223,7 @@ REFERENCE: THE GATES. A turn breaking one is rejected, and you do not get the tu
   * R4 ceiling: PASS is refused while that senior has a load-bearing UNVERIFIED premise or a stamp of yours reads false; a REFUTED one forces FAIL.
   * Nomination: a turn carrying a false stamp names exactly one premise in `nominate_premise_id` (C4).
   * Deviation: a SPAWN made while a load-bearing premise is REFUTED is rejected without a `deviation` (E3).
+  * Recall: a third RECALL turn on one question is rejected (B7).
 
 NEVER INVENT DATASET FACTS. A critic must rest on something you actually hold: the report itself, the case file, a sibling report, the expected shape, or the question's own wording."""
 
@@ -424,7 +419,8 @@ def _render_turn(turn) -> str:
     """
     rows = [f"Reading: {turn.reading}"]
     for e in turn.entries:
-        target = e.senior_id or (e.source_senior if e.route == "ANSWER" else "(new)")
+        target = e.senior_id or {"ANSWER": e.source_senior,
+                                  "RECALL": "(memory)"}.get(e.route, "(new)")
         head = (f"[{e.route}] {target}  "
                 f"R1={e.r1_scope_alignment} R2={e.r2_progress} R3={e.r3_answer_readiness} "
                 f"R4={e.r4_premise_verification}")
@@ -435,6 +431,7 @@ def _render_turn(turn) -> str:
             "CRITIC":  lambda: f"{e.basis}: {e.flaw} -> {e.fix_directive}",
             "CLARIFY": lambda: f"{e.clarify_reason}: " + " | ".join(e.questions),
             "ANSWER":  lambda: f"{e.value} ({e.value_kind}) — {e.justification}",
+            "RECALL":  lambda: f"{e.recall_qid} {e.recall_what}",
         }[e.route]()
         rows.append(head + "\n    " + detail)
         rows += [f"    answered {a.id}: {a.answer}"
@@ -583,7 +580,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                  run_dir: str, case_file=None, dataset_briefing: str = "",
                  delegations: list | None = None, max_parallel: int = MAX_PARALLEL,
                  senior_window: int | None = None, hitl: bool = True,
-                 history: list | None = None) -> dict:
+                 history: dict | None = None,
+                 memory_threshold: int = sh_memory.MEMORY_THRESHOLD) -> dict:
     """Run one question as a bounded SH <-> Senior conversation.
 
     Ends exactly three ways (§4.2): a grounded ANSWER whose source report is not
@@ -591,8 +589,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     the answer falls back to the best candidate across every report this question
     produced.
 
-    `history` is SH's cross-question memory: a windowed copy is replayed before the
-    opening, and this question's non-system messages are appended to it in place.
+    `history` is SH's cross-question memory, {qid: [messages]} in question order. It
+    is rendered with the per-question summaries (sh_memory.render_memory) and fitted
+    under `memory_threshold`; this question's non-system messages are added to it
+    under its qid, in place.
     """
     state = QuestionState(points=points)
     ledger = PremiseLedger()
@@ -613,15 +613,15 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     msgs = [SystemMessage(content=SH_SYSTEM_PROMPT)]
     if dataset_briefing:
         msgs.append(SystemMessage(content=dataset_briefing))
+    # The case file changes between questions, so it goes AFTER the memory: anything
+    # placed before the memory that changes stops the prompt cache from covering it.
+    case = []
     if case_file is not None:
         digest = case_file.render_digest()
         if digest.strip():
-            msgs.append(SystemMessage(content=(
+            case.append(SystemMessage(content=(
                 "CASE FILE (known incident state — verified [OK], hypothesis [?], "
                 "refuted [X]; re-verify [?]/[X] before relying on them):\n" + digest)))
-    # Cross-question memory: SH_SYSTEM_PROMPT promises SH remembers earlier questions.
-    msgs += _window(history or [])
-    start = len(msgs)
     d0 = len(delegations)
 
     answer, end_reason, ungrounded = "", "", 0
@@ -629,10 +629,19 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     unread_clarify = False       # a reply SH has not had a turn to read yet
 
     snap = resume.load(run_dir, qid)
+    opening = snap["msgs"] if snap else [HumanMessage(content=render_opening(
+        qid=qid, question=question, guidance=guidance, points=points,
+        budget=state.budget))]
+    # Cross-question memory (v1.4.5): cards, knowledge, and earlier questions raw or
+    # summarized, fitted under the threshold with this question counted in.
+    msgs += sh_memory.render_memory(run_dir, history or {}, qid=qid, base=msgs,
+                                    current=case + opening, threshold=memory_threshold)
+    msgs += case
+    start = len(msgs)
+    msgs += opening
     if snap:
         # Resume at the last turn boundary. The system messages above are the
         # current code's; only the conversation and the state come from disk.
-        msgs += snap["msgs"]
         delegations.extend(snap["delegations"])
         (state, ledger, validators, kinds, subqs, unread, all_reports, grades,
          counter, clarify_text, unread_clarify, ungrounded) = (
@@ -645,10 +654,6 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         state.transport_failures = 0
         print(f"↩ resuming {qid} from turn {state.turns_used}")
         log.note(f"resumed from the turn-{state.turns_used} snapshot")
-    else:
-        msgs.append(HumanMessage(content=render_opening(
-            qid=qid, question=question, guidance=guidance, points=points,
-            budget=state.budget)))
 
     while True:
         # Every turn boundary is a consistent state: the last turn and its wave are
@@ -688,6 +693,20 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
             break
         state.record_turn()
         msgs.append(AIMessage(content=_render_turn(turn)))
+
+        # A turn made only of RECALLs reads memory and decides nothing, so it costs no
+        # turn and skips the routing gates: a wave SH has not routed yet waits for the
+        # next turn, where those gates apply as usual (v1.4.5 B7).
+        if turn.entries and all(e.route == "RECALL" for e in turn.entries):
+            problems = at_step("B7", recall_violations(turn.entries, state))
+            if problems:
+                log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
+                msgs.append(HumanMessage(content=render_rejection(problems)))
+                continue
+            state.refund_turn()
+            msgs.append(HumanMessage(content=_serve_recalls(turn.entries, run_dir,
+                                                            state, qid, log)))
+            continue
 
         # Grades apply to the reports this turn just read, and are recorded BEFORE the
         # gates run so anti-thrash sees the report SH is reading now. Exploration
@@ -753,7 +772,8 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         ) + at_step("C4", nomination_violations(turn.entries, ledger)
         ) + at_step("C6", grade_ceiling_violations(turn.entries, ledger)
         ) + at_step("F2", ledger_violations(turn.entries, ledger, state)
-        ) + at_step("G2–G3", unanswerable_violations(turn.entries, ledger))
+        ) + at_step("G2–G3", unanswerable_violations(turn.entries, ledger)
+        ) + at_step("B7", recall_violations(turn.entries, state))
         # A refused update is not a gate violation, so without this SH is told
         # nothing and re-sends the same malformed update until the turns run out,
         # blocked each time by an ANSWER gate naming a premise it believes settled.
@@ -809,7 +829,12 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
         unread_clarify = False
         pending, clarified = {}, []
+        # A mixed turn counts as a turn; SH reads the recalled files beside the wave.
+        recalls = [e for e in turn.entries if e.route == "RECALL"]
+        recalled = [_serve_recalls(recalls, run_dir, state, qid, log)] if recalls else []
         for i, e in enumerate(turn.entries):
+            if e.route == "RECALL":
+                continue
             log.sh_to_senior(e.senior_id, e.route, body=_entry_body(e))
 
             if e.route == "SPAWN":
@@ -901,8 +926,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
 
         if end_reason:
             break
-        if clarified:
-            msgs.append(HumanMessage(content="CLARIFY REPLIES\n" + "\n\n".join(clarified)))
+        if clarified or recalled:
+            replies = ["CLARIFY REPLIES\n" + "\n\n".join(clarified)] if clarified else []
+            msgs.append(HumanMessage(content="\n\n".join(replies + recalled)))
             unread_clarify = True   # SH gets the turn to read them, budget or not
         if not pending:
             continue
@@ -1006,7 +1032,10 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         log.note(f"question ended: {end_reason} — no ANSWER from SH; submitting {answer!r}")
 
     if history is not None:
-        history.extend(m for m in msgs[start:] if not isinstance(m, SystemMessage))
+        # Under this question's own key, so a later swap replaces exactly one question.
+        # A hint re-run of the same question extends the same entry.
+        history.setdefault(qid, []).extend(
+            m for m in msgs[start:] if not isinstance(m, SystemMessage))
 
     # End of question: sweep every survivor into a handoff (§7).
     for sid, sess in sessions.items():
@@ -1028,6 +1057,20 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         "delegations": delegations,
         "ledger": ledger,
     }
+
+
+def _serve_recalls(entries: list, run_dir: str, state, qid: str, log) -> str:
+    """One RECALL turn: every file it names, each capped at 8K tokens (B7)."""
+    state.recalls_used += 1
+    out = []
+    for e in entries:
+        text = sh_memory.recall(run_dir, e.recall_qid, e.recall_what)
+        sh_memory.log(run_dir, f"[SH MEMORY] {qid} RECALL {e.recall_qid} {e.recall_what} "
+                               f"→ {sh_memory.count_tokens(text):,} tok (recall "
+                               f"{state.recalls_used} of {MAX_RECALLS})")
+        log.note(f"RECALL {e.recall_qid} {e.recall_what}")
+        out.append(text)
+    return "\n\n".join(out)
 
 
 def _export_threads(pool, sessions: dict, state) -> dict:

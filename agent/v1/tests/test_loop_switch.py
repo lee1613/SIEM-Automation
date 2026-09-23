@@ -95,7 +95,7 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
         clarify_reason="", questions=[],
         constraints={"sourcetypes": [], "sources": [], "fields": []},
         technique="", spawn_type="", subquestion="", reason="",
-        deviation="", inherited_entities="",
+        deviation="", inherited_entities="", recall_qid="", recall_what="",
         value="42", value_kind="count", source_senior="s1", justification="",
         case_updates=[],
     )
@@ -113,8 +113,8 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
 def test_sh_history_is_created_once_before_the_question_loop():
     before_loop, loop_body = SRC.split("for q in selected:", 1)
     # Seeded from disk (v1.4.4), so a resumed process replays the same window.
-    assert "sh_history: list = resume.load_history(logger.run_dir)" in before_loop
-    assert "sh_history = []" not in loop_body and "sh_history: list = []" not in loop_body
+    assert "sh_history: dict = resume.load_history(logger.run_dir)" in before_loop
+    assert "sh_history = {}" not in loop_body and "sh_history: dict = {}" not in loop_body
 
 
 def test_history_is_threaded_through_every_conversational_call():

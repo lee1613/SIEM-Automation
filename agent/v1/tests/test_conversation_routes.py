@@ -30,7 +30,7 @@ BLANK = {
     "clarify_reason": "", "questions": [],
     "constraints": {"sourcetypes": [], "sources": [], "fields": []},
     "technique": "", "spawn_type": "", "subquestion": "", "reason": "",
-    "deviation": "", "inherited_entities": "",
+    "deviation": "", "inherited_entities": "", "recall_qid": "", "recall_what": "",
     "value": "", "value_kind": "", "source_senior": "", "justification": "",
     "case_updates": [],
 }
@@ -98,7 +98,7 @@ def test_routes_and_techniques_tuples_match_the_literals():
               rationale="x", basis=BASES[0], flaw="f", why_it_fails="w", fix_directive="d",
               clarify_reason="unclear", questions=["q"], spawn_type="senior",
               technique="metrics", subquestion="s", value="v", source_senior="s1",
-              justification="j")
+              justification="j", recall_qid="Q216", recall_what="summary")
     for t in TECHNIQUES:
         e = entry(route="SPAWN", spawn_type="senior", technique=t,
                   subquestion="s", reason="r")

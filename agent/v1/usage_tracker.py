@@ -252,7 +252,9 @@ class UsageTracker(BaseCallbackHandler):
             # this precedence check every Senior LLM call gets billed to SH.
             is_senior  = "senior" in tags
             is_explore = "exploration" in tags and not is_senior
-            is_sh      = "SH" in tags and not (is_senior or is_explore)
+            # v1.4.5's summarizer (sh_memory), tagged "memory"; runs after the question.
+            is_memory  = "memory" in tags and not (is_senior or is_explore)
+            is_sh      = "SH" in tags and not (is_senior or is_explore or is_memory)
 
             if is_sh:
                 self._sh_cum["input_tokens"]  += inp
@@ -266,6 +268,7 @@ class UsageTracker(BaseCallbackHandler):
             # calls and would otherwise bill the whole agent to SH.
             role = ("senior" if is_senior else
                     "exploration" if is_explore else
+                    "memory" if is_memory else
                     "sh" if is_sh else "other")
             qid  = next((tg for tg in tags if isinstance(tg, str) and tg.startswith("Q")), "")
             # `sid:s2` is set by SplunkWorkerPool._run / .clarify. SH has none - it is

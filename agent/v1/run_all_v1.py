@@ -42,6 +42,7 @@ for p in (AGENT_DIR, SCRIPT_DIR):
         sys.path.insert(0, p)
 
 import resume
+import sh_memory
 from agent_logger import RunLogger
 from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
 from conversation import UNANSWERABLE_VALUE
@@ -53,7 +54,7 @@ from hitl import RunPaused
 from local_scoreboard import LocalScoreboard
 from orchestrator import DelegationContext, build_sh_agent_compiler, run_sh
 from premise import dump_ledgers, dump_question_ledger
-from sh_loop import run_question
+from sh_loop import NO_ANSWER, run_question
 from splunk_pool import SplunkConnectionPool
 from splunk_subagent import SplunkWorkerPool
 from usage_tracker import UsageTracker
@@ -222,6 +223,15 @@ def seed_resume_results(prior: dict, questions_dir: str) -> list:
     return prior.get("results", [])
 
 
+def memory_answer(clean: str, sh_answer: str) -> str:
+    """What the memory card says was submitted: the value, or why there was none."""
+    if clean:
+        return clean
+    if sh_answer.strip() == UNANSWERABLE_VALUE:
+        return UNANSWERABLE_VALUE
+    return "NO_ANSWER" if sh_answer.strip() in ("", NO_ANSWER) else "NO_ANSWER (unshaped)"
+
+
 def main():
     force_utf8_stdio()
 
@@ -250,6 +260,10 @@ def main():
                         help="conversational: the v1.4 SH<->Senior conversation "
                              "(default on this branch). compiler: the v1.3.0 "
                              "planner/executor/joiner loop, kept for A/B.")
+    parser.add_argument("--memory-threshold", type=int, default=sh_memory.MEMORY_THRESHOLD,
+                        help="SH prompt tokens above which the oldest past questions are "
+                             "swapped for their summaries (default: 60%% of 272K). Set low "
+                             "on a smoke run so the swap fires within 5 questions.")
     args = parser.parse_args()
 
     senior_model    = args.senior_model or SENIOR_MODEL
@@ -354,12 +368,17 @@ def main():
     except (OSError, ValueError) as exc:
         print(f"[SH] dataset briefing unavailable ({exc}) — running without it")
         briefing = ""
-    # SH's cross-question memory for the conversational loop (mirrors the
-    # compiler graph's SQLite-checkpointed thread, kept as a plain message list
-    # here because run_question owns its own per-question message history).
-    # Persisted per question (resume.py), so a resumed process replays the same
-    # window SH had, not an empty one.
-    sh_history: list = resume.load_history(logger.run_dir)
+    # SH's cross-question memory for the conversational loop: {qid: [messages]},
+    # rendered each question with the per-question summaries (sh_memory, v1.4.5).
+    # Persisted per question (resume.py), so a resumed process renders the same
+    # memory SH had, not an empty one.
+    sh_history: dict = resume.load_history(logger.run_dir)
+    # The summarizer: one call per finished question, costed under role `memory`.
+    memory_llm = ChatOpenAI(
+        api_key=OPENAI_API_KEY, model=sh_memory.SUMMARIZER_MODEL,
+        max_completion_tokens=4096, temperature=0, timeout=120.0, max_retries=3,
+        http_client=resilient_http_client(),
+    ).with_structured_output(sh_memory.Digest, method="json_schema", strict=True)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
@@ -472,6 +491,7 @@ def main():
                     guidance=guidance, points=points, run_dir=logger.run_dir,
                     case_file=case_file, dataset_briefing=briefing,
                     delegations=ctx.q_delegations, history=sh_history,
+                    memory_threshold=args.memory_threshold,
                 )
                 ledgers[qid] = conv["ledger"]
                 sh_answer = conv["answer"]
@@ -569,6 +589,7 @@ def main():
                                 run_dir=os.path.join(logger.run_dir, "hint"),
                                 case_file=case_file, dataset_briefing=briefing,
                                 delegations=ctx.q_delegations, history=sh_history,
+                                memory_threshold=args.memory_threshold,
                             )
                         ledgers[f"{qid}-hint"] = hint_result["ledger"]
                         stage_ms["hint"] = t_hint.ms
@@ -663,6 +684,18 @@ def main():
         })
         with open(os.path.join(questions_dir, f"{qid}.json"), "w", encoding="utf-8") as f:
             json.dump(results[-1], f, indent=2, ensure_ascii=False)
+
+        # ── SH memory: summarize this question once, before its metrics row, so the
+        # summarizer's cost lands in this question's cost_by_role.memory. It is given
+        # what SH saw and what SH submitted - never `correct` or the verdict (D3).
+        if args.loop == "conversational" and qid in sh_history:
+            sh_memory.summarize_question(
+                memory_llm.with_config({"callbacks": [tracker], "tags": ["memory", qid],
+                                        "metadata": {"role": "memory", "qid": qid},
+                                        "run_name": f"memory-{qid}"}),
+                run_dir=logger.run_dir, qid=qid, question=qtext, guidance=guidance,
+                answer=memory_answer(clean, sh_answer),
+                transcript=sh_history[qid], ledger=ledgers.get(qid))
 
         # ── Events + per-question metrics row ─────────────────────────────────────
         verdict_str = "correct" if sb_correct else "wrong"

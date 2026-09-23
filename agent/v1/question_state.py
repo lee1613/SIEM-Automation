@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 ROUND_ITERS = 10         # iterations per senior round (v1.4.2: was 12 — a shorter
                          # round returns to SH more often, so a wrong path is caught sooner)
 MAX_EXPLORATIONS = 1     # §2.3 — a second scout means the first failed
+MAX_RECALLS = 2          # v1.4.5 — turns per question that read from SH's memory
 
 # base_points -> budget. Read with tier_budget(); the floors are 1000/500/else.
 # sh_turns = seniors * (rounds + 1) + 1: enough for every senior to run all its
@@ -59,6 +60,7 @@ class QuestionState:
     retired: set = field(default_factory=set)
     capped: dict = field(default_factory=dict)       # sid -> last round ran out of iterations
     transport_failures: int = 0                      # api_failed with no operator reachable
+    recalls_used: int = 0                            # v1.4.5 RECALL turns on this question
 
     def __post_init__(self) -> None:
         self.budget = tier_budget(self.points)
@@ -82,6 +84,10 @@ class QuestionState:
 
     def record_turn(self) -> None:
         self.turns_used += 1
+
+    def refund_turn(self) -> None:
+        """A turn made only of RECALLs reads memory and decides nothing (v1.4.5)."""
+        self.turns_used = max(0, self.turns_used - 1)
 
     def exhausted(self) -> str:
         """'' while the question can continue; else which budget ran out."""
