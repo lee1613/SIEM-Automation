@@ -43,6 +43,22 @@ ROUTES = ("SPAWN", "RETIRE", "COMMAND", "CRITIC", "CLARIFY", "ANSWER")
 TECHNIQUES = ("metrics",)
 
 
+def with_step(step: str, msg: str) -> str:
+    """One rejection line, pointing back to the SOP step it enforces.
+
+    SH's prompt is a numbered procedure (STAGE A-G, REFERENCE). A rejection that only
+    says what went wrong leaves SH to find which instruction it broke; naming the step
+    makes the fix a lookup. The step's text is NOT repeated - it is already in the system
+    prompt at the head of every call - only the live reason and the pointer.
+    """
+    return f"[{step}] {msg} → re-read {step}."
+
+
+def at_step(step: str, msgs: list[str]) -> list[str]:
+    """Tag every line a single-step gate emitted."""
+    return [with_step(step, m) for m in msgs]
+
+
 class Scope(BaseModel):
     """A domain constraint. Empty lists mean 'unset' — strict schemas have no null."""
 
@@ -69,13 +85,11 @@ class PremiseStamp(BaseModel):
 
     TWO QUESTIONS, and they are not the same one asked twice. `establishes` is
     VALIDITY: does the offered quote support this claim as written, judged on the
-    claim's own words. `claim_holds` is SOUNDNESS: is the claim itself right about
-    the question being answered. An argument can be valid and still unsound, and
-    that is not a hypothetical here - Q216's selection premise ("the endpoint is
-    192.168.70.186 because it alone holds the sole pool-port flow") was cited with
-    genuine, verbatim, correctly-read rows and was false, because the endpoint the
-    question meant sat in the very same result set. Asking only `establishes` passed
-    it five times over. Only `claim_holds` can catch it.
+    claim's own words. `claim_holds` is SOUNDNESS: is the claim itself right about the
+    question being answered. A claim can be cited from genuine rows, read correctly,
+    and still be about the wrong entity - when another entity in the same result set
+    fits the question's wording better. `establishes` passes that; only
+    `claim_holds` can catch it.
     """
 
     id: str = Field(description="The premise id, e.g. 'p3'. Copy it exactly.")
@@ -691,19 +705,20 @@ def grade_violations(entries: list[SeniorDirective], *, graded: set, exploration
                e.r4_premise_verification)
         if e.senior_id in exploration:
             if any(g != NA for g in got):
-                out.append(f"{e.senior_id}: exploration workers are not graded")
+                out.append(with_step("C6", f"{e.senior_id}: exploration workers are not graded"))
             continue
         needs_grades = (e.route == "ANSWER") or (e.senior_id in graded)
         if needs_grades and any(g not in GRADES for g in got):
-            out.append(f"{e.senior_id or e.route}: all four grades required (PASS/WEAK/FAIL)")
+            out.append(with_step("C6", f"{e.senior_id or e.route}: all four grades required "
+                                   "(PASS/WEAK/FAIL)"))
     # An ANSWER ends the question and the sweep retires every survivor, so
     # rejecting it for an unrouted sibling would only burn a turn.
     if any(e.route == "ANSWER" for e in entries):
         return out
     addressed = {e.senior_id for e in entries}
     for sid in sorted(graded - exploration - addressed):
-        out.append(f"{sid}: its report was read but no route addressed it — "
-                   "grade it and give it exactly one route")
+        out.append(with_step("C8", f"{sid}: its report was read but no route "
+                                   "addressed it — grade it and give it exactly one route"))
     return out
 
 
@@ -719,43 +734,49 @@ def directive_violations(entries: list[SeniorDirective], state: QuestionState) -
     explore_spawns = sum(1 for e in entries
                          if e.route == "SPAWN" and e.spawn_type == "exploration")
     if senior_spawns > state.slots_remaining:
-        out.append(f"no free senior slot for this SPAWN — only {state.slots_remaining} "
-                   f"of {state.budget['seniors']} left")
+        out.append(with_step("B1", f"no free senior slot for this SPAWN — only "
+                                   f"{state.slots_remaining} of {state.budget['seniors']} left"))
     if senior_spawns and state.turns_remaining < 1:
-        out.append("no SH turn left to read a new senior's report — do not SPAWN")
+        out.append(with_step("B1", "no SH turn left to read a new senior's report — "
+                                   "do not SPAWN"))
     if explore_spawns > (MAX_EXPLORATIONS - state.explorations_used):
-        out.append("exploration already used on this question")
+        out.append(with_step("B6", "exploration already used on this question"))
 
     targets = Counter(e.senior_id for e in entries if e.route != "SPAWN" and e.senior_id)
     for sid, n in sorted(targets.items()):
         if n > 1:
-            out.append(f"{sid} got more than one route this turn — exactly one per senior")
+            out.append(with_step("C8", f"{sid} got more than one route this turn — "
+                                       "exactly one per senior"))
 
     for e in entries:
         if e.route == "CLARIFY" and not state.is_active(e.senior_id):
-            out.append(f"{e.senior_id} is not an active senior")
+            out.append(with_step("C7", f"{e.senior_id} is not an active senior"))
         if e.route == "RETIRE" and not state.is_active(e.senior_id):
-            out.append(f"{e.senior_id} is already retired or was never spawned — "
-                       "do not RETIRE it again")
+            out.append(with_step("C7", f"{e.senior_id} is already retired or was never "
+                                       "spawned — do not RETIRE it again"))
         if e.route in ("COMMAND", "CRITIC"):
             if not state.is_active(e.senior_id):
-                out.append(f"{e.senior_id} is not an active senior")
+                out.append(with_step("C7", f"{e.senior_id} is not an active senior — a "
+                                           "false stamp this turn retires its senior"))
             elif state.rounds_left_for(e.senior_id) <= 0:
-                out.append(f"{e.senior_id} has no rounds left — RETIRE or ANSWER")
+                out.append(with_step("D1", f"{e.senior_id} has no rounds left — RETIRE "
+                                           "or ANSWER"))
         if e.route == "COMMAND" and e.decision == "continue" \
                 and state.continue_blocked(e.senior_id):
-            out.append(f"{e.senior_id} has two consecutive R2 FAILs — "
-                       "RETIRE it or change its scope, do not continue")
+            out.append(with_step("D5", f"{e.senior_id} has two consecutive R2 FAILs — "
+                                       "RETIRE it or change its scope, do not continue"))
         if answer_blocked(e):
-            out.append("ANSWER is blocked: the source report is graded R1 = FAIL")
+            out.append(with_step("F1", "ANSWER is blocked: the source report is graded "
+                                       "R1 = FAIL"))
         # The cut-off gate (§3.5). A round that ran out of iterations stopped where
         # the budget ended, not where the work did: test_20260918_104111's s1 filed
         # a FOUND report carrying the runner's cap line and two unanswered questions
         # for SH, and SH graded it all-PASS and answered it verbatim — wrongly.
         # CLARIFY costs no round, so the cheap move is always available.
         if e.route == "ANSWER" and state.last_round_capped(e.source_senior):
-            out.append(f"ANSWER is blocked: {e.source_senior}'s last round was cut off "
-                       "at the iteration cap — CLARIFY it (costs no round; its reply "
-                       "clears this block) or COMMAND one more round before answering "
-                       "from it")
+            out.append(with_step("REFERENCE: GATES", f"ANSWER is blocked: "
+                                       f"{e.source_senior}'s last round was cut off at the "
+                                       "iteration cap — CLARIFY it (costs no round; its "
+                                       "reply clears this block) or COMMAND one more round "
+                                       "before answering from it"))
     return out

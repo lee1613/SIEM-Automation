@@ -112,7 +112,8 @@ def test_with_config_on_structured_output_runnable_still_returns_the_turn_object
 
 def test_sh_history_is_created_once_before_the_question_loop():
     before_loop, loop_body = SRC.split("for q in selected:", 1)
-    assert "sh_history: list = []" in before_loop
+    # Seeded from disk (v1.4.4), so a resumed process replays the same window.
+    assert "sh_history: list = resume.load_history(logger.run_dir)" in before_loop
     assert "sh_history = []" not in loop_body and "sh_history: list = []" not in loop_body
 
 

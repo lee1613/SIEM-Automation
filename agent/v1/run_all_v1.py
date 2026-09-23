@@ -41,6 +41,7 @@ for p in (AGENT_DIR, SCRIPT_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import resume
 from agent_logger import RunLogger
 from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings
 from conversation import UNANSWERABLE_VALUE
@@ -356,7 +357,9 @@ def main():
     # SH's cross-question memory for the conversational loop (mirrors the
     # compiler graph's SQLite-checkpointed thread, kept as a plain message list
     # here because run_question owns its own per-question message history).
-    sh_history: list = []
+    # Persisted per question (resume.py), so a resumed process replays the same
+    # window SH had, not an empty one.
+    sh_history: list = resume.load_history(logger.run_dir)
 
     run_thread = f"sh_{logger.run_name}"
     ls_project = os.environ["LANGSMITH_PROJECT"]
@@ -711,6 +714,11 @@ def main():
                     for r in results
                 ],
             }, f, indent=2, ensure_ascii=False)
+
+        # Recorded: the question is done, so its turn snapshot is not a resume point
+        # any more, and SH's memory now includes it.
+        resume.clear(logger.run_dir, qid)
+        resume.save_history(logger.run_dir, sh_history)
 
     # ── Final summary ──────────────────────────────────────────────────────────────
     correct_n  = sum(1 for r in results if r["sb_correct"])

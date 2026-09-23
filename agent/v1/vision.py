@@ -38,7 +38,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import email
+import hashlib
+import io
+import json
 import os
+import re
+from typing import NamedTuple
 
 # Priority order, as the operator specified. The first that answers is used; a NIM model
 # that is listed but not servable returns a bare 404, so "it is in models.list()" is not
@@ -76,31 +82,141 @@ def sniff_type(raw: bytes) -> str:
     return ""
 
 
-def decode_field(value: str) -> tuple[bytes, str]:
-    """Base64 in a Splunk field -> (bytes, media type). Raises ValueError with a reason.
+class Image(NamedTuple):
+    label: str        # where it came from: a filename, a MIME type, or "#n"
+    png: bytes        # re-encoded pixels only
+    size: tuple       # (width, height)
 
-    Splunk fields arrive with the line wrapping and whitespace of the original MIME
-    part, which `b64decode` rejects unless it is stripped; `validate=False` also lets the
-    stray header text that sometimes leads a raw field be skipped rather than fatal.
+
+# A base64 run shorter than this cannot hold a real image and is almost always a hash,
+# a DKIM signature or a token.
+_MIN_B64 = 200
+_B64_RUN = re.compile(r"(?:[A-Za-z0-9+/]{4}\s*){%d,}[A-Za-z0-9+/=]{0,4}" % (_MIN_B64 // 4))
+_HEX_RUN = re.compile(r"(?:[0-9a-fA-F]{2}){%d,}" % _MIN_B64)
+_DATA_URI = re.compile(r"data:image/[\w.+-]+;base64,([A-Za-z0-9+/=\s]+)")
+
+
+def pixels_only(raw: bytes) -> tuple[bytes, tuple] | None:
+    """Magic-checked, decoded and re-encoded to PNG, or None if this is not an image.
+
+    The re-encode is the guarantee the vision model sees pixels and nothing else: EXIF,
+    comments, XMP and any bytes trailing the image are dropped, because only the
+    decoded bitmap is written back out.
     """
-    cleaned = "".join((value or "").split())
-    if not cleaned:
-        raise ValueError("the field is empty - check the field name and that the search "
-                         "returned the event you meant")
+    if not raw or len(raw) > MAX_IMAGE_BYTES or not sniff_type(raw):
+        return None
+    from PIL import Image as PILImage  # lazy: Pillow is only needed when a senior looks
     try:
-        raw = base64.b64decode(cleaned, validate=False)
-    except (binascii.Error, ValueError) as exc:
-        raise ValueError(f"the field is not base64: {exc}") from None
-    if not raw:
-        raise ValueError("the field decoded to nothing")
-    if len(raw) > MAX_IMAGE_BYTES:
-        raise ValueError(f"the image is {len(raw):,} bytes, over the "
-                         f"{MAX_IMAGE_BYTES:,} limit")
-    mime = sniff_type(raw)
-    if not mime:
-        raise ValueError("the decoded bytes are not an image this can read (no JPEG, "
-                         "PNG, GIF, BMP or WEBP signature)")
-    return raw, mime
+        with PILImage.open(io.BytesIO(raw)) as im:
+            im.load()
+            out = io.BytesIO()
+            im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").save(out, "PNG")
+            return out.getvalue(), im.size
+    except Exception:                                  # noqa: BLE001 - not an image
+        return None
+
+
+def _texts(value) -> list[str]:
+    """Every string in a JSON value, plus each list of strings joined back together:
+    stream:smtp splits one RFC822 message across a list, and only the whole is MIME."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _texts(v)]
+    if isinstance(value, list):
+        # The whole message first, so an image is labelled by its MIME filename
+        # rather than by whichever chunk happened to hold its base64.
+        whole = (["".join(value)] if len(value) > 1
+                 and all(isinstance(v, str) for v in value) else [])
+        return whole + [t for v in value for t in _texts(v)]
+    return []
+
+
+def _mime_images(text: str, notes: list) -> list[tuple[str, bytes]]:
+    if "content-type:" not in text[:20000].lower():
+        return []
+    found = []
+    for part in email.message_from_string(text).walk():
+        if part.is_multipart():
+            continue
+        ctype = part.get_content_type()
+        notes.append(f"MIME part {ctype}" + (f" {part.get_filename()!r}"
+                                             if part.get_filename() else ""))
+        try:
+            body = part.get_payload(decode=True) or b""
+        except Exception:                              # noqa: BLE001
+            continue
+        found.append((part.get_filename() or ctype, body))
+    return found
+
+
+def _candidates(text: str, notes: list) -> list[tuple[str, bytes]]:
+    """Every byte string in `text` that might be an image, by format."""
+    found = _mime_images(text, notes)
+    found += [("data: URI", _b64(m.group(1))) for m in _DATA_URI.finditer(text)]
+    found += [("base64 run", _b64(m.group(0))) for m in _B64_RUN.finditer(text)]
+    found += [("hex run", bytes.fromhex(m.group(0))) for m in _HEX_RUN.finditer(text)]
+    # Raw bytes (an HTTP body carried as text): start at each signature in the text.
+    blob = text.encode("latin-1", "ignore")
+    for magic, mime in _MAGIC:
+        if len(magic) >= 3:
+            k = blob.find(magic)
+            if k > 0:
+                found.append((f"raw {mime} bytes", blob[k:]))
+    return found
+
+
+def _b64(s: str) -> bytes:
+    try:
+        return base64.b64decode("".join(s.split()), validate=False)
+    except (binascii.Error, ValueError):
+        return b""
+
+
+def extract_images(texts: list[str]) -> tuple[list[Image], list[str]]:
+    """Every distinct image in these texts, pixels only, plus notes on what else was
+    there. `texts` is a Splunk event's `_raw` or a result row's field values; JSON is
+    walked, MIME is parsed, base64/hex/data: runs are decoded, raw bytes are scanned.
+    """
+    notes, images, seen = [], [], set()
+    for text in texts:
+        try:
+            parts = _texts(json.loads(text))
+            notes.append("JSON event")
+        except (ValueError, TypeError):
+            parts = [text]
+        for t in parts:
+            for label, raw in _candidates(t, notes):
+                got = pixels_only(raw)
+                if got is None:
+                    continue
+                png, size = got
+                key = hashlib.sha256(png).hexdigest()
+                if key not in seen:
+                    seen.add(key)
+                    images.append(Image(label, png, size))
+    for n, im in enumerate(images, start=1):
+        if im.label in ("base64 run", "hex run", "data: URI") or im.label.startswith("raw "):
+            images[n - 1] = im._replace(label=f"#{n} ({im.label})")
+    return images, notes
+
+
+def pick(images: list[Image], name: str) -> Image | None:
+    """The one image to look at: the only one, or the one whose label contains `name`."""
+    if name:
+        hits = [im for im in images if name.lower() in im.label.lower()]
+        return hits[0] if len(hits) == 1 else None
+    return images[0] if len(images) == 1 else None
+
+
+def listing(images: list[Image], notes: list) -> str:
+    if images:
+        return "Images found: " + "; ".join(
+            f"{im.label} {im.size[0]}x{im.size[1]}" for im in images)
+    seen = sorted(set(notes))[:15]
+    return ("No image found. " + ("What the event does hold: " + ", ".join(seen)
+                                  if seen else "The event held no MIME parts, no JSON, "
+                                  "and no base64, hex or raw image bytes."))
 
 
 def _client():

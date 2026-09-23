@@ -20,8 +20,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
+import resume
 from case_file import parse_case_updates
 from conversation import (
+    at_step,
     deviation_violations,
     directive_violations,
     effective_r2,
@@ -72,7 +74,9 @@ def _window(messages) -> list:
     """Bounded cross-question history, same rule as orchestrator._window."""
     return list(messages)[-MAX_HISTORY_MSGS:]
 
-SH_SYSTEM_PROMPT = f"""You are the SH agent — the mastermind orchestrator for a BOTSv3 security investigation (an August 2018 APT attack against Frothly; all data is in Splunk index=botsv3).
+SH_SYSTEM_PROMPT = f"""SITUATION. Frothly Corporation is a high-growth craft brewery. Its IT environment consists of corporate Windows and Linux endpoints, standard network infrastructure, and public cloud infrastructure on Amazon Web Services and Microsoft Azure. Management suspects a major, coordinated compromise is actively underway across both on-premises assets and cloud instances. The investigation traces malicious activity from initial access to data exfiltration, and builds its timeline entirely from factual evidence, with zero structural assumptions.
+
+You are the SH agent — the mastermind orchestrator of that investigation. The data covers August 2018, and all of it is in Splunk index=botsv3.
 
 THE BOUNDARY RULE — this is the rule the whole design rests on.
 You speak in constraints and goals. Your seniors speak in evidence and SPL.
@@ -125,7 +129,7 @@ C3. STAMP EVERY NEWLY-CLAIMED VERIFICATION — one `premise_stamps` entry per pr
           claim rules out, and what in the evidence rules it out. If the same result set shows a rival that fits
           the question's wording as well as your claim does, `claim_holds` is FALSE.
 
-    THE DIFFERENCE, because the two sound alike and are not. An argument is VALID when the conclusion follows from the evidence offered. It is SOUND when it is valid AND the claim is actually true. Valid-but-unsound is what cost this system Q216: a senior claimed "the endpoint is 192.168.70.186, because it alone holds the only mining-pool-port flow", quoted genuine verbatim rows that did show exactly that, and was WRONG — the endpoint the question meant sat in the same result table two rows below, running a browser-based miner. `establishes` was honestly TRUE. Only `claim_holds` could have caught it, and there was no such field, so it passed five times and lost the question.
+    THE DIFFERENCE, because the two sound alike and are not. An argument is VALID when the conclusion follows from the evidence offered. It is SOUND when it is valid AND the claim is actually true. Valid-but-unsound is the failure `claim_holds` exists for: a senior claims "X is the entity the question means, because X alone shows property P", quotes genuine rows that do show exactly that, and is still wrong — because another entity in the same result set fits the question's actual wording better, and P was never what the question asked about. There, `establishes` is honestly TRUE. Only `claim_holds` catches it.
     Either answer being false fires the mechanism in C4. Stamping true on a premise you do not believe is the worse error, and every stamp is on the record under your name.
     A stamp is recorded ONCE, when the verification is first claimed, and never changes the premise's status: the ledger keeps the senior's verdict with your reading beside it.
 
@@ -222,7 +226,9 @@ REFERENCE: THE GATES. A turn breaking one is rejected, and you do not get the tu
 NEVER INVENT DATASET FACTS. A critic must rest on something you actually hold: the report itself, the case file, a sibling report, the expected shape, or the question's own wording."""
 
 
-SENIOR_BRIEF = f"""You are a Senior Splunk analyst on a BOTSv3 investigation (August 2018, Frothly; all data is in index=botsv3). You work for SH, who is orchestrating this question.
+SENIOR_BRIEF = f"""SITUATION. Frothly Corporation is a high-growth craft brewery. Its IT environment consists of corporate Windows and Linux endpoints, standard network infrastructure, and public cloud infrastructure on Amazon Web Services and Microsoft Azure. Management suspects a major, coordinated compromise is actively underway across both on-premises assets and cloud instances. The investigation traces malicious activity from initial access to data exfiltration, and builds its timeline entirely from factual evidence, with zero structural assumptions.
+
+You are a Senior Splunk analyst on that investigation. The data covers August 2018, and all of it is in index=botsv3. You work for SH, who is orchestrating this question.
 
 THE BOUNDARY: SH speaks in constraints and goals; you speak in evidence and SPL. SH cannot query Splunk and will never hand you a query. Turning a goal into SPL is your job.
 
@@ -606,15 +612,45 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     # Cross-question memory: SH_SYSTEM_PROMPT promises SH remembers earlier questions.
     msgs += _window(history or [])
     start = len(msgs)
-    msgs.append(HumanMessage(content=render_opening(
-        qid=qid, question=question, guidance=guidance, points=points,
-        budget=state.budget)))
+    d0 = len(delegations)
 
     answer, end_reason, ungrounded = "", "", 0
     clarify_text: dict = {}      # sid -> its CLARIFY replies, quotable in SH's audit
     unread_clarify = False       # a reply SH has not had a turn to read yet
 
+    snap = resume.load(run_dir, qid)
+    if snap:
+        # Resume at the last turn boundary. The system messages above are the
+        # current code's; only the conversation and the state come from disk.
+        msgs += snap["msgs"]
+        delegations.extend(snap["delegations"])
+        (state, ledger, validators, kinds, subqs, unread, all_reports, grades,
+         counter, clarify_text, unread_clarify, ungrounded) = (
+            snap[k] for k in ("state", "ledger", "validators", "kinds", "subqs",
+                              "unread", "all_reports", "grades", "counter",
+                              "clarify_text", "unread_clarify", "ungrounded"))
+        sessions = _restore_sessions(snap["sessions"], snap["threads"], pool)
+        print(f"↩ resuming {qid} from turn {state.turns_used}")
+        log.note(f"resumed from the turn-{state.turns_used} snapshot")
+    else:
+        msgs.append(HumanMessage(content=render_opening(
+            qid=qid, question=question, guidance=guidance, points=points,
+            budget=state.budget)))
+
     while True:
+        # Every turn boundary is a consistent state: the last turn and its wave are
+        # fully applied. A pause or a crash resumes from here (resume.py).
+        resume.save(run_dir, qid, {
+            "msgs": msgs[start:], "delegations": delegations[d0:],
+            "state": state, "ledger": ledger, "validators": validators,
+            "kinds": kinds, "subqs": subqs, "unread": unread,
+            "all_reports": all_reports, "grades": grades, "counter": counter,
+            "clarify_text": clarify_text, "unread_clarify": unread_clarify,
+            "ungrounded": ungrounded,
+            "sessions": {sid: {k: v for k, v in sess.__dict__.items() if k != "pool"}
+                         for sid, sess in sessions.items()},
+            "threads": _export_threads(pool, sessions, state),
+        })
         stop = state.exhausted()
         if stop == "rounds" and (unread or unread_clarify):
             stop = ""              # SH still reads the final wave; the gates stop new work
@@ -686,33 +722,31 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                 e.answer_premise_ids = list(e.answer_premise_ids) + [
                     p.id for p in filed if p.id not in e.answer_premise_ids]
 
+        # Every line names the SOP step it enforces (see conversation.with_step). The
+        # mixed gates - grade_violations, directive_violations - tag each line
+        # themselves; the single-step ones are tagged here. test_rejection_steps fails
+        # on any untagged line, so a new gate cannot ship without its pointer.
         problems = grade_violations(
             turn.entries, graded=set(unread),
             exploration={s for s, k in kinds.items() if k == "exploration"},
-        ) + directive_violations(turn.entries, state) + open_question_violations(
-            turn.entries, ledger
-        ) + spawn_overlap_violations(
+        ) + directive_violations(turn.entries, state) + at_step(
+            "C5", open_question_violations(turn.entries, ledger)
+        ) + at_step("B5", spawn_overlap_violations(
             turn.entries, {sid: s.constraints for sid, s in sessions.items()
-                           if state.is_active(sid)}
-        ) + deviation_violations(
-            turn.entries, ledger
-        ) + premise_audit_violations(
-            turn.entries, ledger
-        ) + stamp_violations(
-            turn.entries, ledger
-        ) + nomination_violations(
-            turn.entries, ledger
-        ) + grade_ceiling_violations(
-            turn.entries, ledger
-        ) + ledger_violations(
-            turn.entries, ledger, state
-        ) + unanswerable_violations(turn.entries, ledger)
+                           if state.is_active(sid)})
+        ) + at_step("E3", deviation_violations(turn.entries, ledger)
+        ) + at_step("F2–F3", premise_audit_violations(turn.entries, ledger)
+        ) + at_step("C3", stamp_violations(turn.entries, ledger)
+        ) + at_step("C4", nomination_violations(turn.entries, ledger)
+        ) + at_step("C6", grade_ceiling_violations(turn.entries, ledger)
+        ) + at_step("F2", ledger_violations(turn.entries, ledger, state)
+        ) + at_step("G2–G3", unanswerable_violations(turn.entries, ledger))
         # A refused update is not a gate violation, so without this SH is told
         # nothing and re-sends the same malformed update until the turns run out,
         # blocked each time by an ANSWER gate naming a premise it believes settled.
         if ledger_notes:
-            problems = problems + ["the runner refused a premise update: " + n
-                                   for n in ledger_notes]
+            problems = problems + at_step("C7", ["the runner refused a premise update: " + n
+                                                 for n in ledger_notes])
         if problems:
             state.r2_streak = saved_streak
             log.note("TURN REJECTED:\n" + "\n".join(f"- {p}" for p in problems))
@@ -923,6 +957,13 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                         # is consistent to continue from — this senior was
                         # retired and its slot refunded just above — so SKIP is
                         # what a reachable operator would have chosen anyway.
+                        # Twice on one question is an outage, not a blip: pause
+                        # so the runner keeps the last turn's snapshot to resume.
+                        state.transport_failures += 1
+                        if state.transport_failures >= 2:
+                            log.note(f"{sid} api_failed again with no operator "
+                                     f"reachable — pausing; resume with --run-name")
+                            raise
                         choice = SKIP
                         log.note(f"{sid} api_failed and no operator reachable — "
                                  f"skipping; slot already refunded, decision "
@@ -974,6 +1015,28 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
         "delegations": delegations,
         "ledger": ledger,
     }
+
+
+def _export_threads(pool, sessions: dict, state) -> dict:
+    """Each live senior's graph state. A retired senior never runs again."""
+    export = getattr(pool, "export_thread", None)
+    if export is None:
+        return {}
+    return {sid: export(thread_id=s.thread_id, technique=s.technique, max_iter=s.iters)
+            for sid, s in sessions.items() if state.is_active(sid)}
+
+
+def _restore_sessions(fields: dict, threads: dict, pool) -> dict:
+    sessions = {}
+    for sid, f in fields.items():
+        sess = SeniorSession.__new__(SeniorSession)
+        sess.__dict__.update(f)
+        sess.pool = pool
+        if sid in threads and hasattr(pool, "import_thread"):
+            pool.import_thread(thread_id=sess.thread_id, values=threads[sid],
+                               technique=sess.technique, max_iter=sess.iters)
+        sessions[sid] = sess
+    return sessions
 
 
 def _senior_reports(reports: list) -> list:

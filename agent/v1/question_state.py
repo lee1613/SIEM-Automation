@@ -58,6 +58,7 @@ class QuestionState:
     r2_streak: dict = field(default_factory=dict)    # sid -> consecutive R2 FAILs
     retired: set = field(default_factory=set)
     capped: dict = field(default_factory=dict)       # sid -> last round ran out of iterations
+    transport_failures: int = 0                      # api_failed with no operator reachable
 
     def __post_init__(self) -> None:
         self.budget = tier_budget(self.points)

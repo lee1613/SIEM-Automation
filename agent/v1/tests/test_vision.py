@@ -7,13 +7,18 @@ client so the decode, the type sniff, the refusals and the fallback are all test
 without touching NIM.
 """
 import base64
+import io
+import json
 
 import pytest
 from vision import (
     MAX_IMAGE_BYTES,
     VISION_MODELS,
-    decode_field,
     describe,
+    extract_images,
+    listing,
+    pick,
+    pixels_only,
     sniff_type,
 )
 
@@ -32,32 +37,76 @@ def test_the_type_comes_from_the_bytes_not_the_filename():
     assert sniff_type(b"not an image at all") == ""
 
 
-def test_a_field_wrapped_across_mime_lines_still_decodes():
-    """Splunk hands the field back with the original MIME part's line wrapping, which
-    b64decode rejects unless it is stripped first."""
-    wrapped = "\n".join(
-        base64.b64encode(PNG).decode()[i:i + 8]
-        for i in range(0, len(base64.b64encode(PNG).decode()), 8))
-    raw, mime = decode_field(wrapped)
-    assert raw == PNG and mime == "image/png"
+def _jpeg(text_in_metadata: bytes = b"", color=(200, 30, 30)) -> bytes:
+    """A real 40x20 JPEG made here, not a dataset artifact, optionally carrying text in
+    a COM segment - the kind of non-pixel payload the model must never see."""
+    from PIL import Image as PILImage
+    out = io.BytesIO()
+    PILImage.new("RGB", (40, 20), color).save(out, "JPEG")
+    data = out.getvalue()
+    if text_in_metadata:
+        seg = b"\xff\xfe" + (len(text_in_metadata) + 2).to_bytes(2, "big") + text_in_metadata
+        data = data[:2] + seg + data[2:]
+    return data
 
 
-def test_an_empty_field_says_which_thing_to_check():
-    with pytest.raises(ValueError, match="empty"):
-        decode_field("   ")
+def _wrapped(b: bytes, width: int = 76) -> str:
+    s = base64.b64encode(b).decode()
+    return "\r\n".join(s[i:i + width] for i in range(0, len(s), width))
 
 
-def test_bytes_that_are_not_an_image_are_refused_not_sent():
-    with pytest.raises(ValueError, match="not an image"):
-        decode_field(base64.b64encode(b"just some text here").decode())
+def _email(img: bytes, filename: str = "chart.jpg") -> str:
+    return ("Content-Type: multipart/related; boundary=\"B\"\r\n\r\n--B\r\n"
+            "Content-Type: text/html\r\n\r\n<p>see attached</p>\r\n--B\r\n"
+            f"Content-Type: image/jpeg; name=\"{filename}\"\r\n"
+            f"Content-Disposition: inline; filename=\"{filename}\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n\r\n"
+            + _wrapped(img) + "\r\n--B--\r\n")
+
+
+def test_a_mime_attachment_split_across_a_json_list_is_found_by_filename():
+    """stream:smtp carries one RFC822 message as a JSON list of chunks; only the
+    rejoined whole parses as MIME."""
+    msg = _email(_jpeg())
+    event = json.dumps({"content": [msg[k:k + 90] for k in range(0, len(msg), 90)],
+                        "subject": "hello"})
+    images, _ = extract_images([event])
+    assert [im.label for im in images] == ["chart.jpg"]
+    assert images[0].size == (40, 20)
+
+
+def test_what_reaches_the_model_is_pixels_only():
+    """Text riding inside the image file is dropped by the re-encode."""
+    png, size = pixels_only(_jpeg(b"THE ANSWER IS 42"))
+    assert size == (40, 20) and png.startswith(b"\x89PNG")
+    assert b"THE ANSWER" not in png
+
+
+def test_a_data_uri_a_hex_run_and_raw_bytes_are_all_found():
+    img = _jpeg()
+    for text in (f'<img src="data:image/jpeg;base64,{base64.b64encode(img).decode()}">',
+                 "blob=" + img.hex(),
+                 "HTTP/1.1 200 OK\r\n\r\n" + img.decode("latin-1")):
+        images, _ = extract_images([text])
+        assert len(images) == 1, text[:40]
+
+
+def test_bytes_that_are_not_an_image_are_never_sent():
+    assert pixels_only(b"\xff\xd8\xff but not really a jpeg") is None
+    assert pixels_only(b"just some text here") is None
 
 
 def test_an_oversized_image_is_refused_before_the_request():
-    """A senior pointing this at a 40MB object should be told so, not left waiting on a
-    request that fails anyway."""
-    big = base64.b64encode(b"\xff\xd8\xff" + b"\x00" * MAX_IMAGE_BYTES).decode()
-    with pytest.raises(ValueError, match="over the"):
-        decode_field(big)
+    assert pixels_only(b"\xff\xd8\xff" + b"\x00" * MAX_IMAGE_BYTES) is None
+
+
+def test_two_images_need_a_name_and_nothing_found_lists_what_is_there():
+    images, _ = extract_images([_email(_jpeg(), "a.jpg"), _email(_jpeg(color=(0, 0, 255)), "b.jpg")])
+    assert len(images) == 2
+    assert pick(images, "") is None, "never guess between two images"
+    assert pick(images, "b.jpg").label == "b.jpg"
+    images, notes = extract_images([_email(b"not an image", "c.jpg")])
+    assert images == [] and "MIME part image/jpeg 'c.jpg'" in listing(images, notes)
 
 
 class _Reply:

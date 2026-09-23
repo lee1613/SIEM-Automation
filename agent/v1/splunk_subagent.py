@@ -231,6 +231,20 @@ class SplunkWorkerPool:
         return self._run("senior", graph, self.senior_model, message, qid, idx,
                          max_iter=max_iter, thread_id=thread_id, sid=sid)
 
+    def export_thread(self, *, thread_id: str, technique: str = "senior",
+                      max_iter: int = 8) -> dict:
+        """A senior's whole thread state, for the per-turn resume snapshot."""
+        config = {"configurable": {"thread_id": thread_id}}
+        return dict(self._graph_for(technique, max_iter).get_state(config).values or {})
+
+    def import_thread(self, *, thread_id: str, values: dict, technique: str = "senior",
+                      max_iter: int = 8) -> None:
+        """Write an exported thread back into a fresh process's checkpointer."""
+        if not values:
+            return
+        config = {"configurable": {"thread_id": thread_id}}
+        self._graph_for(technique, max_iter).update_state(config, values, as_node="agent")
+
     def clarify(self, *, thread_id: str, qid: str, idx: int, questions: list,
                 technique: str = "senior", max_iter: int = 8, preface: str = "",
                 sid: str = "") -> str:

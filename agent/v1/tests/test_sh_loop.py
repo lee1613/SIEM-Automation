@@ -747,6 +747,42 @@ def test_an_unreachable_operator_skips_instead_of_losing_the_question(tmp_path, 
     assert "/tmp/decision_request.json" in log
 
 
+def test_a_second_unreachable_outage_on_one_question_pauses(tmp_path, monkeypatch):
+    # One outage is a blip and skips; a second on the same question is an outage the
+    # loop cannot plan around, so it pauses and the last turn's snapshot is resumed.
+    import sh_loop
+
+    def _unreachable(*a, **k):
+        raise RunPaused("/tmp/decision_request.json", "outage")
+
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", _unreachable)
+    llm = _LLM([_turn(_spawn()), _turn(_spawn())] + [_turn() for _ in range(3)])
+    with pytest.raises(RunPaused):
+        _run(llm, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
+
+
+def test_a_paused_question_resumes_from_its_last_turn(tmp_path, monkeypatch):
+    # The pause above leaves the turn-boundary snapshot on disk. Re-running the same
+    # question in the same run dir continues from it instead of from the opening: SH
+    # sees its earlier turns, and the budget already spent stays spent.
+    import sh_loop
+
+    def _unreachable(*a, **k):
+        raise RunPaused("/tmp/decision_request.json", "outage")
+
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", _unreachable)
+    first = _LLM([_turn(_spawn()), _turn(_spawn())])
+    with pytest.raises(RunPaused):
+        _run(first, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
+
+    second = _LLM([_turn(_spawn()), _turn(_answer())])
+    out = _run(second, _Pool(), tmp_path, hitl=True, points=100)
+    assert out["answer"] == "1367.875"
+    assert len(second.seen[0]) == len(first.seen[1]), "resumed at turn 2, not the opening"
+    assert out["turns"] == 3
+    assert "resumed from the turn-1 snapshot" in _conversation(tmp_path)
+
+
 def test_an_operator_who_can_answer_can_still_abort(tmp_path, monkeypatch):
     # The skip above is only for an operator who cannot be reached. One who can be
     # and says abort must still stop the run, or the pause stops meaning anything.
