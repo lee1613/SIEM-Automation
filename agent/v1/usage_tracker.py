@@ -87,6 +87,11 @@ PRICES_PER_1M: dict[str, dict] = {
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
         "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
     },
+    # The vision fallback when Nemotron fails. Priced at 0 by operator decision
+    # (2026-09-23), under its own key so the paid gpt-5.4-mini row above is untouched.
+    "gpt-5.4-mini (vision)": {
+        "short": {"input": 0.0,   "cached_input": 0.0,    "output": 0.0},
+    },
 }
 
 

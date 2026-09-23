@@ -412,16 +412,19 @@ def make_tools(splunk: SplunkClient) -> list:
         a colour, which word is biggest, what a screenshot says — and no text in the
         dataset states it.
 
-        `spl`      a search returning the ONE event that carries the image (an email, an
-                   upload, a response). The runner reads that event's whole _raw and
-                   finds the image itself: MIME attachments, JSON fields, base64 or
-                   data: URIs, hex, or raw bytes.
+        `spl`      a search for the event that carries the image (an email, an upload,
+                   a response). Narrow it to that ONE event when you know which it is.
+                   If you are not sure, a search matching a few events is fine: the
+                   runner reads the whole _raw of up to 10 of them and finds every image
+                   itself — MIME attachments, JSON fields, base64 or data: URIs, hex, or
+                   raw bytes.
         `question` ONE narrow question about what is VISIBLE ("what kind of chart is
                    this?", "which word is in the largest font?"). Never hand it the
                    investigation's question — you do the reasoning, this only reports
                    what is on screen.
-        `name`     only when the event carries several images: part of the one you mean
-                   (a filename, or "#2"). A call without it lists them.
+        `name`     part of the one image you mean (a filename, or "#2"). Without it,
+                   every image found is shown to the vision model one by one and you get
+                   one labelled answer per image; choosing between them is yours.
         `extract_spl` a fallback, only if the runner found no image: a search whose
                    output IS the encoded image (e.g. a rex or eval that isolates it).
                    The runner runs it and decodes it; its output never comes back here.
@@ -441,8 +444,10 @@ def make_tools(splunk: SplunkClient) -> list:
             return "Image reading is not available in this deployment."
 
         def _texts_of(query: str) -> tuple[list, str]:
+            """Every matching event, not the first: one SMTP session is several events
+            and the one carrying the message is rarely the one Splunk returns first."""
             try:
-                result = splunk.search(query, max_results=1)
+                result = splunk.search(query, max_results=vision.MAX_EVENTS)
             except Exception as exc:                  # noqa: BLE001
                 return [], f"Search failed: {type(exc).__name__}: {str(exc)[:200]}"
             if (result or {}).get("error"):
@@ -450,34 +455,47 @@ def make_tools(splunk: SplunkClient) -> list:
             rows = (result or {}).get("results") or []
             if not rows:
                 return [], "That search returned no events."
-            row = rows[0]
-            if row.get("_raw"):
-                return [str(row["_raw"])], ""
-            return [v if isinstance(v, str) else "\n".join(map(str, v))
-                    for k, v in row.items() if not k.startswith("_")], ""
+            total = int(((result or {}).get("_meta") or {}).get("total_event_count")
+                        or len(rows))
+            texts = []
+            for row in rows:
+                if row.get("_raw"):
+                    texts.append(str(row["_raw"]))
+                else:
+                    texts += [v if isinstance(v, str) else "\n".join(map(str, v))
+                              for k, v in row.items() if not k.startswith("_")]
+            return texts, f"read {len(rows)} of {total} matching events"
 
-        texts, err = _texts_of(spl)
-        if err:
-            return err + " Narrow `spl` to the one event carrying the image."
+        texts, read = _texts_of(spl)
+        if not texts:
+            return read + " Narrow `spl` to the one event carrying the image."
         images, notes = vision.extract_images(texts)
         if not images and extract_spl:
-            texts, err = _texts_of(extract_spl)
-            if err:
-                return f"extract_spl: {err}"
+            texts, more_read = _texts_of(extract_spl)
+            if not texts:
+                return f"extract_spl: {more_read}"
             images, more = vision.extract_images(texts)
             notes += ["(extract_spl) " + n for n in more]
-        chosen = vision.pick(images, name)
-        if chosen is None:
-            hint = (" Call again with `name` set to the one you mean." if len(images) > 1
-                    else " If you know where the image sits, call again with "
-                    "`extract_spl` isolating it." if not images else
-                    f" None matches {name!r}.")
-            return vision.listing(images, notes) + hint
-        try:
-            seen = vision.describe(chosen.png, "image/png", question)
-            return f"({chosen.label}, {chosen.size[0]}x{chosen.size[1]}) {seen}"
-        except RuntimeError as exc:
-            return f"Could not read that image: {exc}"
+        if not images:
+            return (f"{vision.listing(images, notes)} ({read}.) If you know where the "
+                    "image sits, narrow `spl` to that event or call again with "
+                    "`extract_spl` isolating it.")
+        if name:
+            chosen = vision.pick(images, name)
+            if chosen is None:
+                return f"None matches {name!r}. {vision.listing(images, notes)}"
+            images = [chosen]
+        answers = []
+        for im in images[:vision.MAX_IMAGES]:
+            try:
+                seen = vision.describe(im.png, "image/png", question)
+            except RuntimeError as exc:
+                seen = f"could not read it: {exc}"
+            answers.append(f"({im.label}, {im.size[0]}x{im.size[1]}) {seen}")
+        if len(images) > vision.MAX_IMAGES:
+            answers.append(f"{len(images) - vision.MAX_IMAGES} more not shown — pass "
+                           f"`name` to pick one. {vision.listing(images, notes)}")
+        return "\n".join(answers)
 
     return [
         get_source_types,

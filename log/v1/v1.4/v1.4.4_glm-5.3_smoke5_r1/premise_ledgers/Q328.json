@@ -1,0 +1,278 @@
+[
+  {
+    "qid": "Q328",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The tomcat8-to-root escalation file can be identified through Linux endpoint telemetry in index=botsv3: auth logs (linux_secure /var/log/secure, syslog /var/log/auth.log), audit execve records (linux_audit), shell history (bash_history, history-2, out-3, localhost-5), process listings (ps), or file-content feeds (config_file). Searched so far: linux_secure (0 tomcat8 events), bash_history klagerfield first 20 of 83 rows (Splunk config only). Not yet searched: linux_audit, /var/log/auth.log, ps, history-2/out-3/localhost-5, config_file.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "get_raw_events sourcetype=ps keyword=colonelnew returned ps process records on hoth showing colonelnew running as user tomcat8 — the escalation artifact IS visible in Linux endpoint telemetry (ps), confirming p1's claim that the escalation path is identifiable in index=botsv3 Linux telemetry. The specific source file is still unrecovered, but the premise (identifiable via these feeds) holds.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The carried-forward reports support that Linux endpoint telemetry is where the tomcat8-to-root escalation file must be identified: prior rounds searched and compared Linux auth, audit, process, Tomcat-log, and shell-history sources on hoth. That evidence is enough for this broad coverage claim as written.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that a non-Linux or non-endpoint feed holds the file identity or contents. The question asks about a file used to escalate tomcat8 to root, and the established artifacts so far are Linux-host execution on hoth, which rules that rival out as the primary path.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "tomcat8           9456     0      0.0      00:00:00     0.0        616       4424   ?        S         42:31  colonelnew          <noArgs>",
+        "evidence": "get_raw_events sourcetype=ps keyword=colonelnew returned ps process records on hoth showing colonelnew running as user tomcat8 — the escalation artifact IS visible in Linux endpoint telemetry (ps), confirming p1's claim that the escalation path is identifiable in index=botsv3 Linux telemetry. The specific source file is still unrecovered, but the premise (identifiable via these feeds) holds."
+      },
+      {
+        "round": 6,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The carried-forward reports support that Linux endpoint telemetry is where the tomcat8-to-root escalation file must be identified: prior rounds searched and compared Linux auth, audit, process, Tomcat-log, and shell-history sources on hoth. That evidence is enough for this broad coverage claim as written. | rival: The strongest rival is that a non-Linux or non-endpoint feed holds the file identity or contents. The question asks about a file used to escalate tomcat8 to root, and the established artifacts so far are Linux-host execution on hoth, which rules that rival out as the primary path."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": ""
+    }
+  },
+  {
+    "qid": "Q328",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "Host hoth is the compromised Linux host running the exploited tomcat8 service, so the privilege-escalation file used to lift tomcat8 to root should be sought in hoth's telemetry (catalina.out full text, localhost.2018-07-25.log, ps process listings, and any hoth-scoped file-content or command evidence).",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "index=botsv3 sourcetype=ps colonelnew | stats count by host, source returned exactly one row: hoth/ps with 114 events. colonelnew (the tomcat8 escalation binary) exists on no other host, so hoth is the compromised host and the correct scope for the escalation file.",
+    "rival": "Other Linux hosts in botsv3 (e.g., the host carrying klagerfield's /home/klagerfield/.bash_history, or any host with auth/audit records) — ruled out as the tomcat8 escalation site because no tomcat8 records exist on any host except hoth: `sourcetype=linux_audit tomcat8`, `syslog source=/var/log/auth.log tomcat8`, `/var/log/syslog tomcat8`, `/var/log/messages tomcat8` all returned 0 events, and out-3's only host is hoth.",
+    "stamp": "true",
+    "stamp_reason": "The quoted prior results tie the exploited tomcat8 service to host hoth via the only tomcat8 catalina.out feed and the colonelnew execution chain on hoth. That supports the claim that hoth is the compromised Linux host running the exploited tomcat8 service.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is another host running the exploited tomcat8 path. The evidence so far places tomcat8 logs and colonelnew execution only on hoth, with no competing host surfaced in the same result sets.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"host\": \"hoth\", \"source\": \"ps\", \"count\": \"114\"}",
+        "evidence": "index=botsv3 sourcetype=ps colonelnew | stats count by host, source returned exactly one row: hoth/ps with 114 events. colonelnew (the tomcat8 escalation binary) exists on no other host, so hoth is the compromised host and the correct scope for the escalation file."
+      },
+      {
+        "round": 6,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted prior results tie the exploited tomcat8 service to host hoth via the only tomcat8 catalina.out feed and the colonelnew execution chain on hoth. That supports the claim that hoth is the compromised Linux host running the exploited tomcat8 service. | rival: The strongest rival is another host running the exploited tomcat8 path. The evidence so far places tomcat8 logs and colonelnew execution only on hoth, with no competing host surfaced in the same result sets."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": ""
+    }
+  },
+  {
+    "qid": "Q328",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "coverage",
+    "text": "The line-2 text of the tomcat8-to-root escalation file on hoth can surface in: (a) full catalina.out event text (sourcetype=out-3, 15 events, each clipped at 1500 chars with ~7534 chars unread — NOT yet extracted via rex); (b) localhost-5 /var/log/tomcat8/localhost.2018-07-25.log, 30 events — NOT yet searched; (c) bash_history scoped to hoth — NOT yet searched; (d) config_file sourcetype — NOT yet searched; (e) stream:http webshell request/response bodies against hoth — NOT yet searched; (f) lsof open-file records for gcc or PID 9456 — NOT yet searched; (g) osquery:results — NOT yet searched. Searched and negative: ps (114 events, binary name only, no args), linux_audit (0 gcc events), visible heads of all 15 out-3 events (Struts2 stack traces only).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The route that truly holds the file content is the 19:08:37 stream:http echo command's base64 payload, rex-extracted query-side in two chunks (480 + 240 chars) that decode to coherent contiguous C source; the cat response's 5775-byte content_length exactly matches FIM's size for /tmp/colonel.c, and osquery shows gcc colonel.c -o colonelnew. Feeds (a) out-3 and (e) stream:http are now searched: out-3 holds no colonel text at all; stream:http holds the full content in form_data. The cat response body is NOT retrievable: stream:http has no response_body field (search_keyword 'body' shows body fields only in stream:smtp and symantec:ep:scm_system:file), and stream:tcp events for flow 5b903a0c carry only flow metadata with no payload bytes.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report's cited results show two telemetry routes that can carry the file content: the stream:http command stream includes the base64 write to /tmp/colonel, the decode to /tmp/colonel.c, and a later cat of /tmp/colonel.c whose content length matches the FIM size of that file. That supports the claim that line-2 text can surface in the webshell command stream and related file telemetry on hoth.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the line text would only be recoverable from another feed such as Tomcat logs or audit logs. This round rules that down for this question because out-3 had 0 colonel matches while stream:http and osquery together directly trace file creation, decode, and printing of /tmp/colonel.c, which is the file candidate tied to the escalation path.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "(#cmd='base64 --decode /tmp/colonel > /tmp/colonel.c')",
+        "evidence": "The escalation file's identity and its content both surfaced exactly as p3 anticipated: osquery:results carried the gcc input file name (colonel.c) and FIM records for /tmp/colonel.c, and stream:http carried the webshell command stream that created the file (echo base64 > /tmp/colonel, base64 --decode > /tmp/colonel.c) plus the cat command whose 5775-byte response matches the file size. Feeds (a) out-3 and (e) stream:http were searched this round; out-3 holds no colonel text (0 matches), stream:http is the content source."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's cited results show two telemetry routes that can carry the file content: the stream:http command stream includes the base64 write to /tmp/colonel, the decode to /tmp/colonel.c, and a later cat of /tmp/colonel.c whose content length matches the FIM size of that file. That supports the claim that line-2 text can surface in the webshell command stream and related file telemetry on hoth. | rival: The strongest rival is that the line text would only be recoverable from another feed such as Tomcat logs or audit logs. This round rules that down for this question because out-3 had 0 colonel matches while stream:http and osquery together directly trace file creation, decode, and printing of /tmp/colonel.c, which is the file candidate tied to the escalation path."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "* Ubuntu 16.04.4 kernel priv esc",
+      "3": "* Ubuntu 16.04.4 kernel priv esc",
+      "4": "* Ubuntu 16.04.4 kernel priv esc"
+    }
+  },
+  {
+    "qid": "Q328",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "selection",
+    "text": "Host hoth is the only host where the escalation artifacts live: colonelnew appears in ps on hoth alone (114 events), running as tomcat8 PID 9456, so the escalation file and its line-2 text must be sought in hoth-scoped telemetry only.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The only host/source pair carrying colonelnew in the ps feed is hoth/ps; no other host has any colonelnew process record.",
+    "rival": "All other hosts in index=botsv3 (including klagerfield's endpoint, the only other Linux host with bash_history data) — ruled out by `index=botsv3 sourcetype=ps colonelnew | stats count by host, source` returning a single row, host=hoth.",
+    "stamp": "true",
+    "stamp_reason": "This round's ps result shows colonelnew only on host hoth, and no other host appears in that artifact chain. That supports the narrower claim that hoth is the only host where the escalation artifacts currently identified live.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another host holds the same escalation artifacts. The same ps search returned only hoth for colonelnew, so within the identified artifact set there is no equally fitting rival host.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"host\": \"hoth\", \"source\": \"ps\", \"count\": \"114\"}",
+        "evidence": "The only host/source pair carrying colonelnew in the ps feed is hoth/ps; no other host has any colonelnew process record."
+      },
+      {
+        "round": 6,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): This round's ps result shows colonelnew only on host hoth, and no other host appears in that artifact chain. That supports the narrower claim that hoth is the only host where the escalation artifacts currently identified live. | rival: The strongest rival is that another host holds the same escalation artifacts. The same ps search returned only hoth for colonelnew, so within the identified artifact set there is no equally fitting rival host."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "* Ubuntu 16.04.4 kernel priv esc",
+      "3": "* Ubuntu 16.04.4 kernel priv esc",
+      "4": "* Ubuntu 16.04.4 kernel priv esc"
+    }
+  },
+  {
+    "qid": "Q328",
+    "senior": "s2",
+    "id": "p5",
+    "kind": "other",
+    "text": "The base64 payload rex-extracted from the 19:08:37 stream:http echo command (flow 911b5d8b-dacf-4fdf-a08a-72e9fc6b1d55) is the complete content of /tmp/colonel.c: it decodes to a coherent C file whose header matches the public vnik doubleput.c kernel privilege-escalation exploit, its cat response content_length (5775) exactly equals FIM's recorded size for /tmp/colonel.c, and it is the sole gcc input that produced /tmp/colonelnew. Line 2 of that file is ' * Ubuntu 16.04.4 kernel priv esc'. The decode itself is manual because base64_decode is unsupported in this Splunk instance — no query-side decode route exists.",
+    "load_bearing": true,
+    "round_first_seen": 3,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Settled by a pure-SPL base64 decode of the rex-extracted payload: the query returned the file's opening lines directly ('/*', ' * Ubuntu 16.04.4 kernel priv esc', ' *', ' * all c...'), and the payload's completeness is proven by query-side arithmetic (7700 base64 chars -> 5775 bytes, exactly FIM's size for /tmp/colonel.c and the cat response content_length). No manual decoding remains in the chain.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted result described in the report supports the claim as written: the rex-extracted base64 from the 19:08:37 stream:http echo command was shown complete by matching decoded byte length to both the FIM size and cat response length, and the pure-SPL decode output shows the file opening lines.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the extracted payload is only a fragment or belongs to a different artifact. The matching 7700-char to 5775-byte arithmetic, plus agreement with the /tmp/colonel.c FIM size and cat response content_length, rules that out.",
+    "history": [
+      {
+        "round": 3,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "flat=\"/*<LF> * Ubuntu 16.04.4 kernel priv esc<LF> *<LF> * all c\", n=16",
+        "evidence": "Settled by a pure-SPL base64 decode of the rex-extracted payload: the query returned the file's opening lines directly ('/*', ' * Ubuntu 16.04.4 kernel priv esc', ' *', ' * all c...'), and the payload's completeness is proven by query-side arithmetic (7700 base64 chars -> 5775 bytes, exactly FIM's size for /tmp/colonel.c and the cat response content_length). No manual decoding remains in the chain."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted result described in the report supports the claim as written: the rex-extracted base64 from the 19:08:37 stream:http echo command was shown complete by matching decoded byte length to both the FIM size and cat response length, and the pure-SPL decode output shows the file opening lines. | rival: The strongest rival is that the extracted payload is only a fragment or belongs to a different artifact. The matching 7700-char to 5775-byte arithmetic, plus agreement with the /tmp/colonel.c FIM size and cat response content_length, rules that out."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "* Ubuntu 16.04.4 kernel priv esc",
+      "3": "* Ubuntu 16.04.4 kernel priv esc",
+      "4": "* Ubuntu 16.04.4 kernel priv esc"
+    }
+  },
+  {
+    "qid": "Q328",
+    "senior": "s2",
+    "id": "p6",
+    "kind": "selection",
+    "text": "/tmp/colonel.c is the text file used to escalate tomcat8's permissions to root on hoth: it is the sole gcc input in the verified compile chain (gcc colonel.c -o colonelnew, run as tomcat8 uid 111), its full content was delivered by the attacker's echo-base64 command and decoded on-host via base64 --decode, and its line 2 — decoded query-side in pure SPL — is ' * Ubuntu 16.04.4 kernel priv esc'.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The pure-SPL decoder (mvfind alphabet mapping + byte arithmetic + urldecode) returned the decoded opening of the file as a query result: '/*<LF> * Ubuntu 16.04.4 kernel priv esc<LF> *<LF> * all c'. The payload's completeness is proven by query-side arithmetic: len(b64)=7700 chars -> 5775 decoded bytes, exactly matching FIM's size for /tmp/colonel.c and the cat response content_length. The file's role as the escalation source is proven by the osquery gcc cmdline and the full webshell chain.",
+    "rival": "/tmp/colonel (the base64 transport intermediate written by echo and consumed by base64 --decode) and /tmp/colonelnew (the compiled ELF binary) — both ruled out as 'the text file used to escalate': the question's file must be the gcc input source, and the only gcc input in the verified chain is colonel.c (osquery cmdline \"gcc\" \"colonel.c\" \"-o\" \"colonelnew\"); /tmp/colonel is not a C source and /tmp/colonelnew is a binary, neither is a text file whose line 2 could be read.",
+    "stamp": "true",
+    "stamp_reason": "The reported evidence supports the claim that /tmp/colonel.c is the text file used in the escalation: osquery tied gcc to `colonel.c -o colonelnew`, and the round distinguishes it from /tmp/colonel (transport) and /tmp/colonelnew (binary).",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the file asked about is either /tmp/colonel or /tmp/colonelnew. The evidence rules that out because /tmp/colonel is only the base64 staging file and /tmp/colonelnew is the compiled executable, while the question asks for text on line 2 of the file used to escalate permissions.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "flat=\"/*<LF> * Ubuntu 16.04.4 kernel priv esc<LF> *<LF> * all c\", n=16",
+        "evidence": "The pure-SPL decoder (mvfind alphabet mapping + byte arithmetic + urldecode) returned the decoded opening of the file as a query result: '/*<LF> * Ubuntu 16.04.4 kernel priv esc<LF> *<LF> * all c'. The payload's completeness is proven by query-side arithmetic: len(b64)=7700 chars -> 5775 decoded bytes, exactly matching FIM's size for /tmp/colonel.c and the cat response content_length. The file's role as the escalation source is proven by the osquery gcc cmdline and the full webshell chain."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported evidence supports the claim that /tmp/colonel.c is the text file used in the escalation: osquery tied gcc to `colonel.c -o colonelnew`, and the round distinguishes it from /tmp/colonel (transport) and /tmp/colonelnew (binary). | rival: The strongest rival is that the file asked about is either /tmp/colonel or /tmp/colonelnew. The evidence rules that out because /tmp/colonel is only the base64 staging file and /tmp/colonelnew is the compiled executable, while the question asks for text on line 2 of the file used to escalate permissions."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "* Ubuntu 16.04.4 kernel priv esc",
+      "3": "* Ubuntu 16.04.4 kernel priv esc",
+      "4": "* Ubuntu 16.04.4 kernel priv esc"
+    }
+  }
+]

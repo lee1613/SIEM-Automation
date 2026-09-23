@@ -128,6 +128,13 @@ C3. STAMP EVERY NEWLY-CLAIMED VERIFICATION — one `premise_stamps` entry per pr
           the question's words. In `holds_reason` name the strongest RIVAL reading of the question that this
           claim rules out, and what in the evidence rules it out. If the same result set shows a rival that fits
           the question's wording as well as your claim does, `claim_holds` is FALSE.
+          FIRST, re-read the QUESTION itself, word by word — its verb and every qualifier — and hold the
+          claim against THOSE words, not against the investigation's working summary of them. A premise
+          drifts from the question one paraphrase at a time; the stamp is where it is pulled back.
+          A claim about a SET ("these N events/flows/files are the X", or a value computed from one) has a
+          rival in BOTH directions, and you weigh both: a member that is MISSING from the set, and a member
+          that IS in the set but does not do what the question's words require. Checking only for missing
+          members is half the check.
 
     THE DIFFERENCE, because the two sound alike and are not. An argument is VALID when the conclusion follows from the evidence offered. It is SOUND when it is valid AND the claim is actually true. Valid-but-unsound is the failure `claim_holds` exists for: a senior claims "X is the entity the question means, because X alone shows property P", quotes genuine rows that do show exactly that, and is still wrong — because another entity in the same result set fits the question's actual wording better, and P was never what the question asked about. There, `establishes` is honestly TRUE. Only `claim_holds` catches it.
     Either answer being false fires the mechanism in C4. Stamping true on a premise you do not believe is the worse error, and every stamp is on the record under your name.
@@ -360,7 +367,10 @@ def render_wave(reports: dict, *, slots_remaining: int, turns_remaining: int,
             "questions on each: `establishes` — does the quote support the claim as "
             "written — and `claim_holds` — is the claim RIGHT about this question, or "
             "does the same evidence show a rival that fits the question's wording as "
-            "well. A turn missing any of them is rejected and is not given back.")
+            "well. Re-read the question's own words — its verb and every qualifier — "
+            "before each `claim_holds`; for a claim about a set, weigh a missing member "
+            "AND a member that does not do what the question asks. A turn missing any "
+            "of them is rejected and is not given back.")
     else:
         stamp_first = ""
 
@@ -630,6 +640,9 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
                               "unread", "all_reports", "grades", "counter",
                               "clarify_text", "unread_clarify", "ungrounded"))
         sessions = _restore_sessions(snap["sessions"], snap["threads"], pool)
+        # The relaunch IS the operator decision the pause waited for, so the outage
+        # count starts over; otherwise every resume allows one failure, then pauses.
+        state.transport_failures = 0
         print(f"↩ resuming {qid} from turn {state.turns_used}")
         log.note(f"resumed from the turn-{state.turns_used} snapshot")
     else:

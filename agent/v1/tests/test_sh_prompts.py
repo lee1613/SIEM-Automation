@@ -118,3 +118,15 @@ def test_the_prompt_teaches_the_stamp_and_what_a_false_one_costs():
     # ambiguous invites SH to burn a SPAWN slot on a validator it cannot spawn.
     assert "THE RUNNER ACTS AUTOMATICALLY" in SH_SYSTEM_PROMPT
     assert "you do NOT spawn anything" in SH_SYSTEM_PROMPT
+
+
+def test_every_stamp_rereads_the_question_and_checks_a_set_both_ways():
+    # v1.4.4_smoke5_r1 Q216: a set premise was stamped sound after checking only for
+    # MISSING members; a member that did not do what the question asked went through.
+    from conversation import PremiseStamp
+    from sh_loop import SH_SYSTEM_PROMPT
+    c3 = SH_SYSTEM_PROMPT[SH_SYSTEM_PROMPT.index("C3."):SH_SYSTEM_PROMPT.index("C4.")]
+    assert "re-read the QUESTION itself" in c3
+    assert "MISSING" in c3 and "does not do what the question's words require" in c3
+    desc = PremiseStamp.model_fields["claim_holds"].description
+    assert "Re-read the question's" in desc and "both directions" in desc

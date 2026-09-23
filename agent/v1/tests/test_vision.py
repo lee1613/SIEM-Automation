@@ -123,7 +123,7 @@ class _Client:
         outer = self
 
         class _Completions:
-            def create(self, *, model, messages, max_tokens):
+            def create(self, *, model, messages, **limit):
                 outer.seen.append((model, messages))
                 if model in outer.dead:
                     raise RuntimeError("404 model not found")
@@ -159,3 +159,30 @@ def test_when_nothing_answers_every_failure_is_named():
         describe(PNG, "image/png", "what is this?", client=c)
     for model in VISION_MODELS:
         assert model in str(exc.value)
+
+
+def test_the_tool_reads_every_matching_event_not_just_the_first(monkeypatch):
+    """v1.4.4_smoke5_r1 Q217: one SMTP flow_id matched 5 events (greeting, commands,
+    message) and the tool read only the first, a 502-byte protocol record - so a search
+    that did name the right session found nothing. Unsure which event holds the image,
+    the senior may match several; every image in them goes to the vision model in turn."""
+    from unittest.mock import MagicMock
+
+    import splunk_agent
+    import vision
+    fake = MagicMock()
+    fake.search.return_value = {
+        "results": [{"_raw": json.dumps({"method": "QUIT"})},
+                    {"_raw": json.dumps({"content": [_email(_jpeg(), "a.jpg")]})},
+                    {"_raw": json.dumps({"content": [_email(_jpeg(color=(0, 0, 255)),
+                                                            "b.jpg")]})}],
+        "_meta": {"total_event_count": 3}}
+    seen = []
+    monkeypatch.setattr(vision, "describe",
+                        lambda png, mime, q, **k: seen.append(png) or "a column chart")
+    tool = {t.name: t for t in splunk_agent.make_tools(fake)}["read_image"]
+    out = tool.invoke({"spl": "index=x flow_id=1", "question": "what chart is this?"})
+    assert fake.search.call_args.kwargs["max_results"] == vision.MAX_EVENTS
+    assert len(seen) == 2 and "(a.jpg, 40x20)" in out and "(b.jpg, 40x20)" in out
+    out = tool.invoke({"spl": "index=x flow_id=1", "question": "q", "name": "b.jpg"})
+    assert len(seen) == 3 and "b.jpg" in out and "a.jpg" not in out

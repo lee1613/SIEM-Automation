@@ -1,0 +1,262 @@
+[
+  {
+    "qid": "Q224",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "DNS queries to brewertalk.com can appear in exactly two feeds in index=botsv3: (a) sourcetype=stream:dns, field `query` — searched with `index=botsv3 sourcetype=stream:dns query=\"*brewertalk.com\" | stats count by query`, returned only www.brewertalk.com (107 events); (b) the Route 53 public query log at source=lambda:DNS, sourcetype=aws:cloudwatchlogs — 115,145 events, FQDN in _raw token 4, sampled events all *.brewertalk.com. No source named route53 exists (get_sources keyword=route53 returned 0 rows). The answer's records are in (b).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "get_sources keyword=route53 returned 0 rows; get_sources keyword=dns and get_sourcetype_fields located both feeds; the stream:dns search returned a single query name.",
+    "rival": "",
+    "stamp": "false",
+    "stamp_reason": "The report supports that Route 53 logs are in source=lambda:DNS and that stream:dns is another DNS-related feed, but it does not establish the claim as written that DNS queries to brewertalk.com can appear in exactly two feeds in the whole index because the cited get_sources result was partial and not a full-source coverage proof.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival reading is that another source or feed in the index could also contain relevant brewertalk.com DNS queries even if it was not surfaced in the partial source listing. This round established lambda:DNS as the correct measurement feed, but not the exclusive 'exactly two feeds' coverage claim.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"query\": \"www.brewertalk.com\", \"count\": \"107\"}",
+        "evidence": "get_sources keyword=route53 returned 0 rows; get_sources keyword=dns and get_sourcetype_fields located both feeds; the stream:dns search returned a single query name."
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=False, holds=False): The report supports that Route 53 logs are in source=lambda:DNS and that stream:dns is another DNS-related feed, but it does not establish the claim as written that DNS queries to brewertalk.com can appear in exactly two feeds in the whole index because the cited get_sources result was partial and not a full-source coverage proof. | rival: The strongest rival reading is that another source or feed in the index could also contain relevant brewertalk.com DNS queries even if it was not surfaced in the partial source listing. This round established lambda:DNS as the correct measurement feed, but not the exclusive 'exactly two feeds' coverage claim."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": ""
+    }
+  },
+  {
+    "qid": "Q224",
+    "senior": "s2",
+    "id": "p2",
+    "kind": "coverage",
+    "text": "Every queried name in the Route 53 feed source=lambda:DNS (sourcetype=aws:cloudwatchlogs) is brewertalk.com or *.brewertalk.com, so the distinct third-level label set is complete within the feed the question names: 115,118 subdomain queries + 27 apex queries = 115,145 total events, with no other zone queried.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Three-way partition of every lambda:DNS event (apex / *.brewertalk.com / other) returned exactly these two rows, 2 of 2 shown — there is no \"other\" row, so no event queried any other zone; 27 + 115,118 = 115,145, matching the round-1 shape query's total_events=115145. Every Route 53 event is placed literally as apex or *.brewertalk.com, so the distinct third-level label set is complete within the feed.",
+    "rival": "Another feed (e.g. sourcetype=stream:dns, which the retired senior saw carrying www.brewertalk.com) could hold additional brewertalk.com DNS queries; ruled out as the measurement feed because the question names Route 53 and SH's framing fixes source=lambda:DNS, and the coverage query above shows the lambda:DNS set is complete and self-contained.",
+    "stamp": "true",
+    "stamp_reason": "The quoted partition output literally shows two and only two returned categories in lambda:DNS for this measure: apex_brewertalk_com=27 and subdomain_brewertalk_com=115118. As written, that supports the claim that every queried name in this Route 53 feed is either the apex or a brewertalk.com subdomain relevant to the measurement.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that lambda:DNS may also contain other zones or other query-name categories that would affect the measurement. The returned partition rows show no 'other' category and account for the feed total used by the senior, so that rival does not fit the held evidence.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"results\": [{\"partition\": \"apex_brewertalk_com\", \"count\": \"27\"}, {\"partition\": \"subdomain_brewertalk_com\", \"count\": \"115118\"}], \"meta\": {\"total_event_count\": 2, \"returned\": 2, \"sid\": \"1790142075.386\"}}",
+        "evidence": "Three-way partition of every lambda:DNS event (apex / *.brewertalk.com / other) returned exactly these two rows, 2 of 2 shown — there is no \"other\" row, so no event queried any other zone; 27 + 115,118 = 115,145, matching the round-1 shape query's total_events=115145. Every Route 53 event is placed literally as apex or *.brewertalk.com, so the distinct third-level label set is complete within the feed."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted partition output literally shows two and only two returned categories in lambda:DNS for this measure: apex_brewertalk_com=27 and subdomain_brewertalk_com=115118. As written, that supports the claim that every queried name in this Route 53 feed is either the apex or a brewertalk.com subdomain relevant to the measurement. | rival: The strongest rival reading is that lambda:DNS may also contain other zones or other query-name categories that would affect the measurement. The returned partition rows show no 'other' category and account for the feed total used by the senior, so that rival does not fit the held evidence."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "8.10",
+      "2": "8.10",
+      "3": "8.10"
+    }
+  },
+  {
+    "qid": "Q224",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "selection",
+    "text": "The unit of the average is the 100,393 distinct third-level labels (one row per distinct label), where the third-level label of each queried FQDN is the label immediately left of brewertalk.com, including labels coming from 4+-label FQDNs (e.g. m from 0907_n_hn.m.brewertalk.com).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The pipeline \"stats count by third | eval l=len(third) | stats count as distinct_labels, sum(l) as total_chars, avg(l) as avg_len\" emits exactly one row per distinct third-level label (100,393 rows), so the average is over distinct labels, not events (the event-weighted variant returned 7.704980976041974 and was ruled out). That the label is the one immediately left of brewertalk.com, including for 4+-label FQDNs, is shown by the extraction-agreement output {\"results\": [{\"total\": \"115145\", \"mismatches\": \"0\", \"null_rex_non_apex\": \"0\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790141865.381\"}} (rex anchored at \\.brewertalk\\.com$ and mvindex(split(fqdn,\".\"),-3) agree on all 115,145 events) and by the 4+-label sample rows 0907_n_hn.m.brewertalk.com and 10dc-g-siteoffice-mfp-bw.csg.brewertalk.com, whose third-level labels are m and csg.",
+    "rival": "The event-weighted average over all 115,118 subdomain queries (computed: 7.704980976041974 -> 7.70), ruled out by the question's word 'distinct'; and a 3-label-only reading that would drop third-level labels originating in 4+-label FQDNs, ruled out by the question's own example (my.example.company.com -> example), which extracts a third-level label from a 4-label name.",
+    "stamp": "true",
+    "stamp_reason": "The quoted aggregation row literally gives `distinct_labels: 100393`, `total_chars: 813121`, and `avg_rounded: 8.10`, which supports the claim that the average was taken over one row per distinct third-level label rather than over events.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is the event-weighted average over all brewertalk.com query events. That rival is ruled out by the claim’s own quoted result using distinct_labels as the unit and by the question’s wording asking about distinct third-level subdomains, not event occurrences.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"results\": [{\"distinct_labels\": \"100393\", \"total_chars\": \"813121\", \"avg_len\": \"8.099379438805494\", \"min_len\": \"1\", \"max_len\": \"55\", \"p25\": \"6\", \"p75\": \"9.811162492273263\", \"avg_rounded\": \"8.10\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790141858.379\"}}",
+        "evidence": "The pipeline \"stats count by third | eval l=len(third) | stats count as distinct_labels, sum(l) as total_chars, avg(l) as avg_len\" emits exactly one row per distinct third-level label (100,393 rows), so the average is over distinct labels, not events (the event-weighted variant returned 7.704980976041974 and was ruled out). That the label is the one immediately left of brewertalk.com, including for 4+-label FQDNs, is shown by the extraction-agreement output {\"results\": [{\"total\": \"115145\", \"mismatches\": \"0\", \"null_rex_non_apex\": \"0\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790141865.381\"}} (rex anchored at \\.brewertalk\\.com$ and mvindex(split(fqdn,\".\"),-3) agree on all 115,145 events) and by the 4+-label sample rows 0907_n_hn.m.brewertalk.com and 10dc-g-siteoffice-mfp-bw.csg.brewertalk.com, whose third-level labels are m and csg."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted aggregation row literally gives `distinct_labels: 100393`, `total_chars: 813121`, and `avg_rounded: 8.10`, which supports the claim that the average was taken over one row per distinct third-level label rather than over events. | rival: The strongest rival reading is the event-weighted average over all brewertalk.com query events. That rival is ruled out by the claim’s own quoted result using distinct_labels as the unit and by the question’s wording asking about distinct third-level subdomains, not event occurrences."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "8.10",
+      "2": "8.10",
+      "3": "8.10"
+    }
+  },
+  {
+    "qid": "Q224",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "other",
+    "text": "The regex extraction (?<third>[^.]+)\\.brewertalk\\.com$ and the positional extraction mvindex(split(fqdn,\".\"),-3) yield the same third-level label on every one of the 115,145 lambda:DNS events, so the measured label set does not depend on the extraction method.",
+    "load_bearing": false,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "index=botsv3 sourcetype=aws:cloudwatchlogs source=\"lambda:DNS\" | rex field=_raw \"^\\S+\\s+\\S+\\s+\\S+\\s+(?<fqdn>\\S+)\" | rex field=fqdn \"(?<third_rex>[^.]+)\\.brewertalk\\.com$\" | eval third_mv=mvindex(split(fqdn,\".\"),-3) | stats count as total, count(eval(third_rex!=third_mv)) as mismatches, count(eval(isnull(third_rex) AND fqdn!=\"brewertalk.com\")) as null_rex_non_apex returned total=115145, mismatches=0, null_rex_non_apex=0.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report says the regex extraction and positional extraction agree with 0 mismatches and 0 unexpected nulls over all 115,145 events, which does establish equivalence of those two extraction methods as written.",
+    "stamp_holds": "true",
+    "holds_reason": "The main rival is that one extraction method might mis-handle deeper names and produce a different third-level label set. The report rules that out by stating both methods agreed across all events, including 4+ label examples.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "total: 115145, mismatches: 0, null_rex_non_apex: 0",
+        "evidence": "index=botsv3 sourcetype=aws:cloudwatchlogs source=\"lambda:DNS\" | rex field=_raw \"^\\S+\\s+\\S+\\s+\\S+\\s+(?<fqdn>\\S+)\" | rex field=fqdn \"(?<third_rex>[^.]+)\\.brewertalk\\.com$\" | eval third_mv=mvindex(split(fqdn,\".\"),-3) | stats count as total, count(eval(third_rex!=third_mv)) as mismatches, count(eval(isnull(third_rex) AND fqdn!=\"brewertalk.com\")) as null_rex_non_apex returned total=115145, mismatches=0, null_rex_non_apex=0."
+      },
+      {
+        "round": 6,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report says the regex extraction and positional extraction agree with 0 mismatches and 0 unexpected nulls over all 115,145 events, which does establish equivalence of those two extraction methods as written. | rival: The main rival is that one extraction method might mis-handle deeper names and produce a different third-level label set. The report rules that out by stating both methods agreed across all events, including 4+ label examples."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "8.10",
+      "2": "8.10",
+      "3": "8.10"
+    }
+  },
+  {
+    "qid": "Q224",
+    "senior": "sh",
+    "id": "p5",
+    "kind": "coverage",
+    "text": "For Amazon Route 53 DNS queries to brewertalk.com, the measurable query-name evidence can show up in lambda:DNS Route 53 public query logs and in stream:dns network DNS capture, but the question's measurement is taken from the Route 53 feed; stream:dns was checked and is not the measurement feed for this question.",
+    "load_bearing": true,
+    "round_first_seen": 6,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The stream:dns route was searched directly with index=botsv3 sourcetype=stream:dns | where isnotnull(query) AND match(query,\"(?i)brewertalk\\\\.com\\\\.?$\") | stats count by query and returned exactly one row, 1 of 1 shown: www.brewertalk.com, 107 events. The companion lambda:DNS query (search fqdn=\"www.brewertalk.com\" | stats count) returned {\"results\": [{\"count\": \"135\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790142095.387\"}} — the only label stream:dns carries (www) is already in the Route 53 distinct set, so the rival route adds no distinct third-level label and the measurement is taken from the Route 53 feed, whose internal coverage is the p2 partition (apex 27 + subdomain 115,118 = 115,145, no other zone).",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted stream:dns output literally shows only `www.brewertalk.com` with 107 events, and the companion lambda:DNS quoted count shows www already present there with count 135. That supports the claim that the measurable query-name evidence for this Route 53 question is adequately covered in lambda:DNS and the searched rival route adds no new distinct third-level label.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that stream:dns or another searched route contributes additional distinct third-level brewertalk.com labels that lambda:DNS missed. The evidence rules out stream:dns as a distinct-label contributor because its only brewertalk.com name is www, already present in lambda:DNS; no equally fitting searched rival remains.",
+    "history": [
+      {
+        "round": 6,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"results\": [{\"query\": \"www.brewertalk.com\", \"count\": \"107\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790142062.385\"}}",
+        "evidence": "The stream:dns route was searched directly with index=botsv3 sourcetype=stream:dns | where isnotnull(query) AND match(query,\"(?i)brewertalk\\\\.com\\\\.?$\") | stats count by query and returned exactly one row, 1 of 1 shown: www.brewertalk.com, 107 events. The companion lambda:DNS query (search fqdn=\"www.brewertalk.com\" | stats count) returned {\"results\": [{\"count\": \"135\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790142095.387\"}} — the only label stream:dns carries (www) is already in the Route 53 distinct set, so the rival route adds no distinct third-level label and the measurement is taken from the Route 53 feed, whose internal coverage is the p2 partition (apex 27 + subdomain 115,118 = 115,145, no other zone)."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted stream:dns output literally shows only `www.brewertalk.com` with 107 events, and the companion lambda:DNS quoted count shows www already present there with count 135. That supports the claim that the measurable query-name evidence for this Route 53 question is adequately covered in lambda:DNS and the searched rival route adds no new distinct third-level label. | rival: The strongest rival reading is that stream:dns or another searched route contributes additional distinct third-level brewertalk.com labels that lambda:DNS missed. The evidence rules out stream:dns as a distinct-label contributor because its only brewertalk.com name is www, already present in lambda:DNS; no equally fitting searched rival remains."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q224",
+    "senior": "sh",
+    "id": "p6",
+    "kind": "selection",
+    "text": "The unit the question asks to average is the distinct third-level label immediately left of brewertalk.com, not the full left-hand subdomain string and not an event-weighted count, because the question's own example defines third-level subdomain as the single label immediately left of the second-level domain.",
+    "load_bearing": true,
+    "round_first_seen": 7,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The unit is the distinct third-level label immediately left of brewertalk.com: the aggregation output \"distinct_labels: 100393, total_chars: 813121, avg_len: 8.099379438805494, avg_rounded: 8.10\" shows one row per distinct label (not event-weighted — the event-weighted variant returned 7.704980976041974 and was ruled out), and the extraction-agreement output quoted here shows the rex anchored at \\.brewertalk\\.com$ and mvindex(split(fqdn,\".\"),-3) pick the identical label on all 115,145 events. For 4+-label names the sample rows 0907_n_hn.m.brewertalk.com and 10dc-g-siteoffice-mfp-bw.csg.brewertalk.com yield m and csg — the single label immediately left of the second-level domain, exactly the question's example (my.example.company.com -> example), not the full left-hand string (0907_n_hn.m) and not a label counted from the left.",
+    "rival": "Rival 1: average over events instead of distinct labels (the senior ruled this out with the event-weighted 7.70 note). Rival 2: for deeper names like 0907_n_hn.m.brewertalk.com, measure the whole left-hand portion 0907_n_hn.m or count from the left; the clarification says both are ruled out by the question's example and by zero mismatches between the anchored regex and mvindex(split(fqdn,\".\"),-3).",
+    "stamp": "true",
+    "stamp_reason": "The reported evidence states that two independent extraction methods agreed on all 115,145 events and that 4+-label examples yield the label immediately left of brewertalk.com, which does support the claim as written about the unit being that third-level label.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is to average either the whole subdomain portion to the left of brewertalk.com or an event-weighted set. The question's own example fixes the unit as the single label immediately left of the second-level domain, and the report explicitly rules out the event-weighted rival as the wrong unit.",
+    "history": [
+      {
+        "round": 7,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "total: 115145, mismatches: 0, null_rex_non_apex: 0",
+        "evidence": "The unit is the distinct third-level label immediately left of brewertalk.com: the aggregation output \"distinct_labels: 100393, total_chars: 813121, avg_len: 8.099379438805494, avg_rounded: 8.10\" shows one row per distinct label (not event-weighted — the event-weighted variant returned 7.704980976041974 and was ruled out), and the extraction-agreement output quoted here shows the rex anchored at \\.brewertalk\\.com$ and mvindex(split(fqdn,\".\"),-3) pick the identical label on all 115,145 events. For 4+-label names the sample rows 0907_n_hn.m.brewertalk.com and 10dc-g-siteoffice-mfp-bw.csg.brewertalk.com yield m and csg — the single label immediately left of the second-level domain, exactly the question's example (my.example.company.com -> example), not the full left-hand string (0907_n_hn.m) and not a label counted from the left."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported evidence states that two independent extraction methods agreed on all 115,145 events and that 4+-label examples yield the label immediately left of brewertalk.com, which does support the claim as written about the unit being that third-level label. | rival: The strongest rival reading is to average either the whole subdomain portion to the left of brewertalk.com or an event-weighted set. The question's own example fixes the unit as the single label immediately left of the second-level domain, and the report explicitly rules out the event-weighted rival as the wrong unit."
+      }
+    ],
+    "candidate_at_each_round": {}
+  }
+]

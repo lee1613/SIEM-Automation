@@ -783,6 +783,25 @@ def test_a_paused_question_resumes_from_its_last_turn(tmp_path, monkeypatch):
     assert "resumed from the turn-1 snapshot" in _conversation(tmp_path)
 
 
+def test_a_resumed_question_gets_a_fresh_outage_count(tmp_path, monkeypatch):
+    # v1.4.4_smoke5_r1 Q328: the snapshot carried transport_failures=1, so the first
+    # 500 after a relaunch counted as the second and paused again at once. The
+    # relaunch is the operator's decision; the resumed question skips once more.
+    import sh_loop
+
+    def _unreachable(*a, **k):
+        raise RunPaused("/tmp/decision_request.json", "outage")
+
+    monkeypatch.setattr(sh_loop, "resolve_interrupt", _unreachable)
+    with pytest.raises(RunPaused):
+        _run(_LLM([_turn(_spawn()), _turn(_spawn())]), _Pool(status="api_failed"),
+             tmp_path, hitl=True, points=100)
+    second = _LLM([_turn(_spawn()), _turn(_spawn()), _turn(_answer())])
+    with pytest.raises(RunPaused):
+        _run(second, _Pool(status="api_failed"), tmp_path, hitl=True, points=100)
+    assert len(second.turns) == 1, "skipped the first failure after resume, paused on the second"
+
+
 def test_an_operator_who_can_answer_can_still_abort(tmp_path, monkeypatch):
     # The skip above is only for an operator who cannot be reached. One who can be
     # and says abort must still stop the run, or the pause stops meaning anything.

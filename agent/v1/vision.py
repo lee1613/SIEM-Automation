@@ -46,18 +46,24 @@ import os
 import re
 from typing import NamedTuple
 
-# Priority order, as the operator specified. The first that answers is used; a NIM model
-# that is listed but not servable returns a bare 404, so "it is in models.list()" is not
-# evidence it works (see usage_tracker's NIM notes) - hence a fallback rather than one id.
+# Priority order, as the operator specified (2026-09-23): Nemotron on NIM first, then
+# gpt-5.4-mini on OpenAI when it fails. meta/llama-3.2-90b-vision-instruct was dropped
+# after returning nothing but 504s. Both are priced at 0 (usage_tracker).
 VISION_MODELS = (
-    "meta/llama-3.2-90b-vision-instruct",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "gpt-5.4-mini",
 )
 NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 # Beyond this the request is refused rather than sent. A senior that points the tool at a
 # 40 MB object should be told so, not left waiting on a request that will fail anyway.
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+# One search is read to this many events: an SMTP session alone is several (greeting,
+# commands, message), and the message is rarely the first Splunk returns.
+MAX_EVENTS = 10
+# Without a `name`, each image found is described in turn, up to this many.
+MAX_IMAGES = 5
 
 _MAGIC = [
     (b"\xff\xd8\xff", "image/jpeg"),
@@ -219,12 +225,17 @@ def listing(images: list[Image], notes: list) -> str:
                                   "and no base64, hex or raw image bytes."))
 
 
-def _client():
+def _is_nim(model: str) -> bool:
+    return model.startswith(("nvidia/", "meta/"))
+
+
+def _client(model: str):
     from openai import OpenAI  # imported lazily: this module is imported at startup
-    key = os.getenv("NIM_API_KEY", "")
+    env = "NIM_API_KEY" if _is_nim(model) else "OPENAI_API_KEY"
+    key = os.getenv(env, "")
     if not key:
-        raise RuntimeError("NIM_API_KEY is not set")
-    return OpenAI(base_url=NIM_BASE_URL, api_key=key)
+        raise RuntimeError(f"{env} is not set")
+    return OpenAI(base_url=NIM_BASE_URL, api_key=key) if _is_nim(model) else OpenAI(api_key=key)
 
 
 def describe(raw: bytes, mime: str, question: str, *, client=None,
@@ -236,13 +247,15 @@ def describe(raw: bytes, mime: str, question: str, *, client=None,
     with every failure named, because "the vision model is down" and "this model id is
     dead" need different fixes from the operator.
     """
-    client = client or _client()
     data_url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
     failures = []
     for model in models:
+        # gpt-5 models reject max_tokens and spend part of the budget reasoning.
+        limit = ({"max_tokens": max_tokens} if _is_nim(model)
+                 else {"max_completion_tokens": max(max_tokens, 2000)})
         try:
-            resp = client.chat.completions.create(
-                model=model, max_tokens=max_tokens,
+            resp = (client or _client(model)).chat.completions.create(
+                model=model, **limit,
                 messages=[{"role": "user", "content": [
                     {"type": "text", "text": question},
                     {"type": "image_url", "image_url": {"url": data_url}},
@@ -254,7 +267,8 @@ def describe(raw: bytes, mime: str, question: str, *, client=None,
             u = getattr(resp, "usage", None)
             if u is not None:
                 tracker.add_nim_usage(
-                    model, getattr(u, "prompt_tokens", 0) or 0, 0,
+                    model if _is_nim(model) else f"{model} (vision)",
+                    getattr(u, "prompt_tokens", 0) or 0, 0,
                     getattr(u, "completion_tokens", 0) or 0,
                     qid=qid, role="vision")
         text = (resp.choices[0].message.content or "").strip()

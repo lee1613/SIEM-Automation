@@ -111,11 +111,17 @@ class PremiseStamp(BaseModel):
                     "and still be about the wrong entity, the wrong feed, or the wrong "
                     "reading of the question's words. If the same result set that proves "
                     "this claim also shows a rival fitting the question's wording at "
-                    "least as well, this claim does not hold. True or false.")
+                    "least as well, this claim does not hold. Re-read the question's "
+                    "own words - its verb and every qualifier - before answering, and "
+                    "judge the claim against them, not against a paraphrase. For a claim "
+                    "about a set, check both directions: a member missing, and a member "
+                    "present that does not do what the question asks. True or false.")
     holds_reason: str = Field(
         description="One or two sentences naming the strongest rival reading of the "
                     "question that this claim rules out, and what in the evidence rules "
-                    "it out. 'No rival' is a permitted answer, but say it deliberately.")
+                    "it out. For a set, name the stronger of the two rivals: a missing "
+                    "member, or a member that does not fit the question's words. 'No "
+                    "rival' is a permitted answer, but say it deliberately.")
 
 
 class SeniorDirective(BaseModel):
