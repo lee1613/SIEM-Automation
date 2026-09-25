@@ -72,7 +72,7 @@ def over_output_cap(state: dict) -> bool:
 # Per-request LLM timeout / retry budget. SDK defaults are 600s and 2 retries;
 # 600s of silence on a stalled connection is the "process died but is still
 # running" symptom. Retries use the SDK's own capped-exponential backoff.
-LLM_TIMEOUT_S    = 120.0   # workers do long tool-heavy turns; raise if endpoint is slow
+LLM_TIMEOUT_S    = 300.0   # workers do long tool-heavy turns; GLM-5.3 exceeded 120s on long contexts (Q317, Q328)
 LLM_MAX_RETRIES  = 3
 MANIFEST_PATH  = os.path.join(os.path.dirname(__file__), "botsv3_fields.json")
 
