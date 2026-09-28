@@ -1,7 +1,6 @@
 """Malformed provider tool calls are mended, not crashed on (Q216 r8)."""
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
-
 from splunk_agent import repair_tool_calls
 
 

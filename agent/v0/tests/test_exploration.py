@@ -1,7 +1,6 @@
 """The exploration worker: pivot ordering, its budget, and its return schema."""
 
-from exploration import (CONTENT_SCAN_MAX, SYSTEM_PROMPT, make_tools,
-                         parse_report, render_report)
+from exploration import CONTENT_SCAN_MAX, SYSTEM_PROMPT, make_tools, parse_report, render_report
 
 
 class _FakeSplunk:

@@ -1,0 +1,10 @@
+# v1 timeline — test_20260917_224357  (TEST RUN)
+
+Started: 2026-09-17T22:43:57
+
+
+---
+
+## Q216  (1000 pts)
+
+> According to the Cisco NVM flow logs, for how many seconds does the endpoint generate Monero cryptocurrency?

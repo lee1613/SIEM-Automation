@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the two defects the Plan-B combined 5-question smoke (`log/temp/test_20260716_095627`) exposed in the submit path — the hint path bypasses the ledger snap (submitted `'UF = 2059'` raw), and the joiner marks every CASE UPDATE `[verified]` so wrong verdicts persist as trusted findings — then re-verify with a 2-question micro-smoke.
+**Goal:** Fix the two defects the Plan-B combined 5-question smoke (`log/v0/v0.3/v0.3_plan-b_smoke5_20260716_095627`) exposed in the submit path — the hint path bypasses the ledger snap (submitted `'UF = 2059'` raw), and the joiner marks every CASE UPDATE `[verified]` so wrong verdicts persist as trusted findings — then re-verify with a 2-question micro-smoke.
 
 **Architecture:** One pure helper `finalize_answer` in `case_file.py` (label-prefix strip + snap-to-ledger) applied at BOTH extractor call sites in the runner, so the hint path gets the same byte-fidelity guarantee as the joiner path. One pure helper `reconcile_findings` in `case_file.py` demotes a question's `verified` findings to `hypothesis` when the scoreboard says WRONG — post-submit truth feedback closing the verified-inflation hole.
 
@@ -12,7 +12,7 @@
 
 ## Smoke-run defect record (what this plan fixes — and what it doesn't)
 
-Source: `log/temp/test_20260716_095627` (Q216, Q303, Q329, Q330, Q331 + `--recon --hints`; 1/5 correct, $1.09, `failed_delegations=2`).
+Source: `log/v0/v0.3/v0.3_plan-b_smoke5_20260716_095627` (Q216, Q303, Q329, Q330, Q331 + `--recon --hints`; 1/5 correct, $1.09, `failed_delegations=2`).
 
 | # | Defect | Evidence | Status |
 |---|--------|----------|--------|

@@ -71,9 +71,13 @@ def render_waterfall(entries: list[dict]) -> None:
 
 
 ABSTRACT_WATERFALL = [
-    {"tier": "sh", "type": "delegate", "content": "\"Investigate lateral movement on host X\" → spawns a Senior worker with a focused subquestion."},
-    {"tier": "senior", "type": "investigate", "content": "Runs Splunk searches, reasons over results, reports a finding back to SH.", "spl": "index=botsv3 host=X ..."},
-    {"tier": "extractor", "type": "answer", "content": "Strips SH's final prose answer down to the bare value the scoreboard expects."},
+    {"tier": "sh", "type": "delegate",
+     "content": "\"Investigate lateral movement on host X\" → spawns a Senior worker with a focused subquestion."},
+    {"tier": "senior", "type": "investigate",
+     "content": "Runs Splunk searches, reasons over results, reports a finding back to SH.",
+     "spl": "index=botsv3 host=X ..."},
+    {"tier": "extractor", "type": "answer",
+     "content": "Strips SH's final prose answer down to the bare value the scoreboard expects."},
 ]
 
 

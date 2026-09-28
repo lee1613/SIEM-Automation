@@ -1,6 +1,6 @@
 """The Q216 ledger smoke run's failure mode: SH re-filed one premise triplet six times.
 
-`log/temp/v0.4.2_ledger_Q216_r1/premise_ledger.json` holds 28 premises, 18 of them SH's,
+`log/v0/v0.4/intermediate/v0.4.2_ledger_Q216_r1/premise_ledger.json` holds 28 premises, 18 of them SH's,
 and those 18 are six copies of the same coverage/selection/definition claims (rounds 4, 5,
 8, 10, 16, 18). Three distinct claims, eighteen ids, no answer, $2.03.
 

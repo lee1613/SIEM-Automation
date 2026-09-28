@@ -1,7 +1,6 @@
+from executor_graph import ABORT, RETRY, SKIP, build_executor_graph, ready_tasks
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
-
-from executor_graph import ABORT, RETRY, SKIP, build_executor_graph, ready_tasks
 
 CFG = {"configurable": {"thread_id": "t"}}
 
@@ -110,11 +109,15 @@ def test_a_live_object_in_a_send_payload_breaks_checkpointing():
     the whole question with "Type is not msgpack serializable: Send" - the error
     names the Send envelope, not the object inside. Hence ctx.parent_run_tree:
     tracing handles stay in process memory and never enter a payload."""
-    import os, sqlite3, tempfile, threading
+    import os
+    import sqlite3
+    import tempfile
+    import threading
     from typing import TypedDict
+
     import pytest
-    from langgraph.graph import END, START, StateGraph
     from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.graph import END, START, StateGraph
 
     class _S(TypedDict, total=False):
         tasks: list
@@ -131,7 +134,8 @@ def test_a_live_object_in_a_send_payload_breaks_checkpointing():
             prepare_sends=prep)
         g = StateGraph(_S)
         g.add_node("executor", sub)
-        g.add_edge(START, "executor"); g.add_edge("executor", END)
+        g.add_edge(START, "executor")
+        g.add_edge("executor", END)
         db = os.path.join(tempfile.mkdtemp(), f"ckpt_{live}.sqlite")
         return g.compile(checkpointer=SqliteSaver(
             sqlite3.connect(db, check_same_thread=False)))
@@ -151,8 +155,8 @@ def test_runaway_worker_reaches_the_hitl_interrupt():
     """A worker past OUTPUT_TOKEN_CAP is stuck, not thorough. It must reach the
     same human decision point as a provider outage rather than being folded into
     an ordinary reasoning failure that SH just replans around."""
-    from langgraph.checkpoint.memory import MemorySaver
     from executor_graph import INTERRUPT_STATUSES
+    from langgraph.checkpoint.memory import MemorySaver
 
     assert "runaway" in INTERRUPT_STATUSES
 

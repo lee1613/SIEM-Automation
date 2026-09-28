@@ -1,0 +1,35 @@
+[
+  {
+    "qid": "Q216",
+    "points": 1000,
+    "verdict": "wrong",
+    "earned": 0,
+    "clean_answer": "PARTIAL ANSWER: The \"Cisco NVM flow log\" data in `index=botsv3` is the `cisco:asa` sourcetype — no sourcetype named `cisco:nvm`, `cisco:nvm:flow`, or `nvm:flow` exists (verified by enumerating all 102 sourcetype values in the index; `cisco:asa` is the only Cisco sourcetype, 80,192 events). ASA teardown records carry an explicit per-flow duration field in `duration H:MM:SS` format, e.g.:\n`Aug 20 15:18:00 FROTHLY-FW1 %ASA-6-305012: Teardown dynamic TCP translation from inside:192.168.9.30/59796 to outside:192.168.10.18/27952 duration 0:00:30`\nSo the preferred method (summing actual flow durations from mining-classified records) is feasible. The computation SPL template is:\n\n```\nindex=botsv3 sourcetype=cisco:asa \"Teardown\" <MINING_DEST_IP>\n| rex \"duration (?<hrs>\\d+):(?<mins>\\d+):(?<secs>\\d+)\"\n| eval dur_s = hrs*3600 + mins*60 + secs\n| stats sum(dur_s) as total_mining_seconds, count as teardown_flows\n```\n\nUNCERTAINTY: I could not obtain the Task 1 indicators (mining endpoint identifier and mining destination IP/port), so I cannot produce the final rounded integer. Keyword searches for \"monero\", \"mining\", \"pool\", \"stratum\", \"xmr\", and \"cisco\" in the manifest returned zero matches, and my tool budget was exhausted before I could run the `cisco:asa` aggregations needed to identify the mining destination and sum the durations. I therefore have no numeric result and will not invent one.\n\nNEXT STEP: (1) Identify the mining destination IP/port by running `index=botsv3 sourcetype=cisco:asa | top limit=20 dest_ip` and/or looking for teardown records with unusual high ports (typical Monero pool ports: 3333, 4444, 5555, 7777, 9999) — e.g. `index=botsv3 sourcetype=cisco:asa \"Teardown TCP connection\" | top limit=20 dest_port`; (2) identify the mining endpoint's inside IP from those same records (`| top limit=20 src_ip`); (3) then run the duration-sum SPL above filtered to that dest IP/port and src IP, and round with `| eval total_mining_seconds=round(total_mining_seconds)`. Cross-validate session boundaries with `stream:tcp` for the same 5-tuple if ASA durations look incomplete.",
+    "grounded": true,
+    "hint_cost": 0,
+    "delegations": 11,
+    "statuses": [
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+      "partial",
+      "partial",
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+      "failed"
+    ],
+    "cap_hits": 2,
+    "latency_s": {
+      "total": 1640.5,
+      "sh": 1489.3,
+      "extract": 151.1
+    },
+    "cost_by_role": {
+      "sh": 0.039769,
+      "senior": 1.888682
+    }
+  }
+]
