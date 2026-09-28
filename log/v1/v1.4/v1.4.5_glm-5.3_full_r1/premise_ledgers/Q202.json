@@ -1,0 +1,321 @@
+[
+  {
+    "qid": "Q202",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The processor number on Frothly's web servers is recorded only in host-inventory feeds: hardware.cpu_type and osquery:results columns.cpu_brand are the only CPU-model fields in the dataset (dmesg/syslog carry only core counts; code42:computer modelInfo=null).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "s1",
+    "evidence": "Query 'index=botsv3 sourcetype=osquery:results host=hoth name=pack_hardware-monitoring_cpuid | stats count by columns.feature, columns.value' returned a product_name row with value 'AMD FX(tm)-8120 Eight-Core Processor' — a third CPU-model field p1 did not name, so 'the only CPU-model fields' is false as written. Corrected coverage premise filed this round.",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "REFUTED",
+        "by": "s1",
+        "quote": "\"columns.feature\": \"product_name\", \"columns.value\": \"AMD FX(tm)-8120 Eight-Core Processor           \"",
+        "evidence": "Query 'index=botsv3 sourcetype=osquery:results host=hoth name=pack_hardware-monitoring_cpuid | stats count by columns.feature, columns.value' returned a product_name row with value 'AMD FX(tm)-8120 Eight-Core Processor' — a third CPU-model field p1 did not name, so 'the only CPU-model fields' is false as written. Corrected coverage premise filed this round."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "E5-2676 v3"
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The web servers are the gacrux EC2 fleet (i-06fea586f3d3c8ce8, i-0920036c8ca91e501, i-09cbc261e84259b54, i-0cc93bade2b3cba63), which serve Apache behind the Frothly ELB, not hoth.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "The same aws:description ec2_instances event records \"id\": \"i-0920036c8ca91e501\", a gacrux host serving 2772 access_combined events behind the Frothly ELB — AWS infrastructure itself names the gacrux fleet as the WebServers tier. hoth is excluded: its apache2 access log (14/14 rows read) serves only /suitecrm/* URIs to internal 192.168.8.x clients, it is not an EC2 instance in that ASG, and its CPU is an AMD FX-8120, not the fleet's Xeon.",
+    "rival": "hoth (also emits access_combined, 240 events) - no hardware or osquery CPU record exists for hoth, so it cannot supply a processor number, and its web-serving role is unverified.",
+    "stamp": "true",
+    "stamp_reason": "The report's evidence supports the claim that the web servers are the gacrux EC2 fleet: a gacrux instance is tagged with the WebServers autoscaling group and hoth's web activity is internally scoped SuiteCRM traffic rather than the public web tier.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that hoth also counts as a web server because it emits Apache access logs. The evidence rules that out by showing hoth serves only internal /suitecrm/* traffic from 192.168.8.x clients and is not in the WebServers ASG, while gacrux is explicitly tagged into that web tier.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "\"tags\": {\"aws:autoscaling:groupName\": \"WebServers\"}, \"instance_type\": \"t2.medium\", \"state_code\": 16",
+        "evidence": "The same aws:description ec2_instances event records \"id\": \"i-0920036c8ca91e501\", a gacrux host serving 2772 access_combined events behind the Frothly ELB — AWS infrastructure itself names the gacrux fleet as the WebServers tier. hoth is excluded: its apache2 access log (14/14 rows read) serves only /suitecrm/* URIs to internal 192.168.8.x clients, it is not an EC2 instance in that ASG, and its CPU is an AMD FX-8120, not the fleet's Xeon."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's evidence supports the claim that the web servers are the gacrux EC2 fleet: a gacrux instance is tagged with the WebServers autoscaling group and hoth's web activity is internally scoped SuiteCRM traffic rather than the public web tier. | rival: The strongest rival is that hoth also counts as a web server because it emits Apache access logs. The evidence rules that out by showing hoth serves only internal /suitecrm/* traffic from 192.168.8.x clients and is not in the WebServers ASG, while gacrux is explicitly tagged into that web tier."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "E5-2676 v3"
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "coverage",
+    "text": "CPU-model evidence for the gacrux WebServers fleet can appear in: hardware.cpu_type (searched: 3 gacrux hosts, all E5-2676 v3), osquery:results cpuid columns.feature=product_name (searched: hoth only), osquery:results columns.cpu_brand (not re-searched per host), sourcetype=cpu (not searched), cloud-init/cloud-init-output/bootstrap boot logs (not searched), aws:description instance metadata (searched: no CPU string).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "",
+      "3": "",
+      "4": ""
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "selection",
+    "text": "The web servers whose processor number is asked for are the gacrux EC2 fleet in the WebServers autoscaling group (8 t2.medium instances including i-0920036c8ca91e501), not hoth and not mars.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "hoth with AMD FX(tm)-8120 Eight-Core Processor (osquery:results columns.feature=product_name, the only product_name row in the dataset)",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "",
+      "3": "",
+      "4": ""
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s2",
+    "id": "p5",
+    "kind": "other",
+    "text": "i-0920036c8ca91e501 runs the same E5-2676 v3 CPU as the three hardware-covered fleet members because all 8 WebServers members are t2.medium per aws:description - instance-type corroboration, not yet direct CPU evidence on that host.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "",
+      "3": "",
+      "4": ""
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s3",
+    "id": "p6",
+    "kind": "coverage",
+    "text": "Direct processor-identity evidence for i-0920036c8ca91e501 specifically can appear in: its osquery:results tables (searched: 12 tables enumerated; no cpuid, no system_info; system_profile's 166 events NOT yet read), hardware-feed coverage of that host (not searched), sourcetype=cpu / cloud-init / cloud-init-output / bootstrap for that host (not searched), aws:cloudwatch (411 events present, not searched for CPU). Fleet-wide osquery:results carries no E5-2676 string (0 events).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s3",
+    "evidence": "Every location p6 named is now searched and none yields processor identity for i-0920036c8ca91e501: osquery:results tables enumerated (12 result tables, no cpuid/system_info rows; all 166 system_profile events read - performance metrics only); hardware feed for the host -> 0 events; sourcetype=cpu -> hoth only (1192 events), sampled raw is utilization percentages (\"all 2.00 0.00 4.00 0.00 94.00\") so it cannot carry a model; cloud-init/cloud-init-output -> the quoted 7 rows, covering only the 3 other gacrux hosts, not i-0920036c8ca91e501; bootstrap -> hoth only; amazon-ssm-agent-too_small -> 725 events on the host, 0 matching Xeon/processor/cpu; aws:cloudwatch -> 411 events for the instance, 0 matching Xeon/processor/cpu_brand. The coverage list is exhausted: no direct processor-identity evidence exists for that host in captured telemetry.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The reported sweep names each remaining host-bound feed for gacrux.i-0920036c8ca91e501 and states whether it lacked coverage, lacked processor-model content, or had no CPU matches, which does support the claim that direct processor-identity evidence for that host was specifically sought across those artifacts.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that another host-bound artifact within the searched scope could still hold the processor identity, but the evidence rules out the named remaining feeds one by one. No rival within that scope remains unsearched in the report.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s3",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s3",
+        "quote": "[{\"sourcetype\": \"bootstrap\", \"host\": \"hoth\", \"count\": \"10\"}, {\"sourcetype\": \"cloud-init\", \"host\": \"gacrux.i-06fea586f3d3c8ce8\", \"count\": \"448\"}, {\"sourcetype\": \"cloud-init\", \"host\": \"gacrux.i-09cbc261e84259b54\", \"count\": \"448\"}, {\"sourcetype\": \"cloud-init\", \"host\": \"gacrux.i-0cc93bade2b3cba63\", \"count\": \"448\"}, {\"sourcetype\": \"cloud-init-output\", \"host\": \"gacrux.i-06fea586f3d3c8ce8\", \"count\": \"7\"}, {\"sourcetype\": \"cloud-init-output\", \"host\": \"gacrux.i-09cbc261e84259b54\", \"count\": \"7\"}, {\"sourcetype\": \"cloud-init-output\", \"host\": \"gacrux.i-0cc93bade2b3cba63\", \"count\": \"9\"}]",
+        "evidence": "Every location p6 named is now searched and none yields processor identity for i-0920036c8ca91e501: osquery:results tables enumerated (12 result tables, no cpuid/system_info rows; all 166 system_profile events read - performance metrics only); hardware feed for the host -> 0 events; sourcetype=cpu -> hoth only (1192 events), sampled raw is utilization percentages (\"all 2.00 0.00 4.00 0.00 94.00\") so it cannot carry a model; cloud-init/cloud-init-output -> the quoted 7 rows, covering only the 3 other gacrux hosts, not i-0920036c8ca91e501; bootstrap -> hoth only; amazon-ssm-agent-too_small -> 725 events on the host, 0 matching Xeon/processor/cpu; aws:cloudwatch -> 411 events for the instance, 0 matching Xeon/processor/cpu_brand. The coverage list is exhausted: no direct processor-identity evidence exists for that host in captured telemetry."
+      },
+      {
+        "round": 11,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported sweep names each remaining host-bound feed for gacrux.i-0920036c8ca91e501 and states whether it lacked coverage, lacked processor-model content, or had no CPU matches, which does support the claim that direct processor-identity evidence for that host was specifically sought across those artifacts. | rival: The strongest rival reading is that another host-bound artifact within the searched scope could still hold the processor identity, but the evidence rules out the named remaining feeds one by one. No rival within that scope remains unsearched in the report."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "E5-2676 v3",
+      "3": "E5-2676 v3"
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s3",
+    "id": "p7",
+    "kind": "selection",
+    "text": "The processor number on the web servers is E5-2676 v3, read from hardware cpu_type on three gacrux WebServers members (i-06fea586f3d3c8ce8, i-09cbc261e84259b54, i-0cc93bade2b3cba63), not the AMD FX(tm)-8120 — the only other CPU-model string in the dataset — because that string's sole occurrence is host=hoth, an internal SuiteCRM server outside the WebServers fleet.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "v1",
+    "evidence": "an independent reader stood up the rival reading from data, so this selection does not hold: My own search of index=botsv3 sourcetype=osquery:results for the exact string returned exactly 1 event, and its raw JSON shows columns.feature=\"product_name\" with columns.value=\"AMD FX(tm)-8120 Eight-Core Processor\" on host hoth (query pack_hardware-monitoring_cpuid, 2018-08-20 14:20:21 UTC). The feed, field, and value in the claim all match the data.",
+    "rival": "AMD FX(tm)-8120 Eight-Core Processor (osquery:results columns.feature=product_name)",
+    "stamp": "false",
+    "stamp_reason": "The quote supports that three verified web servers have hardware cpu_type strings containing E5-2676 v3 and that hoth's AMD string is outside the web-server set, but it does not establish the broader claim 'the processor number on the web servers is E5-2676 v3' as written because one selected web server still lacks direct CPU evidence.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival reading is set-based: 'web servers' means all members of the established gacrux WebServers fleet, including gacrux.i-0920036c8ca91e501. The report itself says that host has no direct processor confirmation, so the claim over the full set does not yet hold.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s3",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s3",
+        "quote": "[{\"host\": \"gacrux.i-06fea586f3d3c8ce8\", \"cpu_type\": \"Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz\", \"count\": \"1\"}, {\"host\": \"gacrux.i-09cbc261e84259b54\", \"cpu_type\": \"Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz\", \"count\": \"1\"}, {\"host\": \"gacrux.i-0cc93bade2b3cba63\", \"cpu_type\": \"Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz\", \"count\": \"1\"}]",
+        "evidence": "index=botsv3 sourcetype=hardware \"E5-2676\" | stats count by host, cpu_type -> the quoted 3 rows: every hardware-covered gacrux WebServers member records cpu_type \"Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz\", processor number E5-2676 v3. Rival excluded: index=botsv3 sourcetype=osquery:results \"FX(tm)-8120\" | stats count by host, columns.feature, columns.value -> 1 event, host=hoth (columns.feature=product_name, \"AMD FX(tm)-8120 Eight-Core Processor\"), an internal SuiteCRM server outside the WebServers fleet; and index=botsv3 sourcetype=osquery:results \"E5-2676\" -> 0 events fleet-wide, so no osquery row carries a competing E5-2676-adjacent string. No other CPU-model string has surfaced anywhere in the dataset."
+      },
+      {
+        "round": 11,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=False, holds=False): The quote supports that three verified web servers have hardware cpu_type strings containing E5-2676 v3 and that hoth's AMD string is outside the web-server set, but it does not establish the broader claim 'the processor number on the web servers is E5-2676 v3' as written because one selected web server still lacks direct CPU evidence. | rival: The strongest rival reading is set-based: 'web servers' means all members of the established gacrux WebServers fleet, including gacrux.i-0920036c8ca91e501. The report itself says that host has no direct processor confirmation, so the claim over the full set does not yet hold."
+      },
+      {
+        "round": 11,
+        "status": "REFUTED",
+        "by": "v1",
+        "quote": "{\"name\":\"pack_hardware-monitoring_cpuid\",\"hostIdentifier\":\"hoth\",\"calendarTime\":\"Mon Aug 20 14:20:21 2018 UTC\",\"unixTime\":1534774821,\"epoch\":0,\"counter\":0,\"decorations\":{\"host_uuid\":\"1E194D56-34FC-06B8-0107-41BC8367251B\",\"username\":\"klagerfield\"},\"columns\":{\"feature\":\"product_name\",\"input_eax\":\"0x80000002\",\"output_bit\":\"0\",\"output_register\":\"eax,ebx,ecx,edx\",\"value\":\"AMD FX(tm)-8120 Eight-Core Processor           \"},\"action\":\"added\"}",
+        "evidence": "an independent reader stood up the rival reading from data, so this selection does not hold: My own search of index=botsv3 sourcetype=osquery:results for the exact string returned exactly 1 event, and its raw JSON shows columns.feature=\"product_name\" with columns.value=\"AMD FX(tm)-8120 Eight-Core Processor\" on host hoth (query pack_hardware-monitoring_cpuid, 2018-08-20 14:20:21 UTC). The feed, field, and value in the claim all match the data."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "E5-2676 v3",
+      "3": "E5-2676 v3"
+    }
+  },
+  {
+    "qid": "Q202",
+    "senior": "s3",
+    "id": "p8",
+    "kind": "other",
+    "text": "On i-0920036c8ca91e501 the osquery system_info query (SELECT hostname, cpu_brand, physical_memory FROM system_info;) executed 7 times, each producing 109 bytes of output, but no system_info result rows were captured in osquery:results for that host — so its cpu_brand value is unreadable from captured telemetry, and no direct processor string exists for this host in osquery:results.",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "s3",
+    "evidence": "index=botsv3 sourcetype=osquery:results host=\"gacrux.i-0920036c8ca91e501\" name=system_profile columns.name=system_info -> 8 events, executions 1-7, cumulative output_size 109-763; and the host's osquery:results enumeration (| stats count by name) lists 12 result tables with no system_info among them.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report's quoted system_profile output states that on host gacrux.i-0920036c8ca91e501, columns.name=system_info appears with the query text \"SELECT hostname, cpu_brand, physical_memory FROM system_info;\" and repeated output_size values, which supports the claim that the system_info query ran and produced output bytes.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that readable system_info result rows for this host might already exist elsewhere in the same osquery results set, which would make the claim too strong. The report rules that out for this host by stating its 12 captured result tables exclude system_info rows, so the claim about generated-but-unreadable output holds.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s3",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s3",
+        "quote": "{\"columns.query\": \"SELECT hostname, cpu_brand, physical_memory FROM system_info;\", \"columns.output_size\": \"763\", \"columns.executions\": \"7\", \"columns.last_executed\": \"1534769826\", \"count\": \"1\"}",
+        "evidence": "index=botsv3 sourcetype=osquery:results host=\"gacrux.i-0920036c8ca91e501\" name=system_profile columns.name=system_info -> 8 events, executions 1-7, cumulative output_size 109-763; and the host's osquery:results enumeration (| stats count by name) lists 12 result tables with no system_info among them."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's quoted system_profile output states that on host gacrux.i-0920036c8ca91e501, columns.name=system_info appears with the query text \"SELECT hostname, cpu_brand, physical_memory FROM system_info;\" and repeated output_size values, which supports the claim that the system_info query ran and produced output bytes. | rival: The strongest rival reading is that readable system_info result rows for this host might already exist elsewhere in the same osquery results set, which would make the claim too strong. The report rules that out for this host by stating its 12 captured result tables exclude system_info rows, so the claim about generated-but-unreadable output holds."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "E5-2676 v3",
+      "2": "E5-2676 v3",
+      "3": "E5-2676 v3"
+    }
+  }
+]

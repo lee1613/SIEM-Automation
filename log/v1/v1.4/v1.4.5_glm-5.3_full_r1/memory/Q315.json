@@ -1,0 +1,97 @@
+{
+  "flow": [
+    "hoth was identified as the on-premises Linux server, and the hunt focused on host-side telemetry that could show remote writes into /tmp.",
+    "bash_history on hoth only showed navigation (`ls /tmp`, `cd /tmp`), so the filenames had to come from osquery FIM and process/HTTP command evidence instead.",
+    "The Struts2 RCE HTTP channel to hoth showed an `echo <base64 C source> >> /tmp/colonel` write, and osquery FIM recorded `/tmp/colonel` CREATED/UPDATED at the same second by uid 111.",
+    "A second base64 echo on the same HTTP RCE channel lined up with a unique FIM creation at exactly 1534763390 for `/tmp/definitelydontinvestigatethisfile.sh`, again by uid 111, with no rival file at that timestamp.",
+    "All nearby /tmp artifacts were ruled out as local derivatives or later outputs: `/tmp/colonel.c`, `/tmp/colonelnew`, `/tmp/backpipe`, `/tmp/loot.txt`, `/tmp/suitecrm.sql`, and `/tmp/blargh.tgz`."
+  ],
+  "derivation": "The first workable pivot was hoth’s host telemetry. Shell history only gave `ls /tmp` and `cd /tmp`, so it established /tmp activity but not the filenames. The decisive evidence came from the Struts2 RCE HTTP command stream and osquery FIM: the HTTP form_data contained a remote write ending `>> /tmp/colonel`, and FIM showed `/tmp/colonel` created at the same second. A second HTTP base64 echo on the same RCE channel aligned with a unique FIM creation for `/tmp/definitelydontinvestigatethisfile.sh` at 1534763390. Process events then explained the other /tmp files as local derivatives: `base64 --decode /tmp/colonel > /tmp/colonel.c`, gcc build of `colonelnew`, `mknod /tmp/backpipe p`, and later collection/archive outputs `loot.txt`, `suitecrm.sql`, and `blargh.tgz`. The final filename pair held as the two remotely streamed /tmp files on hoth is `colonel,definitelydontinvestigatethisfile.sh`.",
+  "entities": [
+    {
+      "key": "hoth",
+      "fact": "on-premises Linux server compromised in the attack"
+    },
+    {
+      "key": "colonel",
+      "fact": "remote inbound /tmp file written via the HTTP RCE channel"
+    },
+    {
+      "key": "definitelydontinvestigatethisfile.sh",
+      "fact": "remote inbound /tmp file created at the second base64 echo"
+    },
+    {
+      "key": "colonel.c",
+      "fact": "local decode derivative of /tmp/colonel"
+    },
+    {
+      "key": "colonelnew",
+      "fact": "local compile output from colonel.c"
+    },
+    {
+      "key": "backpipe",
+      "fact": "local FIFO created with mknod"
+    },
+    {
+      "key": "loot.txt",
+      "fact": "later local collection output"
+    },
+    {
+      "key": "suitecrm.sql",
+      "fact": "later local SQL dump output"
+    },
+    {
+      "key": "blargh.tgz",
+      "fact": "later local archive output"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "bash_history",
+      "fact": "On hoth, bash history showed `/tmp` navigation only (`ls /tmp`, `cd /tmp`), not the streaming writes themselves."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "The Struts2 RCE command channel to hoth carried base64 `echo` writes into `/tmp`, including the direct write to `/tmp/colonel`."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "FIM/process evidence on hoth tied `/tmp/colonel` and `/tmp/definitelydontinvestigatethisfile.sh` to exact-second creation, while later `/tmp` artifacts were explained by local decode/compile/FIFO/archive/collection commands."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "bash_history",
+      "purpose": "Showed only /tmp navigation on hoth; no filename answer there.",
+      "spl": "get_raw_events sourcetype=bash_history keyword=/tmp -> 2 events: \"ls /tmp\" @ 2018-08-20T21:28:41+08:00, \"cd /tmp\" @ 2018-08-20T19:06:55+08:00.",
+      "returns": "Two navigation events only, no streamed filenames."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Recovered the remote write to /tmp/colonel from the RCE command stream.",
+      "spl": "index=botsv3 sourcetype=stream:http uri_path=\".../saveGangster.action\" form_data=* | rex field=form_data \"#cmd='(?<rce_cmd>[^']*)\" | stats count values(_time) by rce_cmd",
+      "returns": "Enumerated the RCE commands, including `echo <base64 C source> >> /tmp/colonel` and the second base64 echo."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "Matched the remote writes to exact-second FIM creation and ruled out local derivatives.",
+      "spl": "index=botsv3 sourcetype=osquery:results host=hoth columns.target_path=\"/tmp/*\" | stats count by name",
+      "returns": "Returned the /tmp file set on hoth, including `colonel` and `definitelydontinvestigatethisfile.sh`, plus later local derivatives."
+    }
+  ],
+  "ruled_out": "Dead ends and disproven paths: hoth bash_history as the answer source; /tmp/colonel.c, /tmp/colonelnew, /tmp/backpipe, /tmp/loot.txt, /tmp/suitecrm.sql, and /tmp/blargh.tgz as remote-streamed files; stream:tcp and linux_audit as sources of the filename pair; nearby /tmp noise files and compiler/system temp artifacts.",
+  "qid": "Q315",
+  "question": "During the attack, two files are remotely streamed to the /tmp directory of the on-premises Linux server by the adversary. What are the names of these files?",
+  "guidance": "Comma separated without spaces, in alphabetical order, include the file extension where applicable.",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p1 [coverage] The two files remotely streamed to /tmp on hoth can appear in: (a) hoth's bash_history commands referencing /tmp, (b) osquery:results file/process event tables on hoth, (c) stream:http request bodies/URIs delivering files to hoth, (d) linux_audit execve records. (a) searched — only 'ls /tmp' and 'cd /tmp' found, no filenames; (b), (c), (d) not yet searched. — holds: The strongest rival is that the answer should come from a different feed such as stream:tcp or bash_history alone. The same report rules that out by showing 0 relevant stream:tcp/syslog content and by using FIM plus HTTP RCE commands to cover both file appearance and remote delivery semantics.",
+    "p3 [coverage] Files remotely streamed to /tmp on hoth can show up as: (a) redirect targets of echo commands in stream:http form_data on /frothlyinventory/integration/saveGangster.action - searched, found /tmp/colonel plus a JPEG-base64 echo with no visible redirect; (b) osquery:results file events on hoth - full-token name search returned 0; (c) bash_history - 0; (d) stream:tcp payloads on the nc channel to 45.77.53.176:8088, linux_audit, and ps on hoth - NOT yet searched. — holds: The strongest rival is that the streamed files would have to be read from stream:tcp payload or bash history instead. The evidence rules that out for this question by showing stream:tcp has only flow metadata while the HTTP RCE commands and hoth FIM/proc rows together capture the remote inbound writes and their filenames/derivatives.",
+    "p4 [selection] The two remote inbound writes to /tmp on hoth are the C-source echo (>> /tmp/colonel, directly evidenced at 11:35:17Z) and the JPEG-base64 echo (11:36:30Z, redirect not captured in form_data; established candidate name definitelydontinvestigatethisfile.sh). — holds: The strongest rival is colonel.c, because it is closely adjacent in /tmp and derived from colonel, or another /tmp file such as backpipe or blargh.tgz. The evidence rules those out by showing colonel.c is created later by base64 decode, colonelnew by compile, backpipe by mknod, and the collection/archive files later in the nc-backpipe phase, while only colonel and definitelydontinvestigatethisfile.sh exist at the two remote-echo creation seconds.",
+    "p5 [selection] Selection: The two files remotely streamed into /tmp on hoth are colonel and definitelydontinvestigatethisfile.sh because the Struts2 RCE command channel writes base64 content into /tmp at two specific seconds, and the complete osquery FIM/process timeline shows only those two files as inbound writes at those seconds while colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, and blargh.tgz are later local decode, compile, FIFO, collection, or archive artifacts. — holds: not stamped",
+    "p6 [selection] Selection: The two files remotely streamed into /tmp on hoth are colonel and definitelydontinvestigatethisfile.sh, and not colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, or blargh.tgz, because the complete 15-command Struts2 RCE enumeration contains exactly two content-bearing inbound commands (both echo), and the complete osquery FIM CREATED list in the attack window (25/25 rows) shows only those two files created at the two echo seconds by uid 111 (tomcat8, the RCE context), while every rival is a later local artifact with a local creation command in the complete process-event list. — holds: The strongest rival is colonel.c or another /tmp artifact fitting 'remotely streamed' as well as the chosen pair. The evidence rules that out by showing colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, and blargh.tgz are all created later by local decode, compile, FIFO, collection, or archive steps, while only colonel and definitelydontinvestigatethisfile.sh align to the remote echo-write seconds."
+  ],
+  "validator_verdicts": [
+    "p2 → REFUTED by v1 (rival tested: /home/ec2-user/.bash_history (17 events, gacrux.i-0920036c8ca91e501 and mars.i-08e52f8b5a034012d) — ruled out by host field: those are AWS instances, not the on-prem Linux server hoth.)"
+  ]
+}

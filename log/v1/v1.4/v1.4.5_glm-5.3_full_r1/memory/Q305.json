@@ -1,0 +1,72 @@
+{
+  "flow": [
+    "The question asks for the PID of the process listening on a 'leet' port, so the relevant evidence is endpoint listening-port telemetry where ports and PIDs are recorded together.",
+    "The listener scope was narrowed to the listening-port feeds, and the leet-port candidates tested were 1337, 31337, 1338, 13370, and 7331 across Script:ListeningPorts, Unix:ListeningPorts, netstat, lsof, and openPorts.",
+    "Complete coverage showed that only dest_port=1337 had any listening record; the other candidate ports returned zero records.",
+    "The raw Unix:ListeningPorts event for hoth literally recorded `app=netcat dest_port=1337 pid=14356 user=root`, so the PID attached to the leet-port listener is 14356.",
+    "netstat on the same host corroborated that *:1337 was in LISTEN state, confirming this was an actual listening socket rather than a transient connection."
+  ],
+  "derivation": "Start with port-listening telemetry because the question asks for a process ID of a process listening on a 'leet' port. The senior searched the listening-port feeds and tested the likely leet-number ports, then found that dest_port=1337 was the only candidate with a listening record. The direct Unix:ListeningPorts event on host hoth contained the full tuple `app=netcat dest_port=1337 pid=14356 user=root`, which supplies the PID exactly as recorded. netstat on hoth showed `*:1337` in LISTEN state and was used only as corroboration. The submitted answer is 14356.",
+  "entities": [
+    {
+      "key": "hoth",
+      "fact": "Linux host where the 1337 listener was found"
+    },
+    {
+      "key": "netcat",
+      "fact": "process listening on dest_port=1337"
+    },
+    {
+      "key": "14356",
+      "fact": "PID of the listening netcat process on hoth"
+    },
+    {
+      "key": "1337",
+      "fact": "the leet port identified in the listening-port telemetry"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "Unix:ListeningPorts",
+      "fact": "Carries dest_port, pid, app, user, host, and transport; the raw event can show the literal listener tuple including PID."
+    },
+    {
+      "sourcetype": "netstat",
+      "fact": "Shows TCP LISTEN state on *:1337 on hoth but does not carry a PID field in this investigation."
+    },
+    {
+      "sourcetype": "Script:ListeningPorts",
+      "fact": "Part of the port-listing inventory used to test candidate leet ports; no 1337 listener was found there."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "Unix:ListeningPorts",
+      "purpose": "Find the listening process and PID for port 1337",
+      "spl": "`index=botsv3 sourcetype=\"Unix:ListeningPorts\" dest_port=1337 | stats count list(_raw)`",
+      "returns": "1 raw event: `Mon Aug 20 11:48:24 UTC 2018 app=netcat dest_ip=* dest_port=1337 pid=14356 user=root fd=3u ip_version=4 dvc_id=254926 transport=TCP` on host hoth."
+    },
+    {
+      "sourcetype": "Unix:ListeningPorts",
+      "purpose": "Confirm that 1337 is the only leet candidate with a listening record across the searched feeds",
+      "spl": "`index=botsv3 sourcetype IN (5 port feeds) dest_port IN (1337,31337,1338,13370,7331)`",
+      "returns": "33 events total, all dest_port=1337 on hoth with app=netcat and pid=14356; zero records for 31337, 1338, 13370, and 7331."
+    },
+    {
+      "sourcetype": "netstat",
+      "purpose": "Corroborate that the 1337 socket is actually listening",
+      "spl": "`index=botsv3 sourcetype=netstat dest_port=1337`",
+      "returns": "32 events, all showing `tcp 0 1 *:1337 *:* LISTEN` on hoth; no PID field in this feed."
+    }
+  ],
+  "ruled_out": "31337, 1338, 13370, and 7331 as the leet port because they had zero records across the searched listening-port feeds; Script:ListeningPorts as the source of the final PID because it had no 1337 listener; netstat as the PID source because it showed LISTEN state but no PID field; lsof as unnecessary because it did not provide dest_port in this investigation.",
+  "qid": "Q305",
+  "question": "What is the process ID of the process listening on a \"leet\" port?",
+  "guidance": "",
+  "answer": "14356",
+  "verified_premises": [
+    "p1 [coverage] A 'leet' port in BOTSv3 listening-port telemetry is 1337; the other leetspeak number 31337 and near-variants have no listening records anywhere in scope. — holds: The strongest rival reading is that another leet-number port such as 31337 also qualifies. The report explicitly says the searched rival ports had zero records across the five port feeds, so 1337 is the only evidenced qualifying port.",
+    "p2 [selection] The process listening on the leet port is netcat (pid 14356) on Linux host hoth, not a process on any Windows endpoint. — holds: The strongest rival is another process or PID listening on a different qualifying leet port. The report states only 1337 had any listening record and the raw event for that port names pid 14356, so no equally fitting rival is shown."
+  ],
+  "validator_verdicts": []
+}

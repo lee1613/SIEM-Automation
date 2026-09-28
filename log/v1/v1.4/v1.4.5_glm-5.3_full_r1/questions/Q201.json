@@ -1,0 +1,410 @@
+{
+  "id": "Q201",
+  "question": "What field would you use to alert that AWS API activity have occurred without MFA (multi-factor authentication)?",
+  "base_points": 100,
+  "correct_answer": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+  "sh_answer": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+  "clean_answer": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+  "sb_correct": true,
+  "earned": 100,
+  "hint_cost": 0,
+  "num_delegations": 2,
+  "delegations": [
+    {
+      "worker": "s1",
+      "qid": "Q201",
+      "subquestion": "Determine which full JSON field path in Frothly's aws:cloudtrail records indicates that AWS API activity occurred without MFA, and establish it from CloudTrail evidence rather than AWS convention. The answer must be the exact field path, not a value.",
+      "status": "solved",
+      "answer": "# s1 - Q201 - Round 1\n_stamped by runner: rounds_remaining=2 novel_spl=5_\n**Scope:** sourcetype=aws:cloudtrail | fields=userIdentity.sessionContext.attributes.mfaAuthenticated, additionalEventData.MFAUsed, authentication_method, eventType, userIdentity.type\n**Insight:** FOUND\n**Candidate:** userIdentity.sessionContext.attributes.mfaAuthenticated   **Confidence:** 98\n\n## Prior rounds\n- (Round 1 — first round; no prior rounds.)\n\n## This round\n### What I ran\n- search_keyword \"mfa\" -> manifest: aws:cloudtrail carries userIdentity.sessionContext.attributes.mfaAuthenticated; ms:aad:signin carries mfa* fields (Azure, out of scope).\n- get_field_values userIdentity.sessionContext.attributes.mfaAuthenticated on aws:cloudtrail -> 1 distinct value \"false\", 2155 events, 100%.\n- get_raw_events keyword=mfaAuthenticated -> raw JSON confirms nested path: userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\" (sibling creationDate).\n- fieldsummary | search *sessionContext* OR *mfa* -> 8 rows; only MFA-bearing fields: mfaAuthenticated, additionalEventData.MFAUsed.\n- mfaAuthenticated=* | stats count by eventType userIdentity.type -> 2 rows: AwsApiCall/AssumedRole=789, AwsApiCall/IAMUser=1366 (all 2155 are API calls).\n- additionalEventData.MFAUsed=* | stats -> 4 events, all ConsoleLogin / AwsConsoleSignIn, MFAUsed=No, user bstoll.\n- fieldsummary | search *Auth*/*MultiFactor*/*credential* -> 5 rows; extra field authentication_method -> 4 ConsoleLogin events, value \"SFA\".\n\n### What it means\nFOUND. The question asks for the field to alert on AWS API activity without MFA. In Frothly's CloudTrail feed, `userIdentity.sessionContext.attributes.mfaAuthenticated` is present on all 2155 AwsApiCall events and carries the value \"false\" — it is the field that directly states an API call was made in a session that was not MFA-authenticated. Raw event JSON confirms the exact nested path userIdentity → sessionContext → attributes → mfaAuthenticated. The two rivals (additionalEventData.MFAUsed, authentication_method) exist only on the 4 AwsConsoleSignIn ConsoleLogin events — console sign-ins, not API activity — so they are ruled out. The value is a string \"false\", so the alert condition is mfaAuthenticated=\"false\".\n\n## Ruled out\n- additionalEventData.MFAUsed — appears only on 4 AwsConsoleSignIn ConsoleLogin events (bstoll), zero AwsApiCall events; marks console sign-in, not API activity.\n- authentication_method — same 4 ConsoleLogin events, value \"SFA\"; console sign-in only.\n- ms:aad:signin mfa* fields (mfaAuthDetail, mfaAuthMethod, mfaRequired, mfaResult) — Azure AD sign-in telemetry, not AWS API activity.\n\n_Iteration cap reached: 10/10 iterations used this round — cut off, not finished._\n\n_Premise updates refused by the runner:_\n- p1 stays UNVERIFIED: its quote is in no result you ran - copy the query output that shows it word for word\n- p2 stays UNVERIFIED: its quote is in no result you ran - copy the query output that shows it word for word\n\n_Partial results (runner): 1 result(s) this round returned only their first rows — `get_sourcetype_fields: {\"min_count\": 1, \"sourcetype\": \"aws:cloudtrail\"}` (50 of 429 rows seen). A claim resting on them alone is UNVERIFIED._\n",
+      "spl_used": [
+        "index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*sessionContext*\" OR field=\"*mfa*\" OR field=\"*Mfa*\" | stats count values(distinct_count) as distinct_values by field",
+        "index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count values(eventName) as eventName values(eventType) as eventType values(additionalEventData.MFAUsed) as MFAUsed values(userIdentity.type) as userIdentityType values(user_name) as user",
+        "index=botsv3 sourcetype=aws:cloudtrail userIdentity.sessionContext.attributes.mfaAuthenticated=* | stats count by eventType userIdentity.type",
+        "index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*Auth*\" OR field=\"*MultiFactor*\" OR field=\"*credential*\" | stats count values(distinct_count) as distinct_values by field",
+        "index=botsv3 sourcetype=aws:cloudtrail authentication_method=* | stats count values(authentication_method) as auth_method values(eventName) as eventName values(eventType) as eventType"
+      ],
+      "sourcetypes": [
+        "aws:cloudtrail"
+      ],
+      "full_state": [
+        {
+          "type": "HumanMessage",
+          "content": "SITUATION. Frothly Corporation is a high-growth craft brewery. Its IT environment consists of corporate Windows and Linux endpoints, standard network infrastructure, and public cloud infrastructure on Amazon Web Services and Microsoft Azure. Management suspects a major, coordinated compromise is actively underway across both on-premises assets and cloud instances. The investigation traces malicious activity from initial access to data exfiltration, and builds its timeline entirely from factual evidence, with zero structural assumptions.\n\nYou are a Senior Splunk analyst on that investigation. The data covers August 2018, and all of it is in index=botsv3. You work for SH, who is orchestrating this question.\n\nTHE BOUNDARY: SH speaks in constraints and goals; you speak in evidence and SPL. SH cannot query Splunk and will never hand you a query. Turning a goal into SPL is your job.\n\nHOW YOU RUN\nYou stay alive for the whole question. Each round gives you up to 10 tool-call iterations, then you file a report with `submit_finding`. You remember every prior round of your own, so never repeat a query you have already run — going one step further is the only thing a round is for.\n\nTWO REPLY SHAPES, so you never have to guess which is expected:\n  * To a COMMAND or a CRITIC — resume work. Use your iterations, then call `submit_finding`. A round is a CAP, not a quota: if one iteration satisfies the critic, stop there.\n  * To a CLARIFY — answer in short prose from what you already hold. No tools, no searches. It does not consume a round.\n\nNO UNTESTED ASSUMPTIONS — your report is graded hardest on this.\nEvery conclusion rests on premises. A premise is a hypothesis until a query result shows it. SH grades every report on premise verification (R4), and an untested premise is dangerous ground: it is how an investigation goes off track and returns a confident wrong answer.\nVERIFY FIRST. The first thing you do each round is try to verify the premises your work depends on, before you build further on them.\nAn educated guess is allowed only when a premise genuinely cannot be verified. Then say so: file it, leave it UNVERIFIED, and state why it could not be tested.\nYour premises do not go in the report. File them in `submit_finding`'s `new_premises`, each with a kind and whether the answer breaks without it. The runner holds them and shows every unsettled one back to you at the start of each round, with its id - settle them in `premise_updates`, quoting the query output that does it. A premise you stop mentioning does not go away.\nYour first premise each round is a `coverage` one: the ways the question's concept could show up in your scope, and for each, the query that searched it and what came back. Your second is `selection`: why this entity and not the other candidates coverage found.\nYour questions for SH do not go in the report either - put them in `open_questions`, one per string. SH must answer every one before your next round.\nSEARCH NARROW FIRST, THEN OPEN UP. Every tool returns at most a few dozen rows, in the query's own order, and its meta says how many rows the query produced in total; when that total is larger, the rest were not returned, and a listing you did not read to its end covers only the rows you read. So do not list a whole field and page through it. Start from what the question tells you — the entity, the act, the time, the kind of thing it names — and use those clues to decide which fields could hold the answer and to cut the search down to a result short enough to read in full: filter on the clues, group values into coarser units where their exact spelling does not matter, and count (`| stats dc(field)`) before you list. When the narrow search finds nothing, that is not absence: open up one step at a time — a looser filter, the next field that could hold it, a coarser grouping, another feed that could name the same entity — and only when those run out, fall back to brute force: go through the field's values in full, chunk by chunk. When what you are after is the unusual rather than something the question describes, ranking rarest first is one way to shorten the list; it is a tool, not a default. Your `coverage` premise names the ways the question's concept could show up in your scope, and for each, the query that searched it and what came back, or that it is not yet searched. The candidates are everything those searches find; the first match is only one of them.\nA LEAD IS A HYPOTHESIS, NOT EVIDENCE. A port number, a name, a convention suggests an activity; it does not show it. Before you build on a lead, check that its records behave like the activity the question names — how much traffic, in which direction, for how long, started by what. If they behave like something else, say so plainly and rule the lead out: that is a wall, and hitting it means going back to search elsewhere, not explaining the mismatch away.\nBEING THE ONLY LEAD DOES NOT MAKE IT THE ANSWER. \"I found nothing better\" is not evidence for the lead you hold. A candidate is FOUND only when its own records positively show the act the question names; one that failed that check, or that you cannot yet show passes it, is not a candidate. When that leaves you nothing, your report is NOT_FOUND with Candidate: none — the failed lead goes under Ruled out, and your next round opens the search up.\nVERIFIED MEANS YOU READ EVERY ROW IT RESTS ON. A result that returned only its first rows (its meta says \"showing N of M\") verifies nothing about the rows it did not return: \"all of them are X\" built on the first 50 of 365 is UNVERIFIED, however ordinary those 50 looked. Narrow the search until the whole result fits, then read it to the end. Inside that narrowed range, a row you are not certain fails the requirement is a row you check, not one you assume away — exhaust the range before you call it clean.\nWHEN THE ANSWER IS A MEASUREMENT, take its meaning from the question's verbatim words, not from a paraphrase: which records are the act itself rather than the setup or aftermath around it, and how they combine. Records that overlap in time cannot be added without counting the same moments twice. WHICH records are the act is a `selection` premise, and a query settles it. If the question's own words leave the measurement genuinely ambiguous — a span or a sum, one unit or another — that is not a premise, because no search settles it: put it to SH in `open_questions`.\nTHE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your `selection` premise says why this entity (or feed, or value) and not the other candidates coverage found, and it must NAME one of them in `rival`, with the query that ruled it out — a selection naming no rival is not filed at all. When two record sets are both still live, that is two candidates, not one premise: settle the first before filing the second, or say in `rival` why one beats the other.\nWHEN A ROUND FINDS NOTHING — a NOT_FOUND, or a result that contradicts what you expected — do not simply widen the search. Go back to your premises: the UNVERIFIED ones are the first suspects. Your next round starts by testing them.\n\nYOUR REPORT — put it in `submit_finding`'s `report` field, in this shape. Keep it short: ~600 WORDS IS A CEILING, NOT A TARGET — over it, the runner cuts your narrative sections and SH reads less of your work. Be concise: one line per query and its result, no restating the question, no repeating a fact in two sections, fields grouped into one clause where the same verdict covers them.\n\n**Scope:** sourcetype=<...> | source=<...> | fields=<...>\n**Insight:** FOUND | NOT_FOUND\n**Candidate:** <bare value, or none>   **Confidence:** <0-100>\n\n## Prior rounds\n<One line per prior round: what it established or eliminated.\n REWRITTEN each round, never appended. Six lines maximum, total.>\n\n## This round\n### What I ran\n- <spl> -> <what came back, including the event count>\n### What it means\n<FOUND:     the chain from that output to the candidate.\n NOT_FOUND: what you saw instead, and why it rules this scope out.>\n\n## Ruled out\n- <feed / entity / hypothesis> - <why>\n\nDo not write the title line — the runner stamps your round number, your rounds remaining, and how many of your queries this round were new.\n\n`value` still carries the bare answer as its own field, exactly as always: the answer alone, no label, no units unless asked, no hedge. `insight` is FOUND only when `value` holds a candidate for the question as asked and its records show the act the question names; otherwise it is NOT_FOUND and `value` is empty.\n\nHOW YOUR REPORT IS READ\nYour report is read by SH, who is deciding whether to keep you on this scope. Write it so SH can tell, without having to ask: that you stayed inside your constraints and answered the question actually asked; that this round learned something the last one didn't; and whether you now hold a value that could be submitted as-is, or not yet.\n\n## Your task\nThe question, verbatim — its words, not the paraphrase below, decide what is measured:\nWhat field would you use to alert that AWS API activity have occurred without MFA (multi-factor authentication)?\nAnswer format guidance: Provide the full JSON path. (Example: iceCream.flavors.traditional)\n\nSH's framing of your task:\nDetermine which full JSON field path in Frothly's aws:cloudtrail records indicates that AWS API activity occurred without MFA, and establish it from CloudTrail evidence rather than AWS convention. The answer must be the exact field path, not a value.\n\n## This round\nBegin. The question asks for a field to alert on for AWS API activity without MFA, which is an AWS API audit question. Frothly's CloudTrail feed is the established source for AWS API activity and identity context, and MFA-related context, if present, will be in CloudTrail event structure rather than endpoint or network feeds.\n\nENTITIES ALREADY ESTABLISHED - carry these forward, do not spend a round rediscovering them:\naws:cloudtrail in Frothly account 622676721278 is the established feed for AWS API activity and identity context from Q200."
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: The question asks for the CloudTrail JSON field indicating API activity without MFA. I'll first discover which fields in the aws:cloudtrail feed relate to MFA, and simultaneously pull the full field list for that sourcetype to see the exact field naming Splunk extracts.",
+          "tool_calls": [
+            {
+              "name": "search_keyword",
+              "args": {
+                "keyword": "mfa"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"matches\": [{\"sourcetype\": \"aws:cloudtrail\", \"field\": \"userIdentity.sessionContext.attributes.mfaAuthenticated\"}, {\"sourcetype\": \"ms:aad:signin\", \"field\": \"mfaAuthDetail\"}, {\"sourcetype\": \"ms:aad:signin\", \"field\": \"mfaAuthMethod\"}, {\"sourcetype\": \"ms:aad:signin\", \"field\": \"mfaRequired\"}, {\"sourcetype\": \"ms:aad:signin\", \"field\": \"mfaResult\"}], \"count\": 5, \"source\": \"manifest\"}",
+          "name": "search_keyword"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: The manifest names `userIdentity.sessionContext.attributes.mfaAuthenticated` in aws:cloudtrail. Now I need to verify it from actual CloudTrail evidence: its value distribution (does it take true/false?) and the sibling sessionContext fields that confirm the full JSON path.",
+          "tool_calls": [
+            {
+              "name": "get_field_values",
+              "args": {
+                "sourcetype": "aws:cloudtrail",
+                "top_n": 10,
+                "field": "userIdentity.sessionContext.attributes.mfaAuthenticated"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"userIdentity.sessionContext.attributes.mfaAuthenticated\": \"false\", \"count\": \"2155\", \"percent\": \"100.0000\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790222714.60\"}}",
+          "name": "get_field_values"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: The field exists with value \"false\" across 2155 events. Now I'll confirm the full nested JSON path from a raw CloudTrail event (to verify the path is exactly userIdentity.sessionContext.attributes.mfaAuthenticated, not a flattened variant), and check sibling fields under the same parent.",
+          "tool_calls": [
+            {
+              "name": "get_sourcetype_fields",
+              "args": {
+                "min_count": 1,
+                "sourcetype": "aws:cloudtrail"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"field\": \"app\", \"count\": \"6571\", \"distinct_count\": \"2\", \"values\": \"[{\\\"value\\\":\\\"AwsApiCall\\\",\\\"count\\\":6567},{\\\"value\\\":\\\"AwsConsoleSignIn\\\",\\\"count\\\":4}]\"}, {\"field\": \"awsRegion\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"us-west-1\\\",\\\"count\\\":4321},{\\\"value\\\":\\\"us-east-1\\\",\\\"count\\\":1077},{\\\"value\\\":\\\"us-west-2\\\",\\\"count\\\":675}]\"}, {\"field\": \"aws_account_id\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"622676721278\\\",\\\"count\\\":6571}]\"}, {\"field\": \"command\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"DescribeConfigRuleEvaluationStatus\\\",\\\"count\\\":1798},{\\\"value\\\":\\\"RunInstances\\\",\\\"count\\\":576},{\\\"value\\\":\\\"DescribeInstances\\\",\\\"count\\\":346}]\"}, {\"field\": \"date_hour\", \"count\": \"6571\", \"distinct_count\": \"7\", \"values\": \"[{\\\"value\\\":\\\"13\\\",\\\"count\\\":1787},{\\\"value\\\":\\\"9\\\",\\\"count\\\":1294},{\\\"value\\\":\\\"14\\\",\\\"count\\\":1276}]\"}, {\"field\": \"date_mday\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"20\\\",\\\"count\\\":6571}]\"}, {\"field\": \"date_minute\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"5\\\",\\\"count\\\":797},{\\\"value\\\":\\\"11\\\",\\\"count\\\":327},{\\\"value\\\":\\\"40\\\",\\\"count\\\":298}]\"}, {\"field\": \"date_month\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"august\\\",\\\"count\\\":6571}]\"}, {\"field\": \"date_second\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"13\\\",\\\"count\\\":531},{\\\"value\\\":\\\"27\\\",\\\"count\\\":356},{\\\"value\\\":\\\"18\\\",\\\"count\\\":273}]\"}, {\"field\": \"date_wday\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"monday\\\",\\\"count\\\":6571}]\"}, {\"field\": \"date_year\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"2018\\\",\\\"count\\\":6571}]\"}, {\"field\": \"date_zone\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"0\\\",\\\"count\\\":6571}]\"}, {\"field\": \"dvc\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"config.amazonaws.com\\\",\\\"count\\\":2184},{\\\"value\\\":\\\"ec2.amazonaws.com\\\",\\\"count\\\":1833},{\\\"value\\\":\\\"s3.amazonaws.com\\\",\\\"count\\\":912}]\"}, {\"field\": \"errorCode\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"success\\\",\\\"count\\\":5504},{\\\"value\\\":\\\"Client.InstanceLimitExceeded\\\",\\\"count\\\":280},{\\\"value\\\":\\\"Client.UnauthorizedOperation\\\",\\\"count\\\":231}]\"}, {\"field\": \"eventID\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"00120435-c4d9-436f-8ac8-907c2acc709a\\\",\\\"count\\\":1},{\\\"value\\\":\\\"00256f5f-ca6d-4f41-a49a-391b84907001\\\",\\\"count\\\":1},{\\\"value\\\":\\\"00271086-392e-4e8c-ba8b-74a7df3eaf05\\\",\\\"count\\\":1}]\"}, {\"field\": \"eventName\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"DescribeConfigRuleEvaluationStatus\\\",\\\"count\\\":1798},{\\\"value\\\":\\\"RunInstances\\\",\\\"count\\\":576},{\\\"value\\\":\\\"DescribeInstances\\\",\\\"count\\\":346}]\"}, {\"field\": \"eventSource\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"config.amazonaws.com\\\",\\\"count\\\":2184},{\\\"value\\\":\\\"ec2.amazonaws.com\\\",\\\"count\\\":1833},{\\\"value\\\":\\\"s3.amazonaws.com\\\",\\\"count\\\":912}]\"}, {\"field\": \"eventTime\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"2018-08-20T10:53:37Z\\\",\\\"count\\\":70},{\\\"value\\\":\\\"2018-08-20T12:57:32Z\\\",\\\"count\\\":70},{\\\"value\\\":\\\"2018-08-20T11:05:13Z\\\",\\\"count\\\":67}]\"}, {\"field\": \"eventType\", \"count\": \"6571\", \"distinct_count\": \"2\", \"values\": \"[{\\\"value\\\":\\\"AwsApiCall\\\",\\\"count\\\":6567},{\\\"value\\\":\\\"AwsConsoleSignIn\\\",\\\"count\\\":4}]\"}, {\"field\": \"eventVersion\", \"count\": \"6571\", \"distinct_count\": \"4\", \"values\": \"[{\\\"value\\\":\\\"1.05\\\",\\\"count\\\":6167},{\\\"value\\\":\\\"1.04\\\",\\\"count\\\":268},{\\\"value\\\":\\\"1.02\\\",\\\"count\\\":118}]\"}, {\"field\": \"host\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"splunk.froth.ly\\\",\\\"count\\\":6571}]\"}, {\"field\": \"index\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"botsv3\\\",\\\"count\\\":6571}]\"}, {\"field\": \"linecount\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"1\\\",\\\"count\\\":6571}]\"}, {\"field\": \"msg\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"success\\\",\\\"count\\\":5504},{\\\"value\\\":\\\"Client.InstanceLimitExceeded\\\",\\\"count\\\":280},{\\\"value\\\":\\\"Client.UnauthorizedOperation\\\",\\\"count\\\":231}]\"}, {\"field\": \"object_category\", \"count\": \"6571\", \"distinct_count\": \"6\", \"values\": \"[{\\\"value\\\":\\\"unknown\\\",\\\"count\\\":5885},{\\\"value\\\":\\\"instance\\\",\\\"count\\\":589},{\\\"value\\\":\\\"user\\\",\\\"count\\\":68}]\"}, {\"field\": \"product\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"CloudTrail\\\",\\\"count\\\":6571}]\"}, {\"field\": \"punct\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"{\\\\\\\"\\\\\\\":_\\\\\\\"--::\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"\\\\\\\",_\\\\\\\"\\\\\\\":_{\\\\\\\"\\\\\\\":_\\\\\\\"\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\":::\\\",\\\"count\\\":1869},{\\\"value\\\":\\\"{\\\\\\\"\\\\\\\":_\\\\\\\"...\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"--::\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"/.._/.._/..--_/..\\\\\\\",_\\\\\\\"\\\",\\\"count\\\":975},{\\\"value\\\":\\\"{\\\\\\\"\\\\\\\":_\\\\\\\"--::\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"----\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"--\\\\\\\",_\\\\\\\"\\\\\\\":_\\\\\\\"...\\\\\\\",_\\\\\\\"\\\\\\\":_\\\",\\\"count\\\":699}]\"}, {\"field\": \"recipientAccountId\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"622676721278\\\",\\\"count\\\":6571}]\"}, {\"field\": \"region\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"us-west-1\\\",\\\"count\\\":4321},{\\\"value\\\":\\\"us-east-1\\\",\\\"count\\\":1077},{\\\"value\\\":\\\"us-west-2\\\",\\\"count\\\":675}]\"}, {\"field\": \"signature\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"DescribeConfigRuleEvaluationStatus\\\",\\\"count\\\":1798},{\\\"value\\\":\\\"RunInstances\\\",\\\"count\\\":576},{\\\"value\\\":\\\"DescribeInstances\\\",\\\"count\\\":346}]\"}, {\"field\": \"source\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/us-west-1/2018/07/26/622676721278_CloudTrail_us-west-1_20180726T0015Z_0kI4vZDDihwWjypH.json.gz\\\",\\\"count\\\":293},{\\\"value\\\":\\\"s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/us-west-1/2018/07/26/622676721278_CloudTrail_us-west-1_20180726T0050Z_RFe4EoFn7GpzYj5o.json.gz\\\",\\\"count\\\":207},{\\\"value\\\":\\\"s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/us-west-1/2018/07/26/622676721278_CloudTrail_us-west-1_20180726T0115Z_9iZynrwBbVlGXRS5.json.gz\\\",\\\"count\\\":195}]\"}, {\"field\": \"sourceIPAddress\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"34.215.24.225\\\",\\\"count\\\":4071},{\\\"value\\\":\\\"139.198.18.205\\\",\\\"count\\\":637},{\\\"value\\\":\\\"107.77.212.175\\\",\\\"count\\\":552}]\"}, {\"field\": \"sourcetype\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"aws:cloudtrail\\\",\\\"count\\\":6571}]\"}, {\"field\": \"splunk_server\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"DESKTOP-Q4TP1FN\\\",\\\"count\\\":6571}]\"}, {\"field\": \"src\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"34.215.24.225\\\",\\\"count\\\":4071},{\\\"value\\\":\\\"139.198.18.205\\\",\\\"count\\\":637},{\\\"value\\\":\\\"107.77.212.175\\\",\\\"count\\\":552}]\"}, {\"field\": \"src_ip\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"34.215.24.225\\\",\\\"count\\\":4071},{\\\"value\\\":\\\"139.198.18.205\\\",\\\"count\\\":637},{\\\"value\\\":\\\"107.77.212.175\\\",\\\"count\\\":552}]\"}, {\"field\": \"start_time\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"2018-08-20T10:53:37Z\\\",\\\"count\\\":70},{\\\"value\\\":\\\"2018-08-20T12:57:32Z\\\",\\\"count\\\":70},{\\\"value\\\":\\\"2018-08-20T11:05:13Z\\\",\\\"count\\\":67}]\"}, {\"field\": \"timeendpos\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"35\\\",\\\"count\\\":3275},{\\\"value\\\":\\\"72\\\",\\\"count\\\":663},{\\\"value\\\":\\\"71\\\",\\\"count\\\":464}]\"}, {\"field\": \"timestartpos\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"15\\\",\\\"count\\\":3275},{\\\"value\\\":\\\"52\\\",\\\"count\\\":663},{\\\"value\\\":\\\"51\\\",\\\"count\\\":464}]\"}, {\"field\": \"userAgent\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"Boto3/1.5.22 Python/2.7.14 Linux/4.4.0-1062-aws Botocore/1.8.46\\\",\\\"count\\\":2982},{\\\"value\\\":\\\"[Boto3/1.5.22 Python/2.7.14 Linux/4.4.0-1062-aws Botocore/1.8.46]\\\",\\\"count\\\":738},{\\\"value\\\":\\\"signin.amazonaws.com\\\",\\\"count\\\":684}]\"}, {\"field\": \"userIdentity.type\", \"count\": \"6571\", \"distinct_count\": \"3\", \"values\": \"[{\\\"value\\\":\\\"IAMUser\\\",\\\"count\\\":5450},{\\\"value\\\":\\\"AssumedRole\\\",\\\"count\\\":789},{\\\"value\\\":\\\"AWSService\\\",\\\"count\\\":332}]\"}, {\"field\": \"userName\", \"count\": \"6571\", \"distinct_count\": \"12\", \"values\": \"[{\\\"value\\\":\\\"splunk_access\\\",\\\"count\\\":4116},{\\\"value\\\":\\\"web_admin\\\",\\\"count\\\":646},{\\\"value\\\":\\\"bstoll\\\",\\\"count\\\":615}]\"}, {\"field\": \"user_agent\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"Boto3/1.5.22 Python/2.7.14 Linux/4.4.0-1062-aws Botocore/1.8.46\\\",\\\"count\\\":2982},{\\\"value\\\":\\\"[Boto3/1.5.22 Python/2.7.14 Linux/4.4.0-1062-aws Botocore/1.8.46]\\\",\\\"count\\\":738},{\\\"value\\\":\\\"signin.amazonaws.com\\\",\\\"count\\\":684}]\"}, {\"field\": \"user_arn\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"arn:aws:iam::622676721278:user/splunk_access\\\",\\\"count\\\":4116},{\\\"value\\\":\\\"arn:aws:iam::622676721278:user/web_admin\\\",\\\"count\\\":646},{\\\"value\\\":\\\"arn:aws:iam::622676721278:user/bstoll\\\",\\\"count\\\":615}]\"}, {\"field\": \"vendor\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"Amazon Web Services\\\",\\\"count\\\":6571}]\"}, {\"field\": \"vendor_account\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"622676721278\\\",\\\"count\\\":6571}]\"}, {\"field\": \"vendor_product\", \"count\": \"6571\", \"distinct_count\": \"1\", \"values\": \"[{\\\"value\\\":\\\"AWS CloudTrail\\\",\\\"count\\\":6571}]\"}, {\"field\": \"vendor_region\", \"count\": \"6571\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"us-west-1\\\",\\\"count\\\":4321},{\\\"value\\\":\\\"us-east-1\\\",\\\"count\\\":1077},{\\\"value\\\":\\\"us-west-2\\\",\\\"count\\\":675}]\"}, {\"field\": \"requestID\", \"count\": \"6567\", \"distinct_count\": \"15\", \"values\": \"[{\\\"value\\\":\\\"00013aea-903f-11e8-bd4b-2941cf9c7c67\\\",\\\"count\\\":1},{\\\"value\\\":\\\"0008b490-903f-11e8-b120-2778f3934894\\\",\\\"count\\\":1},{\\\"value\\\":\\\"000ad7db-903f-11e8-bd4b-2941cf9c7c67\\\",\\\"count\\\":1}]\"}, {\"field\": \"user_name\", \"count\": \"6507\", \"distinct_count\": \"13\", \"values\": \"[{\\\"value\\\":\\\"splunk_access\\\",\\\"count\\\":4062},{\\\"value\\\":\\\"web_admin\\\",\\\"count\\\":642},{\\\"value\\\":\\\"bstoll\\\",\\\"count\\\":606}]\"}], \"meta\": {\"total_event_count\": 429, \"returned\": 200, \"sid\": \"1790222726.61\", \"truncated\": \"showing 50 of 429 rows \\u2014 the rest were not returned (too large); narrow the query to get a shorter answer\", \"clipped\": \"values longer than 1500 chars are cut; extract what you need with rex/eval to read the rest\"}}",
+          "name": "get_sourcetype_fields"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: The field exists (2155 events, value \"false\"). The fieldsummary was truncated at 50 of 429 fields, so I need to read a raw CloudTrail event to confirm the exact nested JSON path — that the mfaAuthenticated flag sits under userIdentity.sessionContext.attributes, and to see sibling fields (creationDate) that confirm the path spelling.",
+          "tool_calls": [
+            {
+              "name": "get_raw_events",
+              "args": {
+                "keyword": "mfaAuthenticated",
+                "sourcetype": "aws:cloudtrail",
+                "limit": 2
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"_time\": \"2018-08-20T23:15:20.000+08:00\", \"_raw\": \"{\\\"requestParameters\\\": {\\\"filterSet\\\": {}, \\\"instancesSet\\\": {\\\"items\\\": [{\\\"instanceId\\\": \\\"i-0920036c8ca91e501\\\"}]}, \\\"includeAllInstances\\\": true}, \\\"eventTime\\\": \\\"2018-08-20T15:15:20Z\\\", \\\"eventID\\\": \\\"97c6bfcb-c3cf-437c-8b05-4043635ce306\\\", \\\"eventVersion\\\": \\\"1.05\\\", \\\"awsRegion\\\": \\\"us-west-1\\\", \\\"eventType\\\": \\\"AwsApiCall\\\", \\\"eventSource\\\": \\\"ec2.amazonaws.com\\\", \\\"requestID\\\": \\\"f4bd4e9b-e27c-4a52-93fa-fab7a76d3639\\\", \\\"userIdentity\\\": {\\\"arn\\\": \\\"arn:aws:sts::622676721278:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling\\\", \\\"principalId\\\": \\\"AROAIOHK7E4SHKYSVVYLM:AutoScaling\\\", \\\"accountId\\\": \\\"622676721278\\\", \\\"type\\\": \\\"AssumedRole\\\", \\\"invokedBy\\\": \\\"autoscaling.amazonaws.com\\\", \\\"sessionContext\\\": {\\\"sessionIssuer\\\": {\\\"principalId\\\": \\\"AROAIOHK7E4SHKYSVVYLM\\\", \\\"arn\\\": \\\"arn:aws:iam::622676721278:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling\\\", \\\"type\\\": \\\"Role\\\", \\\"userName\\\": \\\"AWSServiceRoleForAutoScaling\\\", \\\"accountId\\\": \\\"622676721278\\\"}, \\\"attributes\\\": {\\\"mfaAuthenticated\\\": \\\"false\\\", \\\"creationDate\\\": \\\"2018-08-20T15:09:21Z\\\"}}}, \\\"eventName\\\": \\\"DescribeInstanceStatus\\\", \\\"recipientAccountId\\\": \\\"622676721278\\\", \\\"responseElements\\\": null, \\\"sourceIPAddress\\\": \\\"autoscaling.amazonaws.com\\\", \\\"userAgent\\\": \\\"autoscaling.amazonaws.com\\\"}\"}, {\"_time\": \"2018-08-20T23:15:13.000+08:00\", \"_raw\": \"{\\\"requestParameters\\\": {\\\"encryptionContext\\\": {\\\"aws:lambda:FunctionArn\\\": \\\"arn:aws:lambda:us-west-1:622676721278:function:VPCFlowLogs\\\"}}, \\\"eventTime\\\": \\\"2018-08-20T15:15:13Z\\\", \\\"eventID\\\": \\\"6f68013b-5b07-432c-bd07-d2219345e920\\\", \\\"eventVersion\\\": \\\"1.05\\\", \\\"awsRegion\\\": \\\"us-west-1\\\", \\\"eventType\\\": \\\"AwsApiCall\\\", \\\"eventSource\\\": \\\"kms.amazonaws.com\\\", \\\"requestID\\\": \\\"5adfb697-9064-11e8-a0f5-1d88a8ed2e42\\\", \\\"readOnly\\\": true, \\\"userIdentity\\\": {\\\"arn\\\": \\\"arn:aws:sts::622676721278:assumed-role/splunk_lambda/VPCFlowLogs\\\", \\\"accountId\\\": \\\"622676721278\\\", \\\"principalId\\\": \\\"AROAJIMMLKY7MV6T5G4V6:VPCFlowLogs\\\", \\\"accessKeyId\\\": \\\"ASIAJ36TWW5RJ4KGEU5Q\\\", \\\"type\\\": \\\"AssumedRole\\\", \\\"sessionContext\\\": {\\\"sessionIssuer\\\": {\\\"principalId\\\": \\\"AROAJIMMLKY7MV6T5G4V6\\\", \\\"arn\\\": \\\"arn:aws:iam::622676721278:role/service-role/splunk_lambda\\\", \\\"type\\\": \\\"Role\\\", \\\"userName\\\": \\\"splunk_lambda\\\", \\\"accountId\\\": \\\"622676721278\\\"}, \\\"attributes\\\": {\\\"mfaAuthenticated\\\": \\\"false\\\", \\\"creationDate\\\": \\\"2018-08-20T13:50:37Z\\\"}}}, \\\"eventName\\\": \\\"Decrypt\\\", \\\"recipientAccountId\\\": \\\"622676721278\\\", \\\"resources\\\": [{\\\"ARN\\\": \\\"arn:aws:kms:us-west-1:622676721278:key/d1c4c3ae-6693-46b5-8285-9b868801fe65\\\", \\\"accountId\\\": \\\"622676721278\\\", \\\"type\\\": \\\"AWS::KMS::Key\\\"}], \\\"responseElements\\\": null, \\\"sourceIPAddress\\\": \\\"13.57.247.32\\\", \\\"userAgent\\\": \\\"aws-internal/3\\\"}\"}], \"meta\": {\"total_event_count\": 2, \"returned\": 2, \"sid\": \"1790222734.62\"}}",
+          "name": "get_raw_events"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: Raw events confirm the nested path `userIdentity.sessionContext.attributes.mfaAuthenticated`. The fieldsummary was truncated (50 of 429), so I'll enumerate ALL sessionContext/mfa fields in the feed to confirm no other MFA-bearing field exists and that this path is complete and unique.\n",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*sessionContext*\" OR field=\"*mfa*\" OR field=\"*Mfa*\" | stats count values(distinct_count) as distinct_values by field"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"field\": \"additionalEventData.MFAUsed\", \"count\": \"1\", \"distinct_values\": \"1\"}, {\"field\": \"userIdentity.sessionContext.attributes.creationDate\", \"count\": \"1\", \"distinct_values\": \"159\"}, {\"field\": \"userIdentity.sessionContext.attributes.mfaAuthenticated\", \"count\": \"1\", \"distinct_values\": \"1\"}, {\"field\": \"userIdentity.sessionContext.sessionIssuer.accountId\", \"count\": \"1\", \"distinct_values\": \"1\"}, {\"field\": \"userIdentity.sessionContext.sessionIssuer.arn\", \"count\": \"1\", \"distinct_values\": \"7\"}, {\"field\": \"userIdentity.sessionContext.sessionIssuer.principalId\", \"count\": \"1\", \"distinct_values\": \"7\"}, {\"field\": \"userIdentity.sessionContext.sessionIssuer.type\", \"count\": \"1\", \"distinct_values\": \"1\"}, {\"field\": \"userIdentity.sessionContext.sessionIssuer.userName\", \"count\": \"1\", \"distinct_values\": \"7\"}], \"meta\": {\"total_event_count\": 8, \"returned\": 8, \"sid\": \"1790222744.63\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: A rival candidate appeared: `additionalEventData.MFAUsed` (1 event). I need to see its value and which event carries it, to decide which field is the right alert field for \"AWS API activity without MFA\" — and compare coverage against mfaAuthenticated's 2155 events.\n",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count values(eventName) as eventName values(eventType) as eventType values(additionalEventData.MFAUsed) as MFAUsed values(userIdentity.type) as userIdentityType values(user_name) as user"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"count\": \"4\", \"eventName\": \"ConsoleLogin\", \"eventType\": \"AwsConsoleSignIn\", \"MFAUsed\": \"No\", \"userIdentityType\": \"IAMUser\", \"user\": \"bstoll\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790222754.64\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: Two candidates now exist. To settle the selection: check the eventType distribution of events carrying `mfaAuthenticated` — if they are AwsApiCall (API activity), that field matches the question's \"AWS API activity\" wording, while MFAUsed covers only console sign-ins.\n",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail userIdentity.sessionContext.attributes.mfaAuthenticated=* | stats count by eventType userIdentity.type"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"eventType\": \"AwsApiCall\", \"userIdentity.type\": \"AssumedRole\", \"count\": \"789\"}, {\"eventType\": \"AwsApiCall\", \"userIdentity.type\": \"IAMUser\", \"count\": \"1366\"}], \"meta\": {\"total_event_count\": 2, \"returned\": 2, \"sid\": \"1790222761.65\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: mfaAuthenticated covers all 2155 AwsApiCall events (the question's \"AWS API activity\"), while MFAUsed covers only 4 console sign-ins. One final completeness check: search the fieldsummary for any other auth/MFA-named fields (e.g. MultiFactor, Auth) I might have missed, so the coverage premise is exhaustive.\n",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*Auth*\" OR field=\"*MultiFactor*\" OR field=\"*credential*\" | stats count values(distinct_count) as distinct_values by field"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"field\": \"authentication_method\", \"count\": \"1\", \"distinct_values\": \"1\"}, {\"field\": \"responseElements.credentials.accessKeyId\", \"count\": \"1\", \"distinct_values\": \"333\"}, {\"field\": \"responseElements.credentials.expiration\", \"count\": \"1\", \"distinct_values\": \"240\"}, {\"field\": \"responseElements.credentials.sessionToken\", \"count\": \"1\", \"distinct_values\": \"333\"}, {\"field\": \"userIdentity.sessionContext.attributes.mfaAuthenticated\", \"count\": \"1\", \"distinct_values\": \"1\"}], \"meta\": {\"total_event_count\": 5, \"returned\": 5, \"sid\": \"1790222772.66\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: One last rival to close out: `authentication_method` (1 distinct value). I'll check what it is and which events carry it, so no MFA-adjacent field is left unexamined.\n",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail authentication_method=* | stats count values(authentication_method) as auth_method values(eventName) as eventName values(eventType) as eventType"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"count\": \"4\", \"auth_method\": \"SFA\", \"eventName\": \"ConsoleLogin\", \"eventType\": \"AwsConsoleSignIn\"}], \"meta\": {\"total_event_count\": 1, \"returned\": 1, \"sid\": \"1790222779.67\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "All candidates are examined and the selection is settled. The field `userIdentity.sessionContext.attributes.mfaAuthenticated` covers all 2155 AwsApiCall events with value \"false\", while the two rivals exist only on console sign-in events. I'm ready to submit.",
+          "tool_calls": [
+            {
+              "name": "submit_finding",
+              "args": {
+                "value_kind": "field_path",
+                "value": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+                "premise_updates": [],
+                "evidence": "SPL 1: index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*sessionContext*\" OR field=\"*mfa*\" OR field=\"*Mfa*\" | stats count values(distinct_count) as distinct_values by field -> returned 8 rows including userIdentity.sessionContext.attributes.mfaAuthenticated (distinct_count 1) and additionalEventData.MFAUsed (distinct_count 1). SPL 2: index=botsv3 sourcetype=aws:cloudtrail userIdentity.sessionContext.attributes.mfaAuthenticated=* | stats count by eventType userIdentity.type -> 2 rows: AwsApiCall/AssumedRole=789, AwsApiCall/IAMUser=1366 (total 2155, all API calls). SPL 3: index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count values(eventName)... -> 1 row: count=4, eventName=ConsoleLogin, eventType=AwsConsoleSignIn, MFAUsed=No, user=bstoll. SPL 4: get_field_values userIdentity.sessionContext.attributes.mfaAuthenticated on aws:cloudtrail -> 1 value \"false\", 2155 events, 100%. SPL 5: get_raw_events keyword=mfaAuthenticated -> raw JSON shows \"userIdentity\": {... \"sessionContext\": {... \"attributes\": {\"mfaAuthenticated\": \"false\", \"creationDate\": ...}}} confirming the nested path. SPL 6: fieldsummary search field=\"*Auth*\" OR \"*MultiFactor*\" OR \"*credential*\" -> 5 rows, only other MFA-adjacent field authentication_method (4 ConsoleLogin events, value SFA).",
+                "sourcetypes_used": "aws:cloudtrail",
+                "new_premises": [
+                  {
+                    "text": "Coverage: 'AWS API activity without MFA' in Frothly's scope can only appear as an MFA/auth-named field in the aws:cloudtrail feed (account 622676721278). Searched its full fieldsummary for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential*: exactly three MFA-bearing fields exist — userIdentity.sessionContext.attributes.mfaAuthenticated (2155 events), additionalEventData.MFAUsed (4 events), authentication_method (4 events). Azure AD (ms:aad:signin) mfa* fields are out of scope for AWS API activity.",
+                    "kind": "coverage",
+                    "load_bearing": true,
+                    "rival": "",
+                    "evidence": "fieldsummary searches returned 8 + 5 rows total naming every mfa/auth field in the feed; no other MFA-named field exists in aws:cloudtrail.",
+                    "quote": "userIdentity.sessionContext.attributes.mfaAuthenticated ... additionalEventData.MFAUsed ... authentication_method"
+                  },
+                  {
+                    "text": "Selection: the alert field for AWS API activity without MFA is userIdentity.sessionContext.attributes.mfaAuthenticated, because it is carried by all 2155 AwsApiCall events (AssumedRole 789 + IAMUser 1366) with value \"false\" — i.e. it is present on API activity records and directly states MFA was not used.",
+                    "kind": "selection",
+                    "load_bearing": true,
+                    "rival": "additionalEventData.MFAUsed — ruled out by: index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count by eventType -> 4 events, all eventType=AwsConsoleSignIn (ConsoleLogin), zero AwsApiCall; it marks console sign-ins, not API activity. Same query pattern ruled out authentication_method (4 ConsoleLogin events, value SFA).",
+                    "evidence": "mfaAuthenticated=* | stats count by eventType userIdentity.type -> AwsApiCall/AssumedRole=789, AwsApiCall/IAMUser=1366; MFAUsed=* -> 4 AwsConsoleSignIn ConsoleLogin events only.",
+                    "quote": "AwsApiCall, AssumedRole, 789 / AwsApiCall, IAMUser, 1366"
+                  }
+                ],
+                "notes": "The field is a string \"false\" (not boolean) in this dataset — an alert would be userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\". The field is present only on AssumedRole and IAMUser AwsApiCall events (2155 of 6571 total cloudtrail events); AWSService-type events carry no sessionContext. Sibling field userIdentity.sessionContext.attributes.creationDate (159 distinct values) gives session start time. The 4 ConsoleLogin events (bstoll, SFA, MFAUsed=No) are the console-side counterpart and are the only events carrying additionalEventData.MFAUsed or authentication_method. ms:aad:signin carries mfaAuthDetail/mfaAuthMethod/mfaRequired/mfaResult but is Azure AD sign-in telemetry, not AWS API activity.",
+                "sources_used": "s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/*",
+                "open_questions": [
+                  "None — the field path is fully established from CloudTrail evidence."
+                ],
+                "report": "**Scope:** sourcetype=aws:cloudtrail | fields=userIdentity.sessionContext.attributes.mfaAuthenticated, additionalEventData.MFAUsed, authentication_method, eventType, userIdentity.type\n**Insight:** FOUND\n**Candidate:** userIdentity.sessionContext.attributes.mfaAuthenticated   **Confidence:** 98\n\n## Prior rounds\n- (Round 1 — first round; no prior rounds.)\n\n## This round\n### What I ran\n- search_keyword \"mfa\" -> manifest: aws:cloudtrail carries userIdentity.sessionContext.attributes.mfaAuthenticated; ms:aad:signin carries mfa* fields (Azure, out of scope).\n- get_field_values userIdentity.sessionContext.attributes.mfaAuthenticated on aws:cloudtrail -> 1 distinct value \"false\", 2155 events, 100%.\n- get_raw_events keyword=mfaAuthenticated -> raw JSON confirms nested path: userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\" (sibling creationDate).\n- fieldsummary | search *sessionContext* OR *mfa* -> 8 rows; only MFA-bearing fields: mfaAuthenticated, additionalEventData.MFAUsed.\n- mfaAuthenticated=* | stats count by eventType userIdentity.type -> 2 rows: AwsApiCall/AssumedRole=789, AwsApiCall/IAMUser=1366 (all 2155 are API calls).\n- additionalEventData.MFAUsed=* | stats -> 4 events, all ConsoleLogin / AwsConsoleSignIn, MFAUsed=No, user bstoll.\n- fieldsummary | search *Auth*/*MultiFactor*/*credential* -> 5 rows; extra field authentication_method -> 4 ConsoleLogin events, value \"SFA\".\n\n### What it means\nFOUND. The question asks for the field to alert on AWS API activity without MFA. In Frothly's CloudTrail feed, `userIdentity.sessionContext.attributes.mfaAuthenticated` is present on all 2155 AwsApiCall events and carries the value \"false\" — it is the field that directly states an API call was made in a session that was not MFA-authenticated. Raw event JSON confirms the exact nested path userIdentity → sessionContext → attributes → mfaAuthenticated. The two rivals (additionalEventData.MFAUsed, authentication_method) exist only on the 4 AwsConsoleSignIn ConsoleLogin events — console sign-ins, not API activity — so they are ruled out. The value is a string \"false\", so the alert condition is mfaAuthenticated=\"false\".\n\n## Ruled out\n- additionalEventData.MFAUsed — appears only on 4 AwsConsoleSignIn ConsoleLogin events (bstoll), zero AwsApiCall events; marks console sign-in, not API activity.\n- authentication_method — same 4 ConsoleLogin events, value \"SFA\"; console sign-in only.\n- ms:aad:signin mfa* fields (mfaAuthDetail, mfaAuthMethod, mfaRequired, mfaResult) — Azure AD sign-in telemetry, not AWS API activity.",
+                "confidence": 98,
+                "insight": "FOUND"
+              }
+            }
+          ]
+        }
+      ],
+      "iterations": 10,
+      "cap_hit": false,
+      "duration_s": 90.991,
+      "value": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "value_kind": "field_path",
+      "evidence": "SPL 1: index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*sessionContext*\" OR field=\"*mfa*\" OR field=\"*Mfa*\" | stats count values(distinct_count) as distinct_values by field -> returned 8 rows including userIdentity.sessionContext.attributes.mfaAuthenticated (distinct_count 1) and additionalEventData.MFAUsed (distinct_count 1). SPL 2: index=botsv3 sourcetype=aws:cloudtrail userIdentity.sessionContext.attributes.mfaAuthenticated=* | stats count by eventType userIdentity.type -> 2 rows: AwsApiCall/AssumedRole=789, AwsApiCall/IAMUser=1366 (total 2155, all API calls). SPL 3: index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count values(eventName)... -> 1 row: count=4, eventName=ConsoleLogin, eventType=AwsConsoleSignIn, MFAUsed=No, user=bstoll. SPL 4: get_field_values userIdentity.sessionContext.attributes.mfaAuthenticated on aws:cloudtrail -> 1 value \"false\", 2155 events, 100%. SPL 5: get_raw_events keyword=mfaAuthenticated -> raw JSON shows \"userIdentity\": {... \"sessionContext\": {... \"attributes\": {\"mfaAuthenticated\": \"false\", \"creationDate\": ...}}} confirming the nested path. SPL 6: fieldsummary search field=\"*Auth*\" OR \"*MultiFactor*\" OR \"*credential*\" -> 5 rows, only other MFA-adjacent field authentication_method (4 ConsoleLogin events, value SFA).",
+      "worker_confidence": 98,
+      "search_space_used": {
+        "sourcetypes": [
+          "aws:cloudtrail"
+        ],
+        "sources": [
+          "s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/*"
+        ]
+      },
+      "negative_findings": [],
+      "notes": "The field is a string \"false\" (not boolean) in this dataset — an alert would be userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\". The field is present only on AssumedRole and IAMUser AwsApiCall events (2155 of 6571 total cloudtrail events); AWSService-type events carry no sessionContext. Sibling field userIdentity.sessionContext.attributes.creationDate (159 distinct values) gives session start time. The 4 ConsoleLogin events (bstoll, SFA, MFAUsed=No) are the console-side counterpart and are the only events carrying additionalEventData.MFAUsed or authentication_method. ms:aad:signin carries mfaAuthDetail/mfaAuthMethod/mfaRequired/mfaResult but is Azure AD sign-in telemetry, not AWS API activity.",
+      "structured": true,
+      "spawn_type": "senior",
+      "search_space": {},
+      "prior_info": "",
+      "confidence": null,
+      "insight": "FOUND",
+      "novel_spl_count": 5,
+      "round": 1
+    },
+    {
+      "worker": "s1",
+      "qid": "Q201",
+      "subquestion": "Determine which full JSON field path in Frothly's aws:cloudtrail records indicates that AWS API activity occurred without MFA, and establish it from CloudTrail evidence rather than AWS convention. The answer must be the exact field path, not a value.",
+      "status": "solved",
+      "answer": "# s1 - Q201 - Round 2\n_stamped by runner: rounds_remaining=1 novel_spl=1_\n**Scope:** sourcetype=aws:cloudtrail | fields=userIdentity.sessionContext.attributes.mfaAuthenticated, additionalEventData.MFAUsed, authentication_method, eventType, eventName, userIdentity.type\n**Insight:** FOUND\n**Candidate:** userIdentity.sessionContext.attributes.mfaAuthenticated   **Confidence:** 99\n\n## Prior rounds\n- R1: Manifest + fieldsummary + raw JSON established userIdentity.sessionContext.attributes.mfaAuthenticated (\"false\", 2155 AwsApiCall events); rivals additionalEventData.MFAUsed and authentication_method found only on 4 ConsoleLogin events; submitted field path.\n\n## This round\n### What I ran\n- index=botsv3 sourcetype=aws:cloudtrail (mfaAuthenticated=* OR MFAUsed=* OR authentication_method=*) | stats count dc(eventName) values(...) by eventType -> 2 rows, quotable cross-tab.\n\n### What it means\nFOUND, premises settled. The cross-tab shows in one output: AwsApiCall (2155 events, 96 distinct eventNames) carries ONLY userIdentity.sessionContext.attributes.mfaAuthenticated, value \"false\" — the field that directly expresses the no-MFA state for AWS API activity. AwsConsoleSignIn (4 events, ConsoleLogin only) carries additionalEventData.MFAUsed=\"No\" and authentication_method=\"SFA\" — console sign-in fields, absent from every API call. Both coverage (only three MFA-bearing fields exist in the feed, split exactly this way) and selection (mfaAuthenticated is the only one on API records) are verified. The exact full JSON path is unchanged: userIdentity.sessionContext.attributes.mfaAuthenticated.\n\n## Ruled out\n- additionalEventData.MFAUsed — AwsConsoleSignIn/ConsoleLogin only (4 events, bstoll), never on AwsApiCall.\n- authentication_method — same 4 ConsoleLogin events, value \"SFA\", never on AwsApiCall.\n- ms:aad:signin mfa* fields — Azure AD sign-in telemetry, not AWS API activity.",
+      "spl_used": [
+        "index=botsv3 sourcetype=aws:cloudtrail (userIdentity.sessionContext.attributes.mfaAuthenticated=* OR additionalEventData.MFAUsed=* OR authentication_method=*) | stats count dc(eventName) as distinct_eventNames values(userIdentity.sessionContext.attributes.mfaAuthenticated) as mfaAuthenticated values(additionalEventData.MFAUsed) as MFAUsed values(authentication_method) as authMethod by eventType"
+      ],
+      "sourcetypes": [
+        "aws:cloudtrail"
+      ],
+      "full_state": [
+        {
+          "type": "HumanMessage",
+          "content": "YOUR UNRESOLVED PREMISES - carried forward by the runner, in your own words:\n[p1] load-bearing, open since round 1 - \"Coverage: 'AWS API activity without MFA' in Frothly's scope can only appear as an MFA/auth-named field in the aws:cloudtrail feed (account 622676721278). Searched its full fieldsummary for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential*: exactly three MFA-bearing fields exist — userIdentity.sessionContext.attributes.mfaAuthenticated (2155 events), additionalEventData.MFAUsed (4 events), authentication_method (4 events). Azure AD (ms:aad:signin) mfa* fields are out of scope for AWS API activity.\"\n[p2] load-bearing, open since round 1 - \"Selection: the alert field for AWS API activity without MFA is userIdentity.sessionContext.attributes.mfaAuthenticated, because it is carried by all 2155 AwsApiCall events (AssumedRole 789 + IAMUser 1366) with value \"false\" — i.e. it is present on API activity records and directly states MFA was not used.\"\n\nSettle each with `premise_updates`: a status, and a quote from a result you actually ran. Not mentioning one does not remove it.\n\n[CONTINUE] Establish the coverage and selection premises from aws:cloudtrail with exact result output. Show, in quotable form, which MFA-related fields occur on AwsApiCall events versus ConsoleLogin/AwsConsoleSignIn events, and which field directly carries the no-MFA state for AWS API activity. Then restate the exact full JSON path literally if unchanged.\n\nOn your open questions:\n[q1] Use the field path that is present on AwsApiCall events and directly expresses MFA state for those API events; console-login-only MFA fields do not satisfy the question.\n\nYour scope is now: sourcetypes=[] sources=[] fields=['userIdentity.sessionContext.attributes.mfaAuthenticated', 'additionalEventData.MFAUsed', 'authentication_method', 'eventType', 'eventName', 'userIdentity.type']. Work inside it."
+        },
+        {
+          "type": "AIMessage",
+          "content": "Intention: SH wants a single quotable cross-tab settling both premises: which MFA fields occur on AwsApiCall events vs AwsConsoleSignIn events, and which carries the no-MFA state for API activity. I'll run one compact stats-by-eventType query over all three MFA-bearing fields.",
+          "tool_calls": [
+            {
+              "name": "run_splunk_search",
+              "args": {
+                "query": "index=botsv3 sourcetype=aws:cloudtrail (userIdentity.sessionContext.attributes.mfaAuthenticated=* OR additionalEventData.MFAUsed=* OR authentication_method=*) | stats count dc(eventName) as distinct_eventNames values(userIdentity.sessionContext.attributes.mfaAuthenticated) as mfaAuthenticated values(additionalEventData.MFAUsed) as MFAUsed values(authentication_method) as authMethod by eventType"
+              }
+            }
+          ]
+        },
+        {
+          "type": "ToolMessage",
+          "content": "{\"results\": [{\"eventType\": \"AwsApiCall\", \"count\": \"2155\", \"distinct_eventNames\": \"96\", \"mfaAuthenticated\": \"false\"}, {\"eventType\": \"AwsConsoleSignIn\", \"count\": \"4\", \"distinct_eventNames\": \"1\", \"MFAUsed\": \"No\", \"authMethod\": \"SFA\"}], \"meta\": {\"total_event_count\": 2, \"returned\": 2, \"sid\": \"1790222809.68\"}}",
+          "name": "run_splunk_search"
+        },
+        {
+          "type": "AIMessage",
+          "content": "The cross-tab settles both premises in one quotable output: on AwsApiCall events (2155, 96 distinct eventNames) only `userIdentity.sessionContext.attributes.mfaAuthenticated` appears, value \"false\"; the other two MFA fields exist only on the 4 AwsConsoleSignIn ConsoleLogin events. The path is unchanged.",
+          "tool_calls": [
+            {
+              "name": "submit_finding",
+              "args": {
+                "open_questions": [
+                  "None — both premises are settled with quotable output; the field path is final."
+                ],
+                "confidence": 99,
+                "premise_updates": [
+                  {
+                    "id": "p1",
+                    "status": "VERIFIED",
+                    "quote": "eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\" | eventType=AwsConsoleSignIn, count=4, distinct_eventNames=1, MFAUsed=\"No\", authMethod=\"SFA\"",
+                    "evidence": "The OR-query over all three MFA-bearing fields, grouped by eventType, returned exactly 2 rows: every MFA-bearing field in the feed appears in one of them, and no fourth MFA/auth field exists (fieldsummary searches for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential* returned only these plus non-MFA credential fields). Coverage is therefore complete: mfaAuthenticated on AwsApiCall, MFAUsed and authentication_method on AwsConsoleSignIn only."
+                  },
+                  {
+                    "id": "p2",
+                    "status": "VERIFIED",
+                    "quote": "eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\"",
+                    "evidence": "On AwsApiCall events — the records the question's 'AWS API activity' names — the only MFA field present is userIdentity.sessionContext.attributes.mfaAuthenticated, and its value is \"false\" on all 2155 of them, directly stating the API calls were made without MFA. The rivals additionalEventData.MFAUsed and authentication_method appear only in the AwsConsoleSignIn row (4 ConsoleLogin events), never on an API call, so they cannot alert on API activity."
+                  }
+                ],
+                "notes": "Field path unchanged: userIdentity.sessionContext.attributes.mfaAuthenticated. The cross-tab is the single quotable artifact for both premises: on AwsApiCall events only mfaAuthenticated is present (value \"false\", string not boolean — alert condition is =\"false\"); additionalEventData.MFAUsed (\"No\") and authentication_method (\"SFA\") occur exclusively on the 4 AwsConsoleSignIn ConsoleLogin events (user bstoll) and never on API calls. mfaAuthenticated covers 2155 AwsApiCall events across 96 distinct eventNames (AssumedRole 789 + IAMUser 1366).",
+                "report": "**Scope:** sourcetype=aws:cloudtrail | fields=userIdentity.sessionContext.attributes.mfaAuthenticated, additionalEventData.MFAUsed, authentication_method, eventType, eventName, userIdentity.type\n**Insight:** FOUND\n**Candidate:** userIdentity.sessionContext.attributes.mfaAuthenticated   **Confidence:** 99\n\n## Prior rounds\n- R1: Manifest + fieldsummary + raw JSON established userIdentity.sessionContext.attributes.mfaAuthenticated (\"false\", 2155 AwsApiCall events); rivals additionalEventData.MFAUsed and authentication_method found only on 4 ConsoleLogin events; submitted field path.\n\n## This round\n### What I ran\n- index=botsv3 sourcetype=aws:cloudtrail (mfaAuthenticated=* OR MFAUsed=* OR authentication_method=*) | stats count dc(eventName) values(...) by eventType -> 2 rows, quotable cross-tab.\n\n### What it means\nFOUND, premises settled. The cross-tab shows in one output: AwsApiCall (2155 events, 96 distinct eventNames) carries ONLY userIdentity.sessionContext.attributes.mfaAuthenticated, value \"false\" — the field that directly expresses the no-MFA state for AWS API activity. AwsConsoleSignIn (4 events, ConsoleLogin only) carries additionalEventData.MFAUsed=\"No\" and authentication_method=\"SFA\" — console sign-in fields, absent from every API call. Both coverage (only three MFA-bearing fields exist in the feed, split exactly this way) and selection (mfaAuthenticated is the only one on API records) are verified. The exact full JSON path is unchanged: userIdentity.sessionContext.attributes.mfaAuthenticated.\n\n## Ruled out\n- additionalEventData.MFAUsed — AwsConsoleSignIn/ConsoleLogin only (4 events, bstoll), never on AwsApiCall.\n- authentication_method — same 4 ConsoleLogin events, value \"SFA\", never on AwsApiCall.\n- ms:aad:signin mfa* fields — Azure AD sign-in telemetry, not AWS API activity.",
+                "evidence": "SPL: index=botsv3 sourcetype=aws:cloudtrail (userIdentity.sessionContext.attributes.mfaAuthenticated=* OR additionalEventData.MFAUsed=* OR authentication_method=*) | stats count dc(eventName) as distinct_eventNames values(userIdentity.sessionContext.attributes.mfaAuthenticated) as mfaAuthenticated values(additionalEventData.MFAUsed) as MFAUsed values(authentication_method) as authMethod by eventType -> 2 rows: (1) eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\", MFAUsed and authMethod absent; (2) eventType=AwsConsoleSignIn, count=4, distinct_eventNames=1, MFAUsed=\"No\", authMethod=\"SFA\", mfaAuthenticated absent. Corroborated by raw JSON: \"userIdentity\": {... \"sessionContext\": {... \"attributes\": {\"mfaAuthenticated\": \"false\", \"creationDate\": ...}}}.",
+                "sourcetypes_used": "aws:cloudtrail",
+                "value_kind": "field_path",
+                "new_premises": [],
+                "value": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+                "sources_used": "s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/*",
+                "insight": "FOUND"
+              }
+            }
+          ]
+        }
+      ],
+      "iterations": 2,
+      "cap_hit": false,
+      "duration_s": 19.65,
+      "value": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "value_kind": "field_path",
+      "evidence": "SPL: index=botsv3 sourcetype=aws:cloudtrail (userIdentity.sessionContext.attributes.mfaAuthenticated=* OR additionalEventData.MFAUsed=* OR authentication_method=*) | stats count dc(eventName) as distinct_eventNames values(userIdentity.sessionContext.attributes.mfaAuthenticated) as mfaAuthenticated values(additionalEventData.MFAUsed) as MFAUsed values(authentication_method) as authMethod by eventType -> 2 rows: (1) eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\", MFAUsed and authMethod absent; (2) eventType=AwsConsoleSignIn, count=4, distinct_eventNames=1, MFAUsed=\"No\", authMethod=\"SFA\", mfaAuthenticated absent. Corroborated by raw JSON: \"userIdentity\": {... \"sessionContext\": {... \"attributes\": {\"mfaAuthenticated\": \"false\", \"creationDate\": ...}}}.",
+      "worker_confidence": 99,
+      "search_space_used": {
+        "sourcetypes": [
+          "aws:cloudtrail"
+        ],
+        "sources": [
+          "s3://cloudtrail-622676721278/AWSLogs/622676721278/CloudTrail/*"
+        ]
+      },
+      "negative_findings": [],
+      "notes": "Field path unchanged: userIdentity.sessionContext.attributes.mfaAuthenticated. The cross-tab is the single quotable artifact for both premises: on AwsApiCall events only mfaAuthenticated is present (value \"false\", string not boolean — alert condition is =\"false\"); additionalEventData.MFAUsed (\"No\") and authentication_method (\"SFA\") occur exclusively on the 4 AwsConsoleSignIn ConsoleLogin events (user bstoll) and never on API calls. mfaAuthenticated covers 2155 AwsApiCall events across 96 distinct eventNames (AssumedRole 789 + IAMUser 1366).",
+      "structured": true,
+      "spawn_type": "senior",
+      "search_space": {},
+      "prior_info": "",
+      "confidence": null,
+      "insight": "FOUND",
+      "novel_spl_count": 1,
+      "round": 2
+    }
+  ],
+  "candidate_ledger": [
+    {
+      "value": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "status": "solved",
+      "worker": "s1",
+      "spl": [
+        "index=botsv3 sourcetype=aws:cloudtrail authentication_method=* | stats count values(authentication_method) as auth_method values(eventName) as eventName values(eventType) as eventType"
+      ],
+      "evidence": "SPL 1: index=botsv3 sourcetype=aws:cloudtrail | fieldsummary | search field=\"*sessionContext*\" OR field=\"*mfa*\" OR field=\"*Mfa*\" | stats count values(distinct_count) as distinct_values by field -> returned 8 rows including userIdentity.sessionContext.attributes.mfaAuthenticated (distinct_count 1) and additionalEventData.MFAUsed (distinct_count 1). SPL 2: index=botsv3 sourcetype=aws:cloudtrail user"
+    }
+  ],
+  "loop": "conversational",
+  "end_reason": "answer",
+  "sh_turns": 3,
+  "waves": 2,
+  "senior_iterations": 12,
+  "ceiling": 30,
+  "compactions": 0,
+  "grades": [
+    {
+      "qid": "Q201",
+      "senior_id": "s1",
+      "round": 1,
+      "r1": "PASS",
+      "r2_sh": "PASS",
+      "r2_effective": "PASS",
+      "r3": "WEAK",
+      "r4": "FAIL",
+      "route": "COMMAND",
+      "decision": "continue",
+      "basis": "",
+      "novel_spl_count": 5
+    },
+    {
+      "qid": "Q201",
+      "senior_id": "s1",
+      "round": 2,
+      "r1": "PASS",
+      "r2_sh": "PASS",
+      "r2_effective": "PASS",
+      "r3": "PASS",
+      "r4": "PASS",
+      "route": "ANSWER",
+      "decision": "",
+      "basis": "",
+      "novel_spl_count": 1
+    }
+  ],
+  "hint_conv": {}
+}

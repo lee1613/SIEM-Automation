@@ -1,0 +1,84 @@
+[
+  {
+    "qid": "Q325",
+    "senior": "sh",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Coverage: For sourcetype ms:aad:signin over the full day in scope, the event creation time is represented by signinDateTimeInMillis and equivalently by _time/signinDateTime, and the feed contains exactly one day of events (2018-08-20), so a full-feed max lag computation over those 220 events covers the entire asked span.",
+    "load_bearing": true,
+    "round_first_seen": 3,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Single complete result row (returned 1 of 1) from index=botsv3 sourcetype=ms:aad:signin | eval time_diff = abs(_time - signinDateTimeInMillis/1000), lag_seconds = _indextime - signinDateTimeInMillis/1000 | stats count, max(time_diff) as max_time_diff, dc(eval(strftime(_time,\"%Y-%m-%d\"))) as distinct_days, values(eval(strftime(_time,\"%Y-%m-%d\"))) as days, max(eval(lag_seconds/60)) as max_lag_minutes_exact, max(eval(round(lag_seconds/60,0))) as max_lag_minutes_rounded. count=220 is every event in the feed; max_time_diff=0.000998 seconds is the largest absolute difference between _time and signinDateTimeInMillis/1000 across all 220 events, so the two creation-time representations are the same instant; distinct_days=1 and days=2018-08-20 show the feed contains exactly one day, so the full-feed max computation covers the entire asked span.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted one-row stats result directly supports the claim: it measures all 220 ms:aad:signin events, shows _time and signinDateTimeInMillis differ by at most 0.000998s, and shows there is exactly one day, 2018-08-20, in scope.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another creation-time field or another day in this sourcetype could change the span or measure. The same complete result rules both out by showing the near-identity of _time and signinDateTimeInMillis and distinct_days=1 for the full feed.",
+    "history": [
+      {
+        "round": 3,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"count\": \"220\", \"max_time_diff\": \"0.000998\", \"distinct_days\": \"1\", \"days\": \"2018-08-20\", \"max_lag_minutes_exact\": \"50.81321666638056\", \"max_lag_minutes_rounded\": \"51\"}",
+        "evidence": "Single complete result row (returned 1 of 1) from index=botsv3 sourcetype=ms:aad:signin | eval time_diff = abs(_time - signinDateTimeInMillis/1000), lag_seconds = _indextime - signinDateTimeInMillis/1000 | stats count, max(time_diff) as max_time_diff, dc(eval(strftime(_time,\"%Y-%m-%d\"))) as distinct_days, values(eval(strftime(_time,\"%Y-%m-%d\"))) as days, max(eval(lag_seconds/60)) as max_lag_minutes_exact, max(eval(round(lag_seconds/60,0))) as max_lag_minutes_rounded. count=220 is every event in the feed; max_time_diff=0.000998 seconds is the largest absolute difference between _time and signinDateTimeInMillis/1000 across all 220 events, so the two creation-time representations are the same instant; distinct_days=1 and days=2018-08-20 show the feed contains exactly one day, so the full-feed max computation covers the entire asked span."
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted one-row stats result directly supports the claim: it measures all 220 ms:aad:signin events, shows _time and signinDateTimeInMillis differ by at most 0.000998s, and shows there is exactly one day, 2018-08-20, in scope. | rival: The strongest rival is that another creation-time field or another day in this sourcetype could change the span or measure. The same complete result rules both out by showing the near-identity of _time and signinDateTimeInMillis and distinct_days=1 for the full feed."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q325",
+    "senior": "sh",
+    "id": "p2",
+    "kind": "selection",
+    "text": "Selection: The max lag to submit is 51 because the complete ms:aad:signin computation returns a maximum lag of 3048.793 seconds = 50.81321666638056 minutes, and the rounded max from SPL is 51, with the next-highest events lower at 47.04 and 45.94 minutes.",
+    "load_bearing": true,
+    "round_first_seen": 3,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Complete top-3 result (returned 1 of 1) from index=botsv3 sourcetype=ms:aad:signin | eval lag_seconds = _indextime - signinDateTimeInMillis/1000 | sort - lag_seconds | head 3 | eval lag_min=round(lag_seconds/60, 2) | stats list(lag_seconds) as lag_seconds, list(lag_min) as lag_min, list(user) as user. The maximum lag is 3048.792999982834 seconds = 50.81 minutes (fyodor@froth.ly), and the next-highest events are lower at 47.04 and 45.94 minutes, so no rival event competes with the max. Combined with the same query's stats output max_lag_minutes_exact=50.81321666638056 and max_lag_minutes_rounded=51 (computed inside SPL via max(eval(round(lag_seconds/60,0)))), the rounded maximum lag to submit is 51.",
+    "rival": "A rival reading is that another event in ms:aad:signin or another representation of creation time could yield a larger rounded lag than 51; the full-feed stats max over both signinDateTimeInMillis and _time rules that out.",
+    "stamp": "true",
+    "stamp_reason": "The quoted one-row stats result literally includes max_lag_minutes_exact=50.81321666638056 and max_lag_minutes_rounded=51, so it supports the claim that 51 is the rounded maximum lag. The top-3 lag row further shows the next values are lower.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another event in ms:aad:signin for the same day could round higher or tie differently. The complete max() aggregation across all 220 events and the next-highest values at 47.04 and 45.94 rule that out.",
+    "history": [
+      {
+        "round": 3,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"lag_seconds\": [\"3048.792999982834\", \"2822.6159999370575\", \"2756.140000104904\"], \"lag_min\": [\"50.81\", \"47.04\", \"45.94\"], \"user\": [\"fyodor@froth.ly\", \"ghoppy@froth.ly\", \"bstoll@froth.ly\"]}",
+        "evidence": "Complete top-3 result (returned 1 of 1) from index=botsv3 sourcetype=ms:aad:signin | eval lag_seconds = _indextime - signinDateTimeInMillis/1000 | sort - lag_seconds | head 3 | eval lag_min=round(lag_seconds/60, 2) | stats list(lag_seconds) as lag_seconds, list(lag_min) as lag_min, list(user) as user. The maximum lag is 3048.792999982834 seconds = 50.81 minutes (fyodor@froth.ly), and the next-highest events are lower at 47.04 and 45.94 minutes, so no rival event competes with the max. Combined with the same query's stats output max_lag_minutes_exact=50.81321666638056 and max_lag_minutes_rounded=51 (computed inside SPL via max(eval(round(lag_seconds/60,0)))), the rounded maximum lag to submit is 51."
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted one-row stats result literally includes max_lag_minutes_exact=50.81321666638056 and max_lag_minutes_rounded=51, so it supports the claim that 51 is the rounded maximum lag. The top-3 lag row further shows the next values are lower. | rival: The strongest rival is that another event in ms:aad:signin for the same day could round higher or tie differently. The complete max() aggregation across all 220 events and the next-highest values at 47.04 and 45.94 rule that out."
+      }
+    ],
+    "candidate_at_each_round": {}
+  }
+]

@@ -1,0 +1,75 @@
+{
+  "flow": [
+    "The mail server was identified first from stream:smtp as internal host 172.31.38.181 on host matar, with a Postfix greeting, so later searches could focus on telemetry tied to that machine.",
+    "CloudTrail and aws:description did not expose a public/IP inventory for that host, so the external/public IP remained unresolved and the hunt moved to network/web telemetry.",
+    "stream:http showed matar’s own traffic was only a ClamAV update, which ruled out the mail server’s captured HTTP as the answer path and pushed the search toward other HTTP sources.",
+    "access_combined was exhausted and only showed internal 172.16.0.149 /search.php activity plus unrelated scanner/exploit probes, so it did not yield an external-IP search string.",
+    "The only remaining promising lead was the single outbound Splunk_HTTPClient event from c_ip=172.31.38.181 at 2018-08-20T14:14:26Z, but the paired Splunk_HTTPURI record that would contain the literal search string was never recovered before the rounds ended."
+  ],
+  "derivation": "The chain starts with stream:smtp, where dest_ip and greeting identify the mail server as 172.31.38.181 on host matar. Subsequent checks against aws:cloudtrail and aws:description did not map that internal host to a public-facing address. stream:http on matar showed only a ClamAV cdiff download, so it did not contain the search query. access_combined was then checked for web searches; the only /search.php traffic found was from internal 172.16.0.149, which is excluded by the question’s external-IP wording, and the remaining external rows were scanners/exploit probes with no relevant search string. The last held lead was a single Splunk_HTTPClient event from c_ip=172.31.38.181 at 2018-08-20T14:14:26Z, but the paired Splunk_HTTPURI event that would hold the literal URI/search string was not read, so no final search string was established in the transcript.",
+  "entities": [
+    {
+      "key": "172.31.38.181",
+      "fact": "Frothly mail server, internal Postfix host identified on host matar"
+    },
+    {
+      "key": "matar",
+      "fact": "Host that carried the stream:smtp evidence for the mail server"
+    },
+    {
+      "key": "172.16.0.149",
+      "fact": "Internal client seen in brewertalk.com /search.php traffic, ruled out by the external-IP wording"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "stream:smtp",
+      "fact": "dest_ip on all 879 events was 172.31.38.181; greeting showed '220 ip-172-31-38-181.us-west-2.compute.internal ESMTP Postfix (Ubuntu)'; src_ip values were Microsoft/O365 sender ranges, so they were inbound mail senders, not the mail server's external IP"
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "matar's own HTTP capture showed only one ClamAV update request to db.local.clamav.net; it did not expose a search query"
+    },
+    {
+      "sourcetype": "access_combined",
+      "fact": "The search-related traffic found there was internal 172.16.0.149 /search.php; external rows were unrelated scanners/exploits and did not tie to the mail server"
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "Splunk_HTTPClient and Splunk_HTTPURI are paired by timestamp/bytes; the literal URI/search string would be in the Splunk_HTTPURI side, but that record was not recovered"
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "stream:smtp",
+      "purpose": "Identify the mail server and its internal IP",
+      "spl": "get_source_types -> 102 sourcetypes; mail evidence in stream:smtp, ms:o365:reporting:messagetrace; HTTP/search candidates in stream:http, access_combined, aws:elb:accesslogs.\nget_sources sourcetype=stream:smtp -> single source \"stream:smtp\", 879 events.\nget_sourcetype_fields stream:smtp -> dest_ip=172.31.38.181 on all 879 events; greeting \"220 ip-172-31-38-181.us-west-2.compute.internal ESMTP Postfix (Ubuntu)\"; host=matar; src_ip values are all 104.47.x.x (Microsoft/O365 sender ranges).",
+      "returns": "Mail server positively identified as 172.31.38.181 on host matar; no external/public IP found here"
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Check whether the mail server’s own HTTP held the search query",
+      "spl": "sourcetype=stream:http host=matar | stats count by src_ip,dest_ip,site,uri_path -> 1 row: 172.31.38.181 -> 104.16.185.138 db.local.clamav.net /daily-24783.cdiff (ClamAV update only).",
+      "returns": "Only a ClamAV update from the mail server; no search string"
+    },
+    {
+      "sourcetype": "access_combined",
+      "purpose": "Look for external-IP web searches and exclude internal search traffic",
+      "spl": "get_raw_events access_combined keyword=search -> 10 rows, all client 172.16.0.149 on brewertalk.com /search.php, incl. automated \"GET /search.php\" with user-agent \"__main__/0.2\".",
+      "returns": "Search traffic exists but is internal RFC1918 traffic, not the external-IP case asked for"
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Find the outbound HTTP client event from the mail server",
+      "spl": "get_raw_events Splunk_HTTPClient keyword=172.31.38.181 -> 1 event: endtime 2018-08-20T14:14:26.186801Z, bytes_in=151, bytes_out=14363, time_taken=12960.",
+      "returns": "Exactly one outbound HTTP client event from c_ip=172.31.38.181 was found, but its paired URI/search string was not read"
+    }
+  ],
+  "ruled_out": "aws:cloudtrail and aws:description for public-IP mapping; matar's own stream:http (only ClamAV update); brewertalk.com /search.php from 172.16.0.149; access_combined external scanner/exploit rows; stream:dns froth.ly MX/A records",
+  "qid": "Q306",
+  "question": "A search query originating from an external IP address of Frothly's mail server yields some interesting search terms. What is the search string?",
+  "guidance": "",
+  "answer": "SH retired without answering",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

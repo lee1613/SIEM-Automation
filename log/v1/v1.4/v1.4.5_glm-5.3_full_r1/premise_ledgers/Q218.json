@@ -1,0 +1,85 @@
+[
+  {
+    "qid": "Q218",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The question's concept can surface three ways in aws:cloudtrail: (a) events targeting the IAM service (eventSource=iam.amazonaws.com) — searched, 118 events, 3 keys with errors, all tied at 1 distinct errorCode; (b) error events by IAMUser-identity access keys across all eventSources — searched, 28 keys, unique max 6 distinct; (c) events whose resources{}.type is AWS::IAM::Role — searched, 332 events all AWSService identity, zero IAMUser.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "All three candidate surfaces re-queried this round and returned exactly what the premise states: iam.amazonaws.com errors -> 3 keys (\"AKIAJOGCDXJ5NW5PXUPA\", \"count\": \"6\", \"distinct_msg\": \"5\"); STS/signin errors -> \"total_event_count\": 0; IAM-Role resources -> \"count\": \"332\", \"types\": \"AWSService\".",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted results support the claim that the concept surfaces through multiple CloudTrail routes and that the non-IAM-service routes tested here do not produce a usable IAMUser winner. The report explicitly shows iam.amazonaws.com activity, empty STS/signin error routes, and AWS::IAM::Role events without IAMUser access keys.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that IAM resource access should include non-IAM-service events such as STS or IAM-role resource records. This round rules that out within the tested feed because STS/signin had zero errors and AWS::IAM::Role events carried AWSService rather than IAMUser identities, leaving strict IAM service access as the sound route.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "\"userIdentity.accessKeyId\": \"AKIAJOGCDXJ5NW5PXUPA\", \"count\": \"6\", \"distinct_msg\": \"5\"",
+        "evidence": "All three candidate surfaces re-queried this round and returned exactly what the premise states: iam.amazonaws.com errors -> 3 keys (\"AKIAJOGCDXJ5NW5PXUPA\", \"count\": \"6\", \"distinct_msg\": \"5\"); STS/signin errors -> \"total_event_count\": 0; IAM-Role resources -> \"count\": \"332\", \"types\": \"AWSService\"."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted results support the claim that the concept surfaces through multiple CloudTrail routes and that the non-IAM-service routes tested here do not produce a usable IAMUser winner. The report explicitly shows iam.amazonaws.com activity, empty STS/signin error routes, and AWS::IAM::Role events without IAMUser access keys. | rival: The strongest rival reading is that IAM resource access should include non-IAM-service events such as STS or IAM-role resource records. This round rules that out within the tested feed because STS/signin had zero errors and AWS::IAM::Role events carried AWSService rather than IAMUser identities, leaving strict IAM service access as the sound route."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "ASIAZB6TMXZ7FWTIS4NJ",
+      "2": "AKIAJOGCDXJ5NW5PXUPA",
+      "3": "AKIAJOGCDXJ5NW5PXUPA"
+    }
+  },
+  {
+    "qid": "Q218",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The winning IAM user access key is ASIAZB6TMXZ7FWTIS4NJ with 6 distinct errorCode values, chosen over the rival with the most error events (ASIAZB6TMXZ7LL6JBJQA, 622 events, 5 distinct) because the question ranks by distinct error count, not total event count.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "s1",
+    "evidence": "ASIAZB6TMXZ7FWTIS4NJ's 6 distinct errorCodes are all S3 bucket-config lookup responses (NoSuchBucketPolicy, NoSuchCORSConfiguration, NoSuchLifecycleConfiguration, NoSuchTagSet, NoSuchWebsiteConfiguration, ReplicationConfigurationNotFoundError) — its records do not show attempts to access IAM resources, and the identical 6-error profile is shared by two AssumedRole config-role keys (ASIAZB6TMXZ7CSGDWJ7C, ASIAZB6TMXZ7EJIK7DPR), marking it as the add-on's routine enumeration pattern. The only key whose records show IAM resource access with a unique distinct-error maximum is AKIAJOGCDXJ5NW5PXUPA (5 distinct denied IAM operations).",
+    "rival": "ASIAZB6TMXZ7LL6JBJQA (most error events, 622, but only 5 distinct errorCodes) and AKIAIGKL572SFDPOKLHA (most IAM-service error events, 9, but only 1 distinct on IAM and 4 overall)",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "REFUTED",
+        "by": "s1",
+        "quote": "\"userIdentity.accessKeyId\": \"ASIAZB6TMXZ7FWTIS4NJ\", \"distinct_errors\": \"6\", \"count\": \"25\", \"error_codes\": [\"NoSuchBucketPolicy\", \"NoSuchCORSConfiguration\", \"NoSuchLifecycleConfiguration\", \"NoSuchTagSet\", \"NoSuchWebsiteConfiguration\", \"ReplicationConfigurationNotFoundError\"]",
+        "evidence": "ASIAZB6TMXZ7FWTIS4NJ's 6 distinct errorCodes are all S3 bucket-config lookup responses (NoSuchBucketPolicy, NoSuchCORSConfiguration, NoSuchLifecycleConfiguration, NoSuchTagSet, NoSuchWebsiteConfiguration, ReplicationConfigurationNotFoundError) — its records do not show attempts to access IAM resources, and the identical 6-error profile is shared by two AssumedRole config-role keys (ASIAZB6TMXZ7CSGDWJ7C, ASIAZB6TMXZ7EJIK7DPR), marking it as the add-on's routine enumeration pattern. The only key whose records show IAM resource access with a unique distinct-error maximum is AKIAJOGCDXJ5NW5PXUPA (5 distinct denied IAM operations)."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "ASIAZB6TMXZ7FWTIS4NJ",
+      "2": "AKIAJOGCDXJ5NW5PXUPA",
+      "3": "AKIAJOGCDXJ5NW5PXUPA"
+    }
+  }
+]

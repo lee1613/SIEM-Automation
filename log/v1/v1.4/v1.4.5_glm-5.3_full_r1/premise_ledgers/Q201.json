@@ -1,0 +1,90 @@
+[
+  {
+    "qid": "Q201",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Coverage: 'AWS API activity without MFA' in Frothly's scope can only appear as an MFA/auth-named field in the aws:cloudtrail feed (account 622676721278). Searched its full fieldsummary for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential*: exactly three MFA-bearing fields exist — userIdentity.sessionContext.attributes.mfaAuthenticated (2155 events), additionalEventData.MFAUsed (4 events), authentication_method (4 events). Azure AD (ms:aad:signin) mfa* fields are out of scope for AWS API activity.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "The OR-query over all three MFA-bearing fields, grouped by eventType, returned exactly 2 rows: every MFA-bearing field in the feed appears in one of them, and no fourth MFA/auth field exists (fieldsummary searches for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential* returned only these plus non-MFA credential fields). Coverage is therefore complete: mfaAuthenticated on AwsApiCall, MFAUsed and authentication_method on AwsConsoleSignIn only.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The reported cross-tab is described as showing which MFA-related fields occur on AwsApiCall versus AwsConsoleSignIn events, which directly supports the coverage claim about where 'AWS API activity without MFA' can appear in this feed.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that a different MFA-related field in the same CloudTrail feed could also represent API activity without MFA. The report says the only rivals, additionalEventData.MFAUsed and authentication_method, appear only on ConsoleLogin/AwsConsoleSignIn, ruling that out for this question's AWS API activity wording.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\" | eventType=AwsConsoleSignIn, count=4, distinct_eventNames=1, MFAUsed=\"No\", authMethod=\"SFA\"",
+        "evidence": "The OR-query over all three MFA-bearing fields, grouped by eventType, returned exactly 2 rows: every MFA-bearing field in the feed appears in one of them, and no fourth MFA/auth field exists (fieldsummary searches for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential* returned only these plus non-MFA credential fields). Coverage is therefore complete: mfaAuthenticated on AwsApiCall, MFAUsed and authentication_method on AwsConsoleSignIn only."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported cross-tab is described as showing which MFA-related fields occur on AwsApiCall versus AwsConsoleSignIn events, which directly supports the coverage claim about where 'AWS API activity without MFA' can appear in this feed. | rival: The strongest rival is that a different MFA-related field in the same CloudTrail feed could also represent API activity without MFA. The report says the only rivals, additionalEventData.MFAUsed and authentication_method, appear only on ConsoleLogin/AwsConsoleSignIn, ruling that out for this question's AWS API activity wording."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "2": "userIdentity.sessionContext.attributes.mfaAuthenticated"
+    }
+  },
+  {
+    "qid": "Q201",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "Selection: the alert field for AWS API activity without MFA is userIdentity.sessionContext.attributes.mfaAuthenticated, because it is carried by all 2155 AwsApiCall events (AssumedRole 789 + IAMUser 1366) with value \"false\" — i.e. it is present on API activity records and directly states MFA was not used.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "On AwsApiCall events — the records the question's 'AWS API activity' names — the only MFA field present is userIdentity.sessionContext.attributes.mfaAuthenticated, and its value is \"false\" on all 2155 of them, directly stating the API calls were made without MFA. The rivals additionalEventData.MFAUsed and authentication_method appear only in the AwsConsoleSignIn row (4 ConsoleLogin events), never on an API call, so they cannot alert on API activity.",
+    "rival": "additionalEventData.MFAUsed — ruled out by: index=botsv3 sourcetype=aws:cloudtrail additionalEventData.MFAUsed=* | stats count by eventType -> 4 events, all eventType=AwsConsoleSignIn (ConsoleLogin), zero AwsApiCall; it marks console sign-ins, not API activity. Same query pattern ruled out authentication_method (4 ConsoleLogin events, value SFA).",
+    "stamp": "true",
+    "stamp_reason": "The report states the cross-tab shows AwsApiCall carries only userIdentity.sessionContext.attributes.mfaAuthenticated with value false, while the other MFA-bearing fields occur only on console sign-in events. That supports the selection claim as written.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is additionalEventData.MFAUsed because it also expresses MFA state, but the evidence places it only on AwsConsoleSignIn/ConsoleLogin events, not API calls. That leaves userIdentity.sessionContext.attributes.mfaAuthenticated as the field that fits the question's AWS API activity qualifier.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "eventType=AwsApiCall, count=2155, distinct_eventNames=96, mfaAuthenticated=\"false\"",
+        "evidence": "On AwsApiCall events — the records the question's 'AWS API activity' names — the only MFA field present is userIdentity.sessionContext.attributes.mfaAuthenticated, and its value is \"false\" on all 2155 of them, directly stating the API calls were made without MFA. The rivals additionalEventData.MFAUsed and authentication_method appear only in the AwsConsoleSignIn row (4 ConsoleLogin events), never on an API call, so they cannot alert on API activity."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report states the cross-tab shows AwsApiCall carries only userIdentity.sessionContext.attributes.mfaAuthenticated with value false, while the other MFA-bearing fields occur only on console sign-in events. That supports the selection claim as written. | rival: The strongest rival is additionalEventData.MFAUsed because it also expresses MFA state, but the evidence places it only on AwsConsoleSignIn/ConsoleLogin events, not API calls. That leaves userIdentity.sessionContext.attributes.mfaAuthenticated as the field that fits the question's AWS API activity qualifier."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "2": "userIdentity.sessionContext.attributes.mfaAuthenticated"
+    }
+  }
+]

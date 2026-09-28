@@ -1,0 +1,67 @@
+[
+  {
+    "qid": "Q221",
+    "senior": "s2",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The unauthorized CreateAccessKey attempt by leaked key AKIAJOGCDXJ5NW5PXUPA is recorded only in aws:cloudtrail iam.amazonaws.com AccessDenied events, with the target resource name carried solely in the errorMessage field (requestParameters is null in every denial event of the burst).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "nullweb_admin"
+    }
+  },
+  {
+    "qid": "Q221",
+    "senior": "s2",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The target resource of the denied CreateAccessKey attempt is the literal string nullweb_admin, not web_admin: the CreateAccessKey event's own errorMessage and all three same-burst sibling key-management denials (ListAccessKeys x2, DeleteAccessKey) read 'user nullweb_admin', while the only 'user web_admin' reading comes from a GetUser denial 11 minutes later, from a different source IP and user agent, where GetUser with no parameters names the caller's own user.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Raw reads: CreateAccessKey errorMessage 'iam:CreateAccessKey on resource: user nullweb_admin'; ListAccessKeys x2 and DeleteAccessKey in the same burst read 'user nullweb_admin' identically; the only 'user web_admin' reading is the 09:27:07Z GetUser denial from 82.102.18.111/ElasticWolf, a different session, and GetUser-with-no-parameters names the caller itself. The CreateUser denial in the same burst targets arn:aws:iam::622676721278:user/my_db_user, a different act.",
+    "rival": "web_admin (the GetUser denial's resource string and the calling identity's userName) and my_db_user (the CreateUser denial's target in the same burst)",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "\"errorMessage\": \"User: arn:aws:iam::622676721278:user/web_admin is not authorized to perform: iam:CreateAccessKey on resource: user nullweb_admin\"",
+        "evidence": "Raw reads: CreateAccessKey errorMessage 'iam:CreateAccessKey on resource: user nullweb_admin'; ListAccessKeys x2 and DeleteAccessKey in the same burst read 'user nullweb_admin' identically; the only 'user web_admin' reading is the 09:27:07Z GetUser denial from 82.102.18.111/ElasticWolf, a different session, and GetUser-with-no-parameters names the caller itself. The CreateUser denial in the same burst targets arn:aws:iam::622676721278:user/my_db_user, a different act."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "nullweb_admin"
+    }
+  }
+]

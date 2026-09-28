@@ -1,0 +1,274 @@
+[
+  {
+    "qid": "Q315",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The two files remotely streamed to /tmp on hoth can appear in: (a) hoth's bash_history commands referencing /tmp, (b) osquery:results file/process event tables on hoth, (c) stream:http request bodies/URIs delivering files to hoth, (d) linux_audit execve records. (a) searched — only 'ls /tmp' and 'cd /tmp' found, no filenames; (b), (c), (d) not yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "(c) stream:http was searched this round and held the complete remote command channel: 17 RCE commands including the two echo commands that streamed base64 blobs into /tmp/colonel and /tmp/definitelydontinvestigatethisfile.sh, plus the local decode that created colonel.c. (d) linux_audit is moot - the streaming act is directly evidenced in stream:http.",
+    "rival": "Windows-side telemetry (WinEventLog/WinHostMon) cannot hold Linux /tmp writes; excluded by host axis.",
+    "stamp": "true",
+    "stamp_reason": "The report cites complete host-side sources for the act: hoth osquery FIM rows for /tmp creation timing, proc_events/shell_history for local creation commands, and stream:http RCE command rows for remote echo/decode behavior. That supports the claim that these are the places where remotely streamed /tmp files can appear.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the answer should come from a different feed such as stream:tcp or bash_history alone. The same report rules that out by showing 0 relevant stream:tcp/syslog content and by using FIM plus HTTP RCE commands to cover both file appearance and remote delivery semantics.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "\"rce_cmd\": \"base64 --decode /tmp/colonel > /tmp/colonel.c\"",
+        "evidence": "(c) stream:http was searched this round and held the complete remote command channel: 17 RCE commands including the two echo commands that streamed base64 blobs into /tmp/colonel and /tmp/definitelydontinvestigatethisfile.sh, plus the local decode that created colonel.c. (d) linux_audit is moot - the streaming act is directly evidenced in stream:http."
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report cites complete host-side sources for the act: hoth osquery FIM rows for /tmp creation timing, proc_events/shell_history for local creation commands, and stream:http RCE command rows for remote echo/decode behavior. That supports the claim that these are the places where remotely streamed /tmp files can appear. | rival: The strongest rival is that the answer should come from a different feed such as stream:tcp or bash_history alone. The same report rules that out by showing 0 relevant stream:tcp/syslog content and by using FIM plus HTTP RCE commands to cover both file appearance and remote delivery semantics."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "colonel.c,definitelydontinvestigatethisfile.sh",
+      "3": "colonel,definitelydontinvestigatethisfile.sh"
+    }
+  },
+  {
+    "qid": "Q315",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "hoth's bash_history is the /home/klagerfield/.bash_history source (83 events), not the ec2-user history which belongs to AWS hosts (gacrux/mars).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "v1",
+    "evidence": "an independent reader stood up the rival reading from data, so this selection does not hold: This is the complete host/source breakdown of every bash_history event in index=botsv3: /home/ec2-user/.bash_history's 17 events (2+15) sit on gacrux.i-0920036c8ca91e501 and mars.i-08e52f8b5a034012d only, while hoth's bash_history comes solely from /home/klagerfield/.bash_history — so the host field does rule that source out for hoth. A separate aws:description search confirmed both instance IDs in us-west-1:ec2_instances, so they are AWS EC2 instances.",
+    "rival": "/home/ec2-user/.bash_history (17 events, gacrux.i-0920036c8ca91e501 and mars.i-08e52f8b5a034012d) — ruled out by host field: those are AWS instances, not the on-prem Linux server hoth.",
+    "stamp": "false",
+    "stamp_reason": "The claim text in the ledger is the stale bash_history-source premise from the earlier round, but this report's evidence is about selecting colonel and definitelydontinvestigatethisfile.sh from FIM/proc_events/HTTP correlations. The offered quote does not establish that older claim as written.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival is the updated selection question the report is actually answering: which two /tmp files were remotely streamed. The evidence supports colonel and definitelydontinvestigatethisfile.sh, but not the stale bash_history-source claim still attached to p2, so the claim as written does not hold for this question.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"host\": \"hoth\", \"count\": \"83\"}",
+        "evidence": "Round 1 host breakdown of bash_history: hoth 83 events, matching /home/klagerfield/.bash_history's 83; the ec2-user history (17 events) belongs to gacrux.i-0920036c8ca91e501 and mars.i-08e52f8b5a034012d."
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=False, holds=False): The claim text in the ledger is the stale bash_history-source premise from the earlier round, but this report's evidence is about selecting colonel and definitelydontinvestigatethisfile.sh from FIM/proc_events/HTTP correlations. The offered quote does not establish that older claim as written. | rival: The strongest rival is the updated selection question the report is actually answering: which two /tmp files were remotely streamed. The evidence supports colonel and definitelydontinvestigatethisfile.sh, but not the stale bash_history-source claim still attached to p2, so the claim as written does not hold for this question."
+      },
+      {
+        "round": 5,
+        "status": "REFUTED",
+        "by": "v1",
+        "quote": "[{\"host\": \"gacrux.i-0920036c8ca91e501\", \"source\": \"/home/ec2-user/.bash_history\", \"count\": \"2\"}, {\"host\": \"hoth\", \"source\": \"/home/klagerfield/.bash_history\", \"count\": \"83\"}, {\"host\": \"mars.i-08e52f8b5a034012d\", \"source\": \"/home/ec2-user/.bash_history\", \"count\": \"15\"}]",
+        "evidence": "an independent reader stood up the rival reading from data, so this selection does not hold: This is the complete host/source breakdown of every bash_history event in index=botsv3: /home/ec2-user/.bash_history's 17 events (2+15) sit on gacrux.i-0920036c8ca91e501 and mars.i-08e52f8b5a034012d only, while hoth's bash_history comes solely from /home/klagerfield/.bash_history — so the host field does rule that source out for hoth. A separate aws:description search confirmed both instance IDs in us-west-1:ec2_instances, so they are AWS EC2 instances."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "colonel.c,definitelydontinvestigatethisfile.sh",
+      "3": "colonel,definitelydontinvestigatethisfile.sh"
+    }
+  },
+  {
+    "qid": "Q315",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "coverage",
+    "text": "Files remotely streamed to /tmp on hoth can show up as: (a) redirect targets of echo commands in stream:http form_data on /frothlyinventory/integration/saveGangster.action - searched, found /tmp/colonel plus a JPEG-base64 echo with no visible redirect; (b) osquery:results file events on hoth - full-token name search returned 0; (c) bash_history - 0; (d) stream:tcp payloads on the nc channel to 45.77.53.176:8088, linux_audit, and ps on hoth - NOT yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "osquery:results pack_fim_file_events on hoth DOES record the second file (my round-1 free-text search was a false negative; the field-filtered search columns.target_path=\"/tmp/definitelydontinvestigatethisfile.sh\" returns 3 events). stream:tcp on the nc channel (192.168.9.30 -> 45.77.53.176:8088) has only 2 events, flow metadata with no payload; linux_audit has 0 events for the filename; osquery:info on hoth is empty. Coverage is now complete: the FIM feed is where host-side evidence lives.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report's quoted results support the claim that remotely streamed files to /tmp on hoth can be evidenced through the HTTP RCE command channel and corroborating osquery FIM/proc telemetry. It shows a direct redirect into /tmp/colonel from stream:http and matching host-side FIM rows, plus host-side evidence for the second inbound write and local-derivative exclusions.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the streamed files would have to be read from stream:tcp payload or bash history instead. The evidence rules that out for this question by showing stream:tcp has only flow metadata while the HTTP RCE commands and hoth FIM/proc rows together capture the remote inbound writes and their filenames/derivatives.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"columns.target_path\": \"/tmp/definitelydontinvestigatethisfile.sh\", \"count\": \"3\", \"times\": \"1534763637\"}",
+        "evidence": "osquery:results pack_fim_file_events on hoth DOES record the second file (my round-1 free-text search was a false negative; the field-filtered search columns.target_path=\"/tmp/definitelydontinvestigatethisfile.sh\" returns 3 events). stream:tcp on the nc channel (192.168.9.30 -> 45.77.53.176:8088) has only 2 events, flow metadata with no payload; linux_audit has 0 events for the filename; osquery:info on hoth is empty. Coverage is now complete: the FIM feed is where host-side evidence lives."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's quoted results support the claim that remotely streamed files to /tmp on hoth can be evidenced through the HTTP RCE command channel and corroborating osquery FIM/proc telemetry. It shows a direct redirect into /tmp/colonel from stream:http and matching host-side FIM rows, plus host-side evidence for the second inbound write and local-derivative exclusions. | rival: The strongest rival is that the streamed files would have to be read from stream:tcp payload or bash history instead. The evidence rules that out for this question by showing stream:tcp has only flow metadata while the HTTP RCE commands and hoth FIM/proc rows together capture the remote inbound writes and their filenames/derivatives."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "colonel,definitelydontinvestigatethisfile.sh",
+      "2": "colonel,definitelydontinvestigatethisfile.sh",
+      "3": "colonel,definitelydontinvestigatethisfile.sh",
+      "4": "colonel,definitelydontinvestigatethisfile.sh",
+      "5": "colonel,definitelydontinvestigatethisfile.sh"
+    }
+  },
+  {
+    "qid": "Q315",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "selection",
+    "text": "The two remote inbound writes to /tmp on hoth are the C-source echo (>> /tmp/colonel, directly evidenced at 11:35:17Z) and the JPEG-base64 echo (11:36:30Z, redirect not captured in form_data; established candidate name definitelydontinvestigatethisfile.sh).",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Complete FIM result (2 of 2 rows, no truncation) at the two RCE-echo seconds: only /tmp/colonel (CREATED 1534763317, matching the RCE command 'echo <base64 C source> >> /tmp/colonel' at 1534763317.466, quote from R1: {\"echo_tail\": \" >> /tmp/colonel\", \"count\": \"1\", \"time\": \"1534763317.4660000801\"}) and /tmp/definitelydontinvestigatethisfile.sh (CREATED 1534763390, matching the JPEG-base64 echo at 1534763390.299, R1 quote: {\"echo_tail\": \"\", \"count\": \"1\", \"time\": \"1534763390.2990000248\"}) exist, both by uid 111 (tomcat8, the RCE context), both 0->content UPDATED. The six derivatives are all later local outputs (complete 6-of-6 FIM result): colonel.c CREATED 1534763456 (process event \"base64 --decode /tmp/colonel\" 1534763464), colonelnew CREATED 1534763660 (\"gcc colonel.c -o colonelnew\" 1534763701, \"chmod +x colonelnew\"/\"./colonelnew\" 1534763820), backpipe CREATED 1534763573 (\"mknod /tmp/backpipe p\" 1534763573.223), loot.txt CREATED 1534764186, suitecrm.sql CREATED 1534765138, blargh.tgz CREATED 1534765279 with MOVED_FROM — none at either echo second, none remote inbound writes.",
+    "rival": "The local /tmp derivatives (colonel.c, backpipe, loot.txt, suitecrm.sql, blargh.tgz, colonelnew) as the streamed files",
+    "stamp": "true",
+    "stamp_reason": "The cited complete FIM-at-seconds result plus the earlier complete RCE command list supports the claim that only colonel and definitelydontinvestigatethisfile.sh align with the two remote echo writes, while the named rivals are created later as local derivatives or outputs.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is colonel.c, because it is closely adjacent in /tmp and derived from colonel, or another /tmp file such as backpipe or blargh.tgz. The evidence rules those out by showing colonel.c is created later by base64 decode, colonelnew by compile, backpipe by mknod, and the collection/archive files later in the nc-backpipe phase, while only colonel and definitelydontinvestigatethisfile.sh exist at the two remote-echo creation seconds.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"columns.target_path\": \"/tmp/colonel\", \"columns.time\": \"1534763317\", \"count\": \"3\", \"actions\": [\"CREATED\", \"UPDATED\"], \"sizes\": [\"0\", \"7701\"], \"uids\": \"111\"}, {\"columns.target_path\": \"/tmp/definitelydontinvestigatethisfile.sh\", \"columns.time\": \"1534763390\", \"count\": \"3\", \"actions\": [\"CREATED\", \"UPDATED\"], \"sizes\": [\"0\", \"21857\"], \"uids\": \"111\"}",
+        "evidence": "Complete FIM result (2 of 2 rows, no truncation) at the two RCE-echo seconds: only /tmp/colonel (CREATED 1534763317, matching the RCE command 'echo <base64 C source> >> /tmp/colonel' at 1534763317.466, quote from R1: {\"echo_tail\": \" >> /tmp/colonel\", \"count\": \"1\", \"time\": \"1534763317.4660000801\"}) and /tmp/definitelydontinvestigatethisfile.sh (CREATED 1534763390, matching the JPEG-base64 echo at 1534763390.299, R1 quote: {\"echo_tail\": \"\", \"count\": \"1\", \"time\": \"1534763390.2990000248\"}) exist, both by uid 111 (tomcat8, the RCE context), both 0->content UPDATED. The six derivatives are all later local outputs (complete 6-of-6 FIM result): colonel.c CREATED 1534763456 (process event \"base64 --decode /tmp/colonel\" 1534763464), colonelnew CREATED 1534763660 (\"gcc colonel.c -o colonelnew\" 1534763701, \"chmod +x colonelnew\"/\"./colonelnew\" 1534763820), backpipe CREATED 1534763573 (\"mknod /tmp/backpipe p\" 1534763573.223), loot.txt CREATED 1534764186, suitecrm.sql CREATED 1534765138, blargh.tgz CREATED 1534765279 with MOVED_FROM — none at either echo second, none remote inbound writes."
+      },
+      {
+        "round": 11,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The cited complete FIM-at-seconds result plus the earlier complete RCE command list supports the claim that only colonel and definitelydontinvestigatethisfile.sh align with the two remote echo writes, while the named rivals are created later as local derivatives or outputs. | rival: The strongest rival is colonel.c, because it is closely adjacent in /tmp and derived from colonel, or another /tmp file such as backpipe or blargh.tgz. The evidence rules those out by showing colonel.c is created later by base64 decode, colonelnew by compile, backpipe by mknod, and the collection/archive files later in the nc-backpipe phase, while only colonel and definitelydontinvestigatethisfile.sh exist at the two remote-echo creation seconds."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "colonel,definitelydontinvestigatethisfile.sh",
+      "2": "colonel,definitelydontinvestigatethisfile.sh",
+      "3": "colonel,definitelydontinvestigatethisfile.sh",
+      "4": "colonel,definitelydontinvestigatethisfile.sh",
+      "5": "colonel,definitelydontinvestigatethisfile.sh"
+    }
+  },
+  {
+    "qid": "Q315",
+    "senior": "sh",
+    "id": "p5",
+    "kind": "selection",
+    "text": "Selection: The two files remotely streamed into /tmp on hoth are colonel and definitelydontinvestigatethisfile.sh because the Struts2 RCE command channel writes base64 content into /tmp at two specific seconds, and the complete osquery FIM/process timeline shows only those two files as inbound writes at those seconds while colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, and blargh.tgz are later local decode, compile, FIFO, collection, or archive artifacts.",
+    "load_bearing": true,
+    "round_first_seen": 11,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "This complete 8/8-row FIM CREATED result, combined with the R1 RCE command rows (\"echo <base64 C source> >> /tmp/colonel\" at 1534763317.466 and the JPEG-base64 echo at 1534763390.299) and the R2 process events (\"base64 --decode /tmp/colonel\" 1534763464, \"gcc colonel.c -o colonelnew\" 1534763701, \"chmod +x colonelnew\"/\"./colonelnew\" 1534763820), settles p5 exactly as stated: the RCE channel writes base64 content into /tmp at two specific seconds (1534763317 and 1534763390), the complete FIM/process timeline shows only colonel and definitelydontinvestigatethisfile.sh as inbound writes at those seconds (both uid 111 = tomcat8, the RCE context), and colonel.c (1534763456, local decode), colonelnew (1534763660, local compile), backpipe (1534763573, local mknod FIFO), loot.txt (1534764186), suitecrm.sql (1534765138), blargh.tgz (1534765279) are later local artifacts — the last three created by uid 0 (root) after the local privilege escalation, not by the RCE context.",
+    "rival": "Rival set: /tmp/colonel.c, /tmp/colonelnew, /tmp/backpipe, /tmp/loot.txt, /tmp/suitecrm.sql, /tmp/blargh.tgz as possible streamed files instead of colonel and definitelydontinvestigatethisfile.sh; this is ruled out by the complete hoth FIM rows at times 1534763317 and 1534763390 plus the process/FIM rows showing local creation of the rival files after those times.",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 11,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"columns.target_path\": \"/tmp/colonel\", \"count\": \"1\", \"created_time\": \"1534763317\", \"uid\": \"111\"}, {\"columns.target_path\": \"/tmp/definitelydontinvestigatethisfile.sh\", \"count\": \"1\", \"created_time\": \"1534763390\", \"uid\": \"111\"}, {\"columns.target_path\": \"/tmp/colonel.c\", \"count\": \"1\", \"created_time\": \"1534763456\", \"uid\": \"111\"}, {\"columns.target_path\": \"/tmp/backpipe\", \"count\": \"1\", \"created_time\": \"1534763573\", \"uid\": \"111\"}, {\"columns.target_path\": \"/tmp/colonelnew\", \"count\": \"1\", \"created_time\": \"1534763660\", \"uid\": \"111\"}, {\"columns.target_path\": \"/tmp/loot.txt\", \"count\": \"1\", \"created_time\": \"1534764186\", \"uid\": \"0\"}, {\"columns.target_path\": \"/tmp/suitecrm.sql\", \"count\": \"1\", \"created_time\": \"1534765138\", \"uid\": \"0\"}, {\"columns.target_path\": \"/tmp/blargh.tgz\", \"count\": \"1\", \"created_time\": \"1534765279\", \"uid\": \"0\"}",
+        "evidence": "This complete 8/8-row FIM CREATED result, combined with the R1 RCE command rows (\"echo <base64 C source> >> /tmp/colonel\" at 1534763317.466 and the JPEG-base64 echo at 1534763390.299) and the R2 process events (\"base64 --decode /tmp/colonel\" 1534763464, \"gcc colonel.c -o colonelnew\" 1534763701, \"chmod +x colonelnew\"/\"./colonelnew\" 1534763820), settles p5 exactly as stated: the RCE channel writes base64 content into /tmp at two specific seconds (1534763317 and 1534763390), the complete FIM/process timeline shows only colonel and definitelydontinvestigatethisfile.sh as inbound writes at those seconds (both uid 111 = tomcat8, the RCE context), and colonel.c (1534763456, local decode), colonelnew (1534763660, local compile), backpipe (1534763573, local mknod FIFO), loot.txt (1534764186), suitecrm.sql (1534765138), blargh.tgz (1534765279) are later local artifacts — the last three created by uid 0 (root) after the local privilege escalation, not by the RCE context."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q315",
+    "senior": "s2",
+    "id": "p6",
+    "kind": "selection",
+    "text": "Selection: The two files remotely streamed into /tmp on hoth are colonel and definitelydontinvestigatethisfile.sh, and not colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, or blargh.tgz, because the complete 15-command Struts2 RCE enumeration contains exactly two content-bearing inbound commands (both echo), and the complete osquery FIM CREATED list in the attack window (25/25 rows) shows only those two files created at the two echo seconds by uid 111 (tomcat8, the RCE context), while every rival is a later local artifact with a local creation command in the complete process-event list.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "p6 is the selection premise replacing the refuted bash_history-based premise (p2). It is settled by this complete 8/8-row result plus the R1 RCE command rows: colonel is tied to the recovered redirect \" >> /tmp/colonel\" at 1534763317.466 (RCE write row: {\"echo_tail\": \" >> /tmp/colonel\", \"count\": \"1\", \"time\": \"1534763317.4660000801\"}) with FIM CREATED at exactly 1534763317 by uid 111; definitelydontinvestigatethisfile.sh is tied to the unique FIM creation at the JPEG-base64 echo second (RCE row: {\"echo_tail\": \"\", \"count\": \"1\", \"time\": \"1534763390.2990000248\"}, request bytes_in=24704 with form_data clipped at capture) with FIM CREATED at exactly 1534763390 by the same uid 111, 0->21857 bytes. Every rival is later and locally created: colonel.c 1534763456 (base64 --decode /tmp/colonel, process event 1534763464), backpipe 1534763573 (mknod /tmp/backpipe p), colonelnew 1534763660 (gcc colonel.c -o colonelnew 1534763701, chmod +x / ./colonelnew 1534763820), loot.txt 1534764186 / suitecrm.sql 1534765138 / blargh.tgz 1534765279 by uid 0 (root) after the local privilege escalation. The complete in-window CREATED list (R4, 25/25 rows) shows no other /tmp file at either echo second.",
+    "rival": "The six local /tmp derivatives (colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, blargh.tgz) as the streamed files",
+    "stamp": "true",
+    "stamp_reason": "The reported complete FIM window and RCE timing rows support the claim as written: they tie colonel to a recovered remote redirect and definitelydontinvestigatethisfile.sh to the unique /tmp creation at the second JPEG-base64 echo, while the other named /tmp artifacts are shown later with local creation paths.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is colonel.c or another /tmp artifact fitting 'remotely streamed' as well as the chosen pair. The evidence rules that out by showing colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, and blargh.tgz are all created later by local decode, compile, FIFO, collection, or archive steps, while only colonel and definitelydontinvestigatethisfile.sh align to the remote echo-write seconds.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"columns.target_path\": \"/tmp/colonel\", \"columns.time\": \"1534763317\", \"count\": \"3\", \"actions\": [\"CREATED\", \"UPDATED\"], \"sizes\": [\"0\", \"7701\"], \"uids\": \"111\"}, {\"columns.target_path\": \"/tmp/definitelydontinvestigatethisfile.sh\", \"columns.time\": \"1534763390\", \"count\": \"3\", \"actions\": [\"CREATED\", \"UPDATED\"], \"sizes\": [\"0\", \"21857\"], \"uids\": \"111\"}",
+        "evidence": "RCE command rows (complete 15-command enumeration, R1): {\"echo_tail\": \" >> /tmp/colonel\", \"count\": \"1\", \"time\": \"1534763317.4660000801\"} ties colonel to the recovered redirect; {\"echo_tail\": \"\", \"count\": \"1\", \"time\": \"1534763390.2990000248\"} is the JPEG-base64 echo whose redirect was clipped at capture (request bytes_in=24704 vs ~8.5KB captured form_data; the C-source echo at 9200 bytes_in was captured complete with its redirect). The unique FIM creation at the JPEG-echo second is /tmp/definitelydontinvestigatethisfile.sh: CREATED at exactly 1534763390 by uid 111, 0->21857 bytes (md5 e1eee6cfdcbf253e343ba52da69673cb). Complete FIM CREATED list in window 1534763000-1534766200 (25/25 rows): only colonel (1534763317) and definitelydontinvestigatethisfile.sh (1534763390) at the two echo seconds; colonel.c 1534763456, cclBJ1WV.s 1534763658, colonelnew+cc* 1534763660, backpipe 1534763573, loot.txt 1534764186, suitecrm.sql 1534765138, blargh.tgz 1534765279 all later. Complete process-event list (9/9 rows) shows the rivals' local creation commands: \"base64 --decode /tmp/colonel\" (1534763464), \"gcc colonel.c -o colonelnew\" (1534763701), \"chmod +x colonelnew\"/\"./colonelnew\" (1534763820), plus mknod /tmp/backpipe p (RCE command row) — none at either echo second, none remote inbound writes."
+      },
+      {
+        "round": 13,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported complete FIM window and RCE timing rows support the claim as written: they tie colonel to a recovered remote redirect and definitelydontinvestigatethisfile.sh to the unique /tmp creation at the second JPEG-base64 echo, while the other named /tmp artifacts are shown later with local creation paths. | rival: The strongest rival is colonel.c or another /tmp artifact fitting 'remotely streamed' as well as the chosen pair. The evidence rules that out by showing colonel.c, colonelnew, backpipe, loot.txt, suitecrm.sql, and blargh.tgz are all created later by local decode, compile, FIFO, collection, or archive steps, while only colonel and definitelydontinvestigatethisfile.sh align to the remote echo-write seconds."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "colonel,definitelydontinvestigatethisfile.sh",
+      "2": "colonel,definitelydontinvestigatethisfile.sh",
+      "3": "colonel,definitelydontinvestigatethisfile.sh",
+      "4": "colonel,definitelydontinvestigatethisfile.sh",
+      "5": "colonel,definitelydontinvestigatethisfile.sh"
+    }
+  }
+]

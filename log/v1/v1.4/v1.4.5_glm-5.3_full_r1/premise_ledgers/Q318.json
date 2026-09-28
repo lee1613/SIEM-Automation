@@ -1,0 +1,279 @@
+[
+  {
+    "qid": "Q318",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "A small brute force/password spray against Frothly's web tier can surface as: (a) repeated member.php login attempts by external client_ip in aws:elb:accesslogs — searched (request=*member.php* | stats count by client_ip, action, elb_status_code), top result 35.182.246.222 with 11 logins; (b) POST do_login form_data in stream:http — searched, only 4 single attempts from 3 IPs; (c) apache_error, aws:cloudwatch:guardduty, and iplocation on the attacking IP — NOT yet searched; (d) ms:aad:signin (Azure AD, not the web tier) — not yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Both in-scope web-tier surfaces named in p1 are now fully searched and negative: (a) ELB member.php activity by client_ip (round 1, 15 rows complete) and the complete POST member.php breakdown (19 rows) show no source with repeated authentication attempts; (b) stream:http do_login (3 rows complete) shows only 4 single submissions from 3 IPs. The attack the question names therefore cannot surface via (a) or (b); it must surface via the still-unsearched (c) guardduty/iplocation or (d) ms:aad:signin, which are carried in open_questions.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted results support the claim that this web-tier HTTP/access scope was searched for brute-force/password-spray evidence: ELB member.php actions, POSTs, access_combined, stream:http form_data, and linux_secure were all examined in this round.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the brute-force act was still visible in the same searched web-tier feeds under a different client IP. The complete POST/member.php results and the crawler analysis rule that out within this scope; the remaining live rival is a different feed such as GuardDuty, not an unchosen IP inside these searched results.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"src_ip\": \"62.251.109.73\", \"form_data\": \"action=do_login&url=http://www.brewertalk.com/memberlist.php&quick_login=1&quick_username=bootyman&quick_password=bootylove&quick_remember=yes&submit=Login\", \"count\": \"2\"}",
+        "evidence": "Both in-scope web-tier surfaces named in p1 are now fully searched and negative: (a) ELB member.php activity by client_ip (round 1, 15 rows complete) and the complete POST member.php breakdown (19 rows) show no source with repeated authentication attempts; (b) stream:http do_login (3 rows complete) shows only 4 single submissions from 3 IPs. The attack the question names therefore cannot surface via (a) or (b); it must surface via the still-unsearched (c) guardduty/iplocation or (d) ms:aad:signin, which are carried in open_questions."
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted results support the claim that this web-tier HTTP/access scope was searched for brute-force/password-spray evidence: ELB member.php actions, POSTs, access_combined, stream:http form_data, and linux_secure were all examined in this round. | rival: The strongest rival is that the brute-force act was still visible in the same searched web-tier feeds under a different client IP. The complete POST/member.php results and the crawler analysis rule that out within this scope; the remaining live rival is a different feed such as GuardDuty, not an unchosen IP inside these searched results."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": ""
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "35.182.246.222 is the attacking source IP on the web tier: the only external client with repeated login attempts (11 member.php?action=login requests plus 11 lostpw and 11 register, scripted 6-10s intervals over 14 minutes) — pending confirmation that credential submissions or failed authentications accompany them.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "91.207.175.249 (841 ELB events, the highest-volume external client) — ruled out as the login attacker by the same member.php aggregation: only 2 profile actions and zero login attempts; also ruled out: 12.196.122.127 (forum registrations only, no logins) and 62.251.109.73 (2 logins only).",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": ""
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s1",
+    "id": "p3",
+    "kind": "other",
+    "text": "35.182.246.222 originates from Canada (it sits in AWS ca-central-1 / Montreal range 35.182.0.0/15) — external knowledge, NOT yet tested against the dataset; verify with | iplocation client_ip or a GuardDuty / threat-intel lookup before submitting any country.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "v1",
+    "evidence": "I re-ran the claim's own prescribed verification — | iplocation client_ip on the IP's ELB events — and got the identical result: all 197 events for client_ip 35.182.246.222 (confirmed by a separate client_ip stats) resolve to a single country, Canada. The claim's core assertion is dataset-backed exactly as its instruction demanded; the 'not yet tested' caveat is what this test resolves, not a gap the evidence walks past.",
+    "rival": "",
+    "stamp": "false",
+    "stamp_reason": "The cited iplocation result supports the claim as written by returning a single row for client_ip 35.182.246.222 with Country=Canada and City=Toronto across 197 ELB events.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival reading is that Canada may be real for 35.182.246.222 yet still not answer the question because that IP's activity may not be the brute-force/password-spray attack. The same evidence leaves the act unresolved: all observed requests from that IP are GETs, not credential submissions.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"Country\": \"Canada\", \"City\": \"Toronto\", \"count\": \"197\"}",
+        "evidence": "Ran the exact verification p3 asked for: iplocation on the IP's own ELB events. All 197 events resolve to a single country — Canada is now dataset-backed, not external knowledge."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=True, holds=False): The cited iplocation result supports the claim as written by returning a single row for client_ip 35.182.246.222 with Country=Canada and City=Toronto across 197 ELB events. | rival: The strongest rival reading is that Canada may be real for 35.182.246.222 yet still not answer the question because that IP's activity may not be the brute-force/password-spray attack. The same evidence leaves the act unresolved: all observed requests from that IP are GETs, not credential submissions."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": ""
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "coverage",
+    "text": "The question's concept (a brute force / password spray against the Frothly web servers with a country) can show up in my scope only as: (a) a GuardDuty finding in sourcetype aws:cloudwatch:guardduty, source lambda:guardduty:us-west-1 — searched via get_sourcetype_fields and get_sources: exactly 1 event, a Recon PORT_PROBE on SSH 22 against web-server instance i-0cc93bade2b3cba63 with remoteIpDetails country 'China', city 'Beijing'; (b) Apache web-server error telemetry (apache_error) — searched via sample_events: 3 events, all startup notices, no auth failures; (c) alternate GuardDuty paths — aws:cloudwatchlogs (only lambda:DNS), aws:cloudwatch (metrics only), errors (only SSM errors.log): no findings. No feed in scope labels any credential attack against the web servers.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Complete enumeration of all 63 apache_error events (levels 40+14+9=63; error messages 24+14+1+1=40; clients 39+1=40) and the full GuardDuty raw event confirm no feed in scope labels any credential attack against the web servers. This also corrects round 1's partial sample: apache_error holds 63 events, not 3 — the conclusion is unchanged, now verified on the complete set.",
+    "rival": "apache_error web-server error telemetry and the alternate GuardDuty paths (aws:cloudwatchlogs, aws:cloudwatch, errors) — ruled out by sample_events and get_sources returning no findings and no auth errors.",
+    "stamp": "true",
+    "stamp_reason": "The quoted complete GuardDuty raw event and complete apache_error enumerations do support the claim that this scope records recon and generic web-server errors, not a brute-force/password-spray act against the Frothly web servers.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that GuardDuty or apache_error might still contain a qualifying credential-attack record. The complete single GuardDuty event is explicitly Recon:EC2/PortProbeUnprotectedPort and the apache_error results enumerate only 404s/startup/module messages, ruling that rival out within this scope.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"msg\": \"File does not exist: /var/www/html/favicon.ico\", \"count\": \"24\"}",
+        "evidence": "Complete enumeration of all 63 apache_error events (levels 40+14+9=63; error messages 24+14+1+1=40; clients 39+1=40) and the full GuardDuty raw event confirm no feed in scope labels any credential attack against the web servers. This also corrects round 1's partial sample: apache_error holds 63 events, not 3 — the conclusion is unchanged, now verified on the complete set."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted complete GuardDuty raw event and complete apache_error enumerations do support the claim that this scope records recon and generic web-server errors, not a brute-force/password-spray act against the Frothly web servers. | rival: The strongest rival reading is that GuardDuty or apache_error might still contain a qualifying credential-attack record. The complete single GuardDuty event is explicitly Recon:EC2/PortProbeUnprotectedPort and the apache_error results enumerate only 404s/startup/module messages, ruling that rival out within this scope."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "China",
+      "2": "",
+      "3": "Canada"
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s2",
+    "id": "p5",
+    "kind": "selection",
+    "text": "China (GuardDuty remoteIpDetails.country.countryName on the single finding against web-server instance i-0cc93bade2b3cba63, WebServers ASG) is the country submitted, because it is the only country recorded against the Frothly web tier anywhere in the dataset, recorded verbatim as the question asks.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "s2",
+    "evidence": "Refuted on two independent grounds: the GuardDuty finding is recon (round 2's complete raw event: Recon:EC2/PortProbeUnprotectedPort, PORT_PROBE, SSH 22, threatName Scanner), and China is no longer the only country recorded against the web tier — iplocation on 35.182.246.222's 197 ELB events records Canada, attached to the only client with the credential-attack signature.",
+    "rival": "The retired senior's HTTP lead 35.182.246.222 (expected country Canada) — not a recorded answer: no feed in the dataset records a country for it (Canada is untested external knowledge, open premise p3), and its brute-force act was never established in ELB/access_combined/stream:http/linux_secure per prior rounds; also apache_error telemetry, ruled out by sample_events returning only 3 Apache startup notices.",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "REFUTED",
+        "by": "s2",
+        "quote": "{\"Country\": \"Canada\", \"City\": \"Toronto\", \"count\": \"197\"}",
+        "evidence": "Refuted on two independent grounds: the GuardDuty finding is recon (round 2's complete raw event: Recon:EC2/PortProbeUnprotectedPort, PORT_PROBE, SSH 22, threatName Scanner), and China is no longer the only country recorded against the web tier — iplocation on 35.182.246.222's 197 ELB events records Canada, attached to the only client with the credential-attack signature."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "China",
+      "2": "",
+      "3": "Canada"
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s2",
+    "id": "p6",
+    "kind": "other",
+    "text": "The single GuardDuty finding against the web tier is a Recon port probe (action PORT_PROBE, port 22/SSH, category Recon), not a GuardDuty brute-force or password-spray finding type; no feed in scope labels any credential attack against the Frothly web servers. This mismatch is why confidence is 55, not higher.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "China",
+      "2": "",
+      "3": "Canada"
+    }
+  },
+  {
+    "qid": "Q318",
+    "senior": "s2",
+    "id": "p7",
+    "kind": "coverage",
+    "text": "The question's country is established from in-dataset evidence: | iplocation client_ip on 35.182.246.222 in aws:elb:accesslogs returns Country=Canada (City=Toronto) for all 197 of its events — the only in-dataset country record for the only ELB client with the credential-attack signature (11 login + 11 lostpw actions, scripted __main__/0.2 agent). GuardDuty (1 recon finding) and apache_error (63 events, zero auth/password/denied) carry no brute-force record, so the ELB feed is the only place the act's country can come from.",
+    "load_bearing": true,
+    "round_first_seen": 3,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "iplocation on all 197 ELB events returned a single row: Country=Canada, City=Toronto. Rivals ruled out by their own member.php records (no login/lostpw).",
+    "rival": "",
+    "stamp": "false",
+    "stamp_reason": "The quote supports the claim that the country's value was established from in-dataset evidence, because the iplocation result is a direct computed output over the ELB client IP and returns Canada literally.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival is that although the country is established from data, it may belong to a source whose behavior does not satisfy the question's brute-force/password-spray wording. The ELB evidence still shows only repeated login/lostpw page fetches, so the claim does not yet hold as an answer premise.",
+    "history": [
+      {
+        "round": 3,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"Country\": \"Canada\", \"City\": \"Toronto\", \"count\": \"197\"}",
+        "evidence": "iplocation on all 197 ELB events returned a single row: Country=Canada, City=Toronto. Rivals ruled out by their own member.php records (no login/lostpw)."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=True, holds=False): The quote supports the claim that the country's value was established from in-dataset evidence, because the iplocation result is a direct computed output over the ELB client IP and returns Canada literally. | rival: The strongest rival is that although the country is established from data, it may belong to a source whose behavior does not satisfy the question's brute-force/password-spray wording. The ELB evidence still shows only repeated login/lostpw page fetches, so the claim does not yet hold as an answer premise."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "China",
+      "2": "",
+      "3": "Canada"
+    }
+  }
+]

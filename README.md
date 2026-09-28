@@ -1,18 +1,20 @@
 # SIEM Automation
 
-A three-tier LLM agent that investigates realistic SOC incidents in Splunk, benchmarked on Boss of the SOC v3: 26/56 (46.4%), with every trajectory logged.
+A multi-agent LLM system that investigates realistic SOC incidents in Splunk, benchmarked on Boss of the SOC v3 (56 exact-match forensic questions), with every trajectory logged. Best complete run: **26/56 (46.4%)**. Latest run (v1.4.5): **24 correct of the 50 questions it reached**; the run was stopped before the last six 1000-point questions.
 
 [![ci](https://github.com/lee1613/SIEM-Automation/actions/workflows/ci.yml/badge.svg)](https://github.com/lee1613/SIEM-Automation/actions/workflows/ci.yml)
 ![benchmark](https://img.shields.io/badge/BOTSv3-26%2F56%20(46.4%25)-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-**Live demo:** [siem-automation.streamlit.app](https://siem-automation.streamlit.app/) — replay real trajectories tier by tier (Problem → Architecture → Trajectory → Score), no setup needed.
+**Live demo:** [siem-automation.streamlit.app](https://siem-automation.streamlit.app/) replays real trajectories tier by tier (Problem → Architecture → Trajectory → Score), with no setup needed.
 
 ## What this is
 
-This repository is an agent-engineering benchmark built around 56 real forensic questions over a multi-sourcetype Splunk index. The agent plans investigations, delegates independent searches, executes SPL, joins evidence, and self-checks before submitting an exact-match answer. A single agent scored 20/56; the multi-agent pipeline scores 26/56, and the 1000-point tier is still the frontier at 2/9. SIEM is the proving ground here; the project is about observable, grounded agent control under tool and cost constraints.
+This repository is an agent-engineering benchmark built around 56 real forensic questions over a multi-sourcetype Splunk index. An orchestrator plans each investigation and delegates searches to worker agents that run SPL. It checks their evidence against the tool output before it lets an answer through, and submits exact-match answers to a scoreboard. SIEM is the proving ground; the project is about observable, grounded agent control under tool, context and cost constraints.
 
 ## Leaderboard
+
+Complete full runs, generated from `log/v1/run_1.N`:
 
 <!-- LEADERBOARD:START -->
 | Tier | Solved / Total | Rate |
@@ -30,84 +32,126 @@ This repository is an agent-engineering benchmark built around 56 real forensic 
 | v1.2 | 26 / 56 | 8000 | $31.36 | + grounding guard, structured findings |
 <!-- LEADERBOARD:END -->
 
-Regenerate with `python3 scripts/run_eval.py --write`; CI fails if this table drifts from `log/v1/`.
+Regenerate with `python3 scripts/run_eval.py --write`. CI fails if this table drifts from `log/v1/`. The v1.4.5 run below is not in the table because it did not complete.
 
-## Architecture
+## Current performance: v1.4.5 (2026-09-24 to 2026-09-25)
 
-v1.3/Plan C is the current architecture; all published metrics below come from the v1.2 full run. The v1.3 controls are shipped and unit-tested but have not been benchmarked end to end.
+| Metric | Value |
+|---|---|
+| Questions recorded | 50 / 56 (stopped by the operator; Q328–Q333 not recorded) |
+| Correct | **24 / 50** (48%): 100 pt 14/24, 500 pt 9/23, 1000 pt 1/3 |
+| Points | **6,900** of the 16,900 recorded (22,900 in the dataset) |
+| Cost (recorded) | **$44.95**: SH (gpt-5.4) $18.05, seniors (GLM-5.3) $26.30, memory summarizer (gpt-5.4-mini) $0.60 |
+| Latency | 11.3 h summed question time; mean 13.5 min per question (100 pt 8.4 min, 500 pt 19.6 min) |
+
+Why the 26 wrong answers failed (root cause for every question: [result doc](docs/scoreboard_result/v1/v1.4.5.md)):
+
+| Cause | Questions | Points lost |
+|---|:---:|--:|
+| Held the right answer and never submitted it: the premise gates and the turn budget ran out first | 7 | 2,700 |
+| An earlier question's wrong or unsettled conclusion was carried into a later one | 6 | 2,200 |
+| Never found the right evidence (wrong host or wrong phase of the attack) | 7 | 2,300 |
+| Right evidence, wrong value (off-by-one, ordering semantics, format, image read) | 4 | 2,600 |
+| Answer only exists on the web (Symantec pages) | 2 | 200 |
+
+The run also exposed four reliability faults, all fixed in the v1.5.0 design:
+- A senior's context grew past its window inside a round, and the provider stalled and then returned 502s.
+- One brief network drop made SH give up on a question.
+- A Windows file lock crashed the runner.
+- A stalled call could hang for 8–20 minutes before it failed.
+
+## Architecture (v1.4.5)
 
 ```mermaid
 flowchart TD
-    Q[BOTSv3 question] --> SH[SH orchestrator<br/>persistent-memory planner]
-    SH -->|decompose| D{Planning mode}
-    D -->|standard| T[Worker tasks]
-    D -->|dual-track<br/>1000-point Qs| T2[Track A + Track B<br/>orthogonal worker tasks]
-    T --> W[Senior worker pool<br/>searches Splunk]
-    T2 --> W
-    W -->|one run by default| J[Joiner<br/>synthesizes findings]
-    W -->|eligible metrics task<br/>3 worker samples| M[Strict-majority<br/>worker result]
-    M --> J
-    J --> G{Grounding gate}
-    G -->|grounded| ADJ[Adjudicator<br/>ranks competing candidates]
-    G -->|ungrounded<br/>rounds remain| RP[Bounded targeted replan]
-    RP --> D
-    G -->|round budget exhausted| FB[Best available result<br/>may be an explicit refusal]
-    FB --> ADJ
-    ADJ -->|tie or low confidence<br/>at 1000 points| ESC[One tiebreak or<br/>strong-model follow-up]
-    ESC --> ADJ
-    ADJ -->|500+ points| V[Verifier<br/>prove or refute once]
-    ADJ -->|under 500 points| X[Extractor<br/>prose to bare answer]
-    V --> X
-    X --> S[Scoreboard submit<br/>exact match]
+    Q[BOTSv3 question] --> MEM[Prompt assembly<br/>memory summaries + raw transcripts<br/>+ knowledge + case file]
+    MEM --> SH[SH orchestrator · gpt-5.4<br/>conversational loop, numbered SOP]
+    SH -->|SPAWN · COMMAND · CLARIFY<br/>CRITIC · RETIRE| POOL[Senior pool · GLM-5.3<br/>one LangGraph thread per senior<br/>up to 6 in parallel]
+    POOL -->|Splunk SPL · raw events · sources<br/>field manifest · web · image reader| SPL[(Splunk index=botsv3)]
+    POOL -->|stamped report + premises| LED[Premise ledger<br/>quotes checked against tool output]
+    LED --> VAL[Validation agent<br/>independent check of load-bearing premises]
+    VAL --> SH
+    LED --> SH
+    SH -->|RECALL: 2 per question| MEM
+    SH -->|ANSWER, only when every gate passes| EX[Extractor<br/>prose → bare value]
+    EX --> SB[Scoreboard<br/>exact match, one submission]
+    SB --> SUMM[gpt-5.4-mini summary<br/>memory/QID.json]
+    SUMM --> MEM
 ```
 
-- **Grounding gate:** grounded values continue; ungrounded values trigger a bounded replan or best-available-result fallback. An explicit refusal can survive as that fallback, but the gate does not manufacture one. In v1.2, all four previously observed fabrications stopped, although three still scored wrong.
-- **Worker sampling + adjudication:** the executor samples only eligible 500+-point metrics tasks three times and takes a strict-majority worker result; later, the adjudicator ranks competing ledger candidates. Their cost and score impact are not yet measured.
-- **Escalation:** one bounded follow-up can route low-confidence 1000-point work to a stronger model, then re-adjudicate; this path is unbenchmarked.
-- **Dual-track planning:** 1000-point questions require two orthogonal evidence paths, including one unfiltered population enumeration, targeting the measured 2/9 hard-tier result.
+- **SH (the orchestrator).** It runs one conversation per question. Each turn chooses routes: spawn a senior, command it, ask it to clarify, critique it, retire it, recall memory, or answer. Budgets scale with value: a 1000-point question gets 3 seniors, 8 rounds each and 28 SH turns; a 100-point question gets 1 senior, 3 rounds and 5 turns.
+- **Runner-enforced gates.** The runner rejects a turn that breaks a numbered SOP step and tells SH which step it broke. For example: F2 blocks ANSWER while a load-bearing premise is unverified, C3 lets a premise be stamped once, and B7 allows at most 2 RECALLs per question.
+- **Seniors.** Each senior works on its own thread for up to 10 tool calls per round. It files findings through `submit_finding`, and each report is stamped with its round and the SPL it ran.
+- **Premise ledger.** Premises carry quotes that must appear in output the senior's tools really returned. A validation agent re-checks load-bearing premises, so a senior can't certify its own claims.
+- **Case file.** Entities and findings carried across questions.
 
-See [the architecture document](docs/ARCHITECTURE.md) for responsibilities, implementation paths, and measured-versus-unmeasured tradeoffs.
+See [the architecture docs](docs/version_architecture/v1/) for each version's design and changelog.
 
-## Resilience — Resume & Recovery (v1.3)
+## Context management pipeline
 
-The SIEM agent (`agent/v1/`) runs full 56-question BOTSv3 evaluations that take
-hours and call three separate LLM providers (OpenAI, Vultr serverless, NVIDIA
-NIM). Provider outages happen mid-run — e.g. the Vultr GLM cluster went down
-partway through the v1.2 evaluation run. Two mechanisms exist so a long run
-survives that:
+A full run is 56 questions of continuous investigation, far more than any model's window. There are three layers:
 
-- **Per-question fallback.** If the Extractor's API call fails after retries,
-  that single question doesn't take the run down with it — `run_all_v1.py`
-  falls back to the best worker answer already produced
-  (`extractor_fallback_answer`) and moves on to the next question.
-- **Resume-from-crash.** If the whole process dies (crash, killed terminal,
-  sustained provider outage), the next invocation
-  (`run_all_v1.py --start <question_id> --run-name <existing_run>`) doesn't
-  start over. `seed_resume_results()` rebuilds the completed-questions list
-  from the prior run's `run_summary.json`, and `UsageTracker.seed()` reloads
-  the token/cost counters so cost tracking keeps accumulating across the
-  restart instead of resetting to zero.
+1. **SH memory across questions (v1.4.5).** Each finished question is summarized by gpt-5.4-mini into a digest: the question's flow, the derivation, entities, feed facts, the SPL that worked, and what was ruled out.
+   - Raw transcripts stay in the prompt until it reaches **163,200 tokens** (60% of gpt-5.4's 272K). Then the oldest are swapped for their summaries, down to 75% of that threshold, so the swap doesn't recur every question.
+   - Stable blocks come first, so the provider's prompt cache stays warm.
+   - A 6K-token knowledge block merges entities, feed facts and working SPL across questions.
+   - RECALL fetches a summarized question's details (at most 8K tokens, twice per question).
+   - Measured on v1.4.5: 6 swaps, 43 of 50 questions summarized, SH prompts held between 115K and 175K.
+2. **Senior context.** Each senior's thread is compacted at 80% of GLM-5.3's 256K window. In v1.4.5 this was checked only between rounds, and it never fired. v1.5.0 moves the check to every call (below).
+3. **Tool output limits.** Search results are capped at 12,000 characters, clipping long values before dropping rows. Raw events are capped at 20 per call. Images are decoded by a separate vision tool, so base64 never enters a senior's context.
 
-This resume path is currently **human-triggered** — someone notices the
-process died and re-invokes it with the right flags. It is not yet an
-automatic reconnect loop that detects a dead connection and recovers on its
-own; that's active design work (see `docs/version_architecture/v1/`).
+## Resumable architecture
+
+Runs take many hours and call three providers, so every stage can be killed and resumed:
+
+- **Resume from the last turn.** After every SH turn, `resume_state/<QID>/snapshot.pkl` stores SH's messages, the premise ledger, the gate state and every senior's exported thread. `run_all_v1.py --run-name <run>` restarts a question at its last completed turn.
+- **Resume across questions.** `sh_history.pkl`, `memory/*.json`, `memory/swapped.json`, `case_file.json`, `metrics.json` and `run_summary.json` are written after each question. A resumed process rebuilds SH's prompt exactly: on v1.4.5, every restart reproduced its first attempt's prompt to the token.
+- **Cost continuity.** `UsageTracker.seed()` reloads token and dollar counters, so the cost keeps accumulating across restarts.
+- **Pause instead of crash.** A second provider failure on one question raises `RunPaused` and writes `decision_request.json`, rather than silently marking the question as unanswered. The operator (or a supervising agent) resumes with `--run-name`.
+- v1.4.5 survived 8 restarts this way: a low-memory kill, a redo after a network drop, four provider-failure pauses, a file lock and a timeout change. Discarded attempts are archived in `_discarded_network_errors/`.
+
+## Next: v1.5.0 (design approved, tests written, implementation in progress)
+
+Branch `feat/v1.5.0-memory` · design: [v1.5.0.md](docs/version_architecture/v1/v1.5.0.md)
+
+| # | Change |
+|---|---|
+| R1 | The runner refuses to RECALL a question that is still in the prompt in full, and the refusal costs no recall slot. One counter of summarized questions decides this. |
+| R2 | Below the threshold the prompt carries raw transcripts only. Summaries are written by a **background thread** while the next question starts, and a crash-safe outbox (`memory/pending/`) replays any lost summary. |
+| R3 | Each summary records an **incident timeline**: every timed attacker action, including lateral movement. Timelines are merged across questions and de-duplicated. |
+| R4 | Overflowing the knowledge (6K) or timeline (11K) block is **logged entry by entry**, raises an event, and is counted in metrics. |
+| R5 | A senior's context is **checked after every call**. At 80% of its window it writes a handover and continues on a fresh thread with the calls it has left. Clarify calls are checked too, and a crashed round keeps its size in the record. |
+| R6 | Every API call gives up within about **8 minutes** (120 s × 4 attempts). |
+| R7 | Brief API errors (connection errors, HTTP 5xx) are **retried after 30, 60 and 120 s** before a senior or SH is retired. |
+| R8 | Every atomic file swap goes through one helper that retries a Windows file lock. |
+
+### Forecast for the v1.5.0 full run
+
+This is a forecast, not a measurement. It rests on the v1.4.5 per-question record and on earlier versions' results.
+
+| | Forecast | Basis |
+|---|---|---|
+| Completion | **56 / 56 without manual intervention** | R5–R8 remove every provider and file-lock fault that stopped or paused v1.4.5 (a low-memory kill on the host is still possible) |
+| Score | **22–28 / 56, about 6,500–9,500 pts** (central about 25/56, 8,000 pts) | The 50 questions v1.4.5 reached: 24 correct, ±2 run-to-run. The six unreached 1000-point questions: earlier versions solved 0–2 of them |
+| Cost | **about $53–60** | v1.4.5 averaged $0.90 per question; the six hard questions assumed at $1.30–2.50 each |
+| Question time | **about 14–18 h** | 11.3 h for 50, plus the 1000-point tier |
+
+v1.5.0 is a reliability release. The two biggest score losses, held-but-unsubmitted answers (2,700 pts) and cross-question contamination (2,200 pts), are deliberately out of its scope. They are the targets after it.
 
 ## Agent trajectory logs
 
 ### A 1000-point hit
 
-- Q332 began: “I need to see all available sourcetypes” → `get_source_types()` → `index=botsv3 host=hoth | stats count by sourcetype | sort -count`.
+- Q332 began: "I need to see all available sourcetypes" → `get_source_types()` → `index=botsv3 host=hoth | stats count by sourcetype | sort -count`.
 - The pivot tied `/tmp/colonel.c` to `hoth` in `osquery:results`; the extractor submitted `cve-2017-16995` — **correct**.
-- Q333 found POST requests in `stream:http` to `/frothlyinventory/integration/saveGangster.action`; “The web lookup confirms that CVE-2017-9791 (S2-048) is the vulnerability” → `cve-2017-9791` — **correct**.
+- Q333 found POST requests in `stream:http` to `/frothlyinventory/integration/saveGangster.action`; "The web lookup confirms that CVE-2017-9791 (S2-048) is the vulnerability" → `cve-2017-9791` — **correct**.
 - Evidence: [full Q332/Q333 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 
 ### An honest refusal
 
 - Q303 searched `linux_audit`, `linux_secure`, shell, process, and cloud-init evidence, but found no plaintext password-setting event.
 - The agent returned *"The password is not provided in the context"* and was scored **wrong**.
-- In a SOC, a confident wrong IOC costs an analyst hours of chasing; after evidence search and bounded fallback, an explicit refusal can be a safer output than a guess. The grounding gate itself does not manufacture that refusal.
-- **11 of 56 outputs failed grounding; two were explicit refusals (Q303 and Q328).** (`grounded: false` in the [run summary](log/v1/run_1.2/run_summary.json)). Those refusals cost benchmark points and reflect a deliberate safety trade.
+- In a SOC, a confident wrong IOC costs an analyst hours of chasing. After the evidence search and a bounded fallback, an explicit refusal can be safer than a guess.
 - Evidence: [full Q303 trajectory](log/v1/run_1.2/timeline.md) and [scored results](docs/scoreboard_result/v1/v1.2.md).
 
 ## Quick start
@@ -138,30 +182,23 @@ See the [runbook](docs/RUNBOOK.md) for full-run, per-question, test, and live-Sp
 
 ## Lessons learned
 
-1. **Cost is an architecture bug, not a billing line.** v1.1 and v1.2 both scored 26/56, but cost $0.63 and $31.36 respectively as failed delegations rose from 1 to 62. A permissive retry path restarted fresh workers without carrying context, turning a held score into a 50× bill. [Evidence](docs/scoreboard_result/v1/v1.2.md)
-
-2. **Refusal is a feature.** Eleven of 56 outputs failed grounding; two—Q303 and Q328—explicitly refused rather than fabricate. That safer behavior still lost benchmark points. [Evidence](log/v1/run_1.2/run_summary.json)
-
-3. **The frontier is multi-hop.** The 100-point tier reached 62.5%; the 1000-point tier reached 22.2%. The remaining hard-tier work is chained inference, not lookup. [Evidence](datasets/evaluation/leaderboard.json)
-
-4. **The scoring path needs the same rigor as the agent.** `run_summary.json` score keys were silently overwritten by a partial re-run, so the scorer now derives verdicts from submission records instead. [Evidence](docs/ARCHITECTURE.md)
-
-5. **Extractor over-trimming loses correct investigations.** In Q210, evidence supported `fyodor-L`, but extraction dropped the required `-L` and submitted `fyodor`. [Evidence](docs/scoreboard_result/v1/v1.2.md)
+1. **Cost is an architecture bug, not a billing line.** v1.1 and v1.2 both scored 26/56, but cost $0.63 and $31.36 respectively as failed delegations rose from 1 to 62. [Evidence](docs/scoreboard_result/v1/v1.2.md)
+2. **Refusal is a feature.** An explicit "not found" loses points but costs an analyst nothing; v1.4.5 keeps that trade and does not force a submit. [Evidence](docs/scoreboard_result/v1/v1.4.5.md)
+3. **The frontier is multi-hop.** The 100-point tier reaches about 60%; the 1000-point tier stays near 20%. [Evidence](datasets/evaluation/leaderboard.json)
+4. **A safety check that never fires is not a safety check.** v1.4.5's senior compaction ran only between rounds and only on finished rounds, so a thread that grew past its window inside a round, and crashed, was invisible to it. The check fired zero times in 50 questions. [Evidence](docs/scoreboard_result/v1/v1.4.5.md)
+5. **Gates can cost more than they save.** In seven v1.4.5 questions the right answer was held and marked `solved`, but the premise ledger kept growing faster than SH could verify it, and the turn budget ran out. [Evidence](docs/scoreboard_result/v1/v1.4.5.md)
+6. **Memory spreads errors as readily as facts.** One earlier question's wrong conclusion sank Q221, Q308, Q311 and Q320. [Evidence](docs/scoreboard_result/v1/v1.4.5.md)
 
 ## Repo layout
 
 | Path | Purpose |
 |---|---|
-| [`agent/`](agent/) | Three-tier investigation pipeline and Splunk tools |
+| [`agent/`](agent/) | SH orchestrator, senior pool, premise ledger, memory, and Splunk tools (`agent/v1/`) |
 | [`datasets/`](datasets/) | BOTSv3 inputs and generated evaluation artifacts |
-| [`docs/`](docs/) | Architecture, runbook, and per-version benchmark results |
+| [`docs/`](docs/) | Per-version architecture docs and benchmark results |
 | [`log/`](log/) | Full trajectory evidence for every scored run |
 | [`scripts/`](scripts/) | Standard-library offline scorer and leaderboard generator |
 | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) | Agent-assisted development workflow used to build the project |
-
-## Next
-
-The open engineering problems are to cap replan rounds for high-value questions, build a portable replay view of a run's trajectory, and close the 1000-point gap without trading away grounding.
 
 ## License and attribution
 

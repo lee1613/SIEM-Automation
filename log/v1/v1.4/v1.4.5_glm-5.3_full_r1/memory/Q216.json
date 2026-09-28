@@ -1,0 +1,67 @@
+{
+  "flow": [
+    "Cisco NVM flow logs were identified as `index=botsv3 sourcetype=syslog source=cisconvmflowdata`, and BSTOLL-L was already established as the mining endpoint from prior work, so the task became measuring that endpoint's Monero-generating time in this feed.",
+    "The first NVM search found six Coinhive-related flows from `sa=192.168.247.131` (BSTOLL-L), all `chrome.exe` on port 443, with `fss`/`fes` values showing a start at 1534772253 and an end at 1534773920.",
+    "A second pass verified that BSTOLL-L had only one source IP and that the whole-feed mining keyword sweep was clean except for unrelated non-BSTOLL-L ad-pool domains, so the six Coinhive flows were the complete mining set in cisconvmflowdata.",
+    "The ordered flow rows showed overlapping intervals: each later flow began before the previous active set ended, so the correct measure was the continuous union from earliest `fss` to latest `fes`, not the sum of per-flow durations or just the longest single flow.",
+    "That continuous span was computed in SPL as `span_seconds=1667`, and the same output explicitly ruled out `1758` and `1603` as rival readings.",
+    "The final answer submitted was 1667."
+  ],
+  "derivation": "Using Cisco NVM flow logs only (`index=botsv3 sourcetype=syslog source=cisconvmflowdata`), SH focused on BSTOLL-L and the known Coinhive/Monero activity. The first report found six Coinhive flows from `sa=192.168.247.131`, all `chrome.exe:443`, with `fss`/`fes` values spanning `1534772253` to `1534773920`. A follow-up report verified coverage: BSTOLL-L had one source IP, the whole-feed mining keyword sweep did not reveal any other BSTOLL-L mining flows, and the Coinhive DNS/IP set matched the same six flows. The deciding report listed the six flows in time order and showed their overlaps; because each later flow began before the prior active set ended, the endpoint's generation time was the continuous interval from earliest `fss` to latest `fes`. The SPL output gave `span_seconds=1667`, while explicitly ruling out summing all durations (`1758`) and using only the longest single flow (`1603`).",
+  "entities": [
+    {
+      "key": "BSTOLL-L",
+      "fact": "Frothly endpoint that generated Monero traffic in the Cisco NVM flow logs; source IP `192.168.247.131`."
+    },
+    {
+      "key": "192.168.247.131",
+      "fact": "BSTOLL-L's source IP in `cisconvmflowdata`."
+    },
+    {
+      "key": "37.187.167.47",
+      "fact": "Coinhive-related resolved IP contacted by BSTOLL-L on 443."
+    },
+    {
+      "key": "104.20.208.59",
+      "fact": "Coinhive-related resolved IP contacted by BSTOLL-L on 443."
+    },
+    {
+      "key": "104.20.209.59",
+      "fact": "Coinhive-related resolved IP returned from Coinhive DNS resolution."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "syslog source=cisconvmflowdata",
+      "fact": "In Cisco NVM flow logs, `sa` is the endpoint/source IP and `fss`/`fes` are the flow start/end epoch seconds; `pn`/`dp` identify process and destination port."
+    },
+    {
+      "sourcetype": "syslog source=cisconvmflowdata",
+      "fact": "The six Coinhive mining flows for BSTOLL-L were all `chrome.exe` on port 443 and formed one continuous interval from `1534772253` to `1534773920`."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "syslog source=cisconvmflowdata",
+      "purpose": "Find the mining flows and initial duration candidate.",
+      "spl": "index=botsv3 sourcetype=syslog source=cisconvmflowdata sa=192.168.247.131 coinhive | stats min(fss) as first_start max(fes) as last_end | eval duration_seconds=last_end-first_start",
+      "returns": "Six Coinhive flows from BSTOLL-L; `first_start=1534772253`, `last_end=1534773920`, yielding `1667` seconds."
+    },
+    {
+      "sourcetype": "syslog source=cisconvmflowdata",
+      "purpose": "Verify the six flows cover the full mining interval and are overlapping.",
+      "spl": "... sa=192.168.247.131 coinhive | sort fss | streamstats current=f window=0 max(fes) as prev_max_end | eval gap_seconds=fss-prev_max_end, flow_duration=fes-fss | stats count as flows dc(ph) as distinct_process_hashes values(pn) as process_names values(dp) as ports values(ppn) as parent_processes list(dh) as hostnames list(fss) as starts list(fes) as ends list(flow_duration) as durations list(gap_seconds) as gaps min(fss) as first_start max(fes) as last_end sum(flow_duration) as sum_flow_durations | eval span_seconds=last_end-first_start",
+      "returns": "One row showing `flows=6`, `process=chrome.exe`, `port=443`, `first_start=1534772253`, `last_end=1534773920`, `sum_flow_durations=1758`, and `span_seconds=1667`; all gaps were negative, proving overlap."
+    }
+  ],
+  "ruled_out": "1758 as the answer because it is the sum of overlapping flow durations; 1603 because it is only the longest single flow; any additional BSTOLL-L mining flow outside the six Coinhive chrome.exe:443 flows because the feed checks showed BSTOLL-L had one source IP and no extra mining set.",
+  "qid": "Q216",
+  "question": "According to the Cisco NVM flow logs, for how many seconds does the endpoint generate Monero cryptocurrency?",
+  "guidance": "Round to the nearest second without the unit of measure.",
+  "answer": "1667",
+  "verified_premises": [
+    "p1 [coverage] In index=botsv3 sourcetype=syslog source=cisconvmflowdata, Monero-generation traffic shows up as flows whose destination host (dh) or IP (da) is Coinhive. Searched three ways: (a) keyword 'coinhive' over the entire feed -> 6 events, all with sa=192.168.247.131; (b) sa=192.168.247.131 to the prior-round known IPs 37.187.167.47/104.20.208.59/104.20.209.59 -> 2 events; (c) sa=192.168.247.131 to Coinhive IP ranges 37.187.*/104.20.*/217.182.* -> the same 6 events, none lacking the coinhive hostname. All three result sets were complete (returned = total). — holds: The strongest rival reading is that additional Cisco NVM mining flows for BSTOLL-L existed outside the six Coinhive rows used. The report rules that out within this feed by tying Coinhive DNS hostnames to the flow destinations, showing dc(sa)=1 for BSTOLL-L, and reporting that no mining flow outside the Coinhive set was found for BSTOLL-L.",
+    "p2 [selection] In Cisco NVM flow logs for BSTOLL-L's Coinhive mining session, the question's requested generating time is the continuous union of the mining flow intervals, so it is measured from the earliest flow start (fss) to the latest flow end (fes), not by summing overlapping flow durations or taking only one flow. — holds: The strongest rival readings are 1758 seconds from summing all six flow durations and 1603 seconds from using only ws019. The same output rules both out: every gap is negative, so the flows overlap and summing double-counts time, while the ordered starts show the mining session began before ws019 started, so a single-flow reading is too narrow for the endpoint's generating time."
+  ],
+  "validator_verdicts": []
+}

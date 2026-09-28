@@ -1,0 +1,94 @@
+{
+  "flow": [
+    "The question asks for the country behind a small brute force/password spray against Frothly web servers, so the first check had to stay on web-tier access/auth telemetry and identify any source IP showing repeated login behavior.",
+    "In aws:elb:accesslogs, 35.182.246.222 emerged as the only external client with repeated member.php login/lostpw/register/profile activity, but the same ELB evidence also showed it was a Python crawler doing repeated GETs with zero POSTs, so that lead did not yet establish the brute-force act.",
+    "GuardDuty and apache_error were then checked as a non-overlapping path; GuardDuty’s only web-tier finding was a Recon:EC2/PortProbeUnprotectedPort event on port 22, and apache_error contained no authentication telemetry or password-related events, so neither feed supplied a qualifying brute-force/password-spray record.",
+    "The surviving ELB rival 35.182.246.222 was then geolocated with iplocation on its ELB events, which returned Canada for all 197 events, and its repeated login/lostpw page activity remained the strongest supported fit among the web-tier clients once the other scopes were ruled out.",
+    "The unresolved gap is that ELB only showed repeated GETs to login/lostpw/register pages, not direct credential submissions or failed authentications, so the country came from the surviving ELB rival’s in-dataset geolocation rather than from a directly observed password-spray event."
+  ],
+  "derivation": "The search path began with web-facing ELB/access logs because the question names an attack against Frothly web servers. That feed surfaced 35.182.246.222 as the only repeated member.php source, but subsequent complete ELB checks showed it was a scripted crawler: every page fetched 11 times and no POSTs. Because that did not establish the act, the investigation pivoted to GuardDuty and apache_error. GuardDuty’s only relevant finding was a Recon port probe (PORT_PROBE on SSH 22) with country set to China, and apache_error had only startup notices and generic 404/probe noise, so neither feed recorded the asked brute-force/password-spray behavior. The remaining live ELB rival 35.182.246.222 was then geolocated directly in-dataset using iplocation on client_ip, yielding Canada for all 197 events. That IP also had the strongest remaining web-tier pattern: repeated login and lostpw page activity with no rival showing the same action mix. However, the feed still only showed GETs and not credential submissions, so the act itself remained inferred rather than directly recorded; the country value that held was Canada from the ELB-side rival IP.",
+  "entities": [
+    {
+      "key": "35.182.246.222",
+      "fact": "External ELB client IP; repeated member.php/login-lostpw activity; geolocates to Canada in the dataset."
+    },
+    {
+      "key": "45.62.48.155",
+      "fact": "ELB client IP; had 460 responses and profile requests, but no login or lostpw actions."
+    },
+    {
+      "key": "12.196.122.127",
+      "fact": "ELB client IP; member.php activity skewed to registrations/profile, no login or lostpw actions."
+    },
+    {
+      "key": "aws:cloudwatch:guardduty",
+      "fact": "Sourcetype containing the only web-tier security finding; the finding was Recon:EC2/PortProbeUnprotectedPort, not brute force."
+    },
+    {
+      "key": "apache_error",
+      "fact": "Apache error telemetry; contained startup notices, 404s, and one CGI probe, but no auth/password/denied events."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:elb:accesslogs",
+      "fact": "client_ip can identify the true external web client behind ELB traffic; repeated member.php actions by client_ip were the pivot point."
+    },
+    {
+      "sourcetype": "aws:elb:accesslogs",
+      "fact": "iplocation on client_ip returned Country=Canada, City=Toronto for 35.182.246.222 across 197 events."
+    },
+    {
+      "sourcetype": "aws:cloudwatch:guardduty",
+      "fact": "The only web-tier finding was a Recon:EC2/PortProbeUnprotectedPort event with country.countryName = China; it was a recon probe on SSH 22, not a credential attack."
+    },
+    {
+      "sourcetype": "apache_error",
+      "fact": "No auth/password/denied events were present; the file contained generic errors, notices, and a single luci CGI probe."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:elb:accesslogs",
+      "purpose": "Identify the surviving web-tier rival and its country",
+      "spl": "client_ip=\"35.182.246.222\" | iplocation client_ip | stats count by Country, City",
+      "returns": "Country=Canada, City=Toronto, count=197"
+    },
+    {
+      "sourcetype": "aws:elb:accesslogs",
+      "purpose": "Show the repeated member.php action mix for the candidate",
+      "spl": "request=\"*member.php*\" | stats count by client_ip",
+      "returns": "35.182.246.222 was the top member.php client; rivals included 12.196.122.127 and 45.62.48.155"
+    },
+    {
+      "sourcetype": "aws:elb:accesslogs",
+      "purpose": "Show the candidate’s repeated login/lostpw/profile pattern",
+      "spl": "client_ip=\"35.182.246.222\" | stats count by request",
+      "returns": "login 11, lostpw 11, register 11, profile 18; all GETs"
+    },
+    {
+      "sourcetype": "aws:cloudwatch:guardduty",
+      "purpose": "Read the only GuardDuty event and its country",
+      "spl": "get_raw_events aws:cloudwatch:guardduty",
+      "returns": "Recon:EC2/PortProbeUnprotectedPort, port 22, remoteIpDetails.country.countryName = China, city Beijing"
+    },
+    {
+      "sourcetype": "apache_error",
+      "purpose": "Verify whether error telemetry held brute-force/auth evidence",
+      "spl": "get_raw_events apache_error keyword=auth / password / denied",
+      "returns": "0 / 0 / 0 events"
+    }
+  ],
+  "ruled_out": "35.182.246.222 as direct brute-force evidence in ELB (it was a crawler doing GET enumeration, with no POSTs); GuardDuty as the asked attack (its only finding was recon/port probe on SSH 22, country China); apache_error as attack evidence (no auth/password/denied telemetry); 12.196.122.127 and 45.62.48.155 as the attack source (they lacked login/lostpw action mix).",
+  "qid": "Q318",
+  "question": "From what country is a small brute force or password spray attack occurring against the Frothly web servers?",
+  "guidance": "",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p1 [coverage] A small brute force/password spray against Frothly's web tier can surface as: (a) repeated member.php login attempts by external client_ip in aws:elb:accesslogs — searched (request=*member.php* | stats count by client_ip, action, elb_status_code), top result 35.182.246.222 with 11 logins; (b) POST do_login form_data in stream:http — searched, only 4 single attempts from 3 IPs; (c) apache_error, aws:cloudwatch:guardduty, and iplocation on the attacking IP — NOT yet searched; (d) ms:aad:signin (Azure AD, not the web tier) — not yet searched. — holds: The strongest rival is that the brute-force act was still visible in the same searched web-tier feeds under a different client IP. The complete POST/member.php results and the crawler analysis rule that out within this scope; the remaining live rival is a different feed such as GuardDuty, not an unchosen IP inside these searched results.",
+    "p3 [other] 35.182.246.222 originates from Canada (it sits in AWS ca-central-1 / Montreal range 35.182.0.0/15) — external knowledge, NOT yet tested against the dataset; verify with | iplocation client_ip or a GuardDuty / threat-intel lookup before submitting any country. — holds: The strongest rival reading is that Canada may be real for 35.182.246.222 yet still not answer the question because that IP's activity may not be the brute-force/password-spray attack. The same evidence leaves the act unresolved: all observed requests from that IP are GETs, not credential submissions.",
+    "p4 [coverage] The question's concept (a brute force / password spray against the Frothly web servers with a country) can show up in my scope only as: (a) a GuardDuty finding in sourcetype aws:cloudwatch:guardduty, source lambda:guardduty:us-west-1 — searched via get_sourcetype_fields and get_sources: exactly 1 event, a Recon PORT_PROBE on SSH 22 against web-server instance i-0cc93bade2b3cba63 with remoteIpDetails country 'China', city 'Beijing'; (b) Apache web-server error telemetry (apache_error) — searched via sample_events: 3 events, all startup notices, no auth failures; (c) alternate GuardDuty paths — aws:cloudwatchlogs (only lambda:DNS), aws:cloudwatch (metrics only), errors (only SSM errors.log): no findings. No feed in scope labels any credential attack against the web servers. — holds: The strongest rival reading is that GuardDuty or apache_error might still contain a qualifying credential-attack record. The complete single GuardDuty event is explicitly Recon:EC2/PortProbeUnprotectedPort and the apache_error results enumerate only 404s/startup/module messages, ruling that rival out within this scope.",
+    "p7 [coverage] The question's country is established from in-dataset evidence: | iplocation client_ip on 35.182.246.222 in aws:elb:accesslogs returns Country=Canada (City=Toronto) for all 197 of its events — the only in-dataset country record for the only ELB client with the credential-attack signature (11 login + 11 lostpw actions, scripted __main__/0.2 agent). GuardDuty (1 recon finding) and apache_error (63 events, zero auth/password/denied) carry no brute-force record, so the ELB feed is the only place the act's country can come from. — holds: The strongest rival is that although the country is established from data, it may belong to a source whose behavior does not satisfy the question's brute-force/password-spray wording. The ELB evidence still shows only repeated login/lostpw page fetches, so the claim does not yet hold as an answer premise."
+  ],
+  "validator_verdicts": []
+}

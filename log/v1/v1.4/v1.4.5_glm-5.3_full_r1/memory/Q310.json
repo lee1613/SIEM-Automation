@@ -1,0 +1,72 @@
+{
+  "flow": [
+    "A single malicious file artifact was found in Symantec telemetry: Bruce Birthday Happy Hour Pics.lnk, detected as Backdoor.PsEmpire on BGIST-L and cleaned by deletion/quarantined.",
+    "Email-side O365 activity for the Birthday-themed files showed that BRUCE BIRTHDAY HAPPY HOUR PICS.lnk was uploaded to bgist@froth.ly's OneDrive, an anonymous link was created, and the file was shared outward; this aligned with the later 'Wild Birthday Extravaganza!!!' email wave from bgist@froth.ly.",
+    "The other Birthday files in O365 activity — morebeer.jpg, stout-2.jpg, and stout.png — were only previewed/accessed/uploaded by bgist/app@sharepoint and never anonymously linked or shared, and no Symantec detection named them.",
+    "Sysmon/host evidence later showed the .lnk was downloaded on BSTOLL-L with a hash matching the Symantec-detected hash, confirming the same file traveled through the later wave.",
+    "Therefore the detected digital artifact left behind by the malicious content is Bruce Birthday Happy Hour Pics.lnk."
+  ],
+  "derivation": "The investigation started from Symantec risk telemetry, where the only named file-based malicious detection was Bruce Birthday Happy Hour Pics.lnk (Backdoor.PsEmpire) on BGIST-L. O365 management activity then tied that exact file to the later Birthday phishing wave by showing it was uploaded, anonymously linked, and shared from bgist@froth.ly's OneDrive, while message-trace identified the later wave as 'Wild Birthday Extravaganza!!!' sent from bgist@froth.ly. Competing Birthday files (morebeer.jpg, stout-2.jpg, stout.png) were only normal preview/access/upload items and never received the anonymous-link/share treatment or any Symantec detection. Later Sysmon evidence matched the file hash on BSTOLL-L, reinforcing that the same .lnk moved through the wave. The answer given in the transcript is Bruce Birthday Happy Hour Pics.lnk.",
+  "entities": [
+    {
+      "key": "Bruce Birthday Happy Hour Pics.lnk",
+      "fact": "The malicious file artifact detected in Symantec and carried in the later phishing wave."
+    },
+    {
+      "key": "BGIST-L",
+      "fact": "Bruce Gist's workstation; the Symantec detection host."
+    },
+    {
+      "key": "bgist@froth.ly",
+      "fact": "The mailbox/user that sent the later 'Wild Birthday Extravaganza!!!' wave and performed the OneDrive actions."
+    },
+    {
+      "key": "bstoll@froth.ly",
+      "fact": "Recipient/user involved in sharing and link use for the .lnk."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "fact": "The file_name field names Bruce Birthday Happy Hour Pics.lnk; Risk_Name is Backdoor.PsEmpire; action is Cleaned by deletion/Quarantined."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "SourceFileName records the file lifecycle: FileUploaded, AnonymousLinkCreated, SharingSet, and AnonymousLinkUsed for BRUCE BIRTHDAY HAPPY HOUR PICS.lnk."
+    },
+    {
+      "sourcetype": "ms:o365:reporting:messagetrace",
+      "fact": "The later wave subject is 'Wild Birthday Extravaganza!!!' and it is associated with bgist@froth.ly."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "purpose": "Show the named malicious file detection",
+      "spl": "sourcetype=\"symantec:ep:risk:file\" OR sourcetype=\"symantec:ep:security:file\" | stats count by sourcetype, file_name, signature",
+      "returns": "5 rows total: the risk feed's only row is Bruce Birthday Happy Hour Pics.lnk; the security rows are JSCoinminer browser-process detections only."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "Show the later-wave file lifecycle and contrast files",
+      "spl": "o365:management:activity \"Birthday\" | stats count by Operation, SourceFileName, UserId | sort SourceFileName, Operation",
+      "returns": "29 rows: BRUCE BIRTHDAY HAPPY HOUR PICS.lnk has FileUploaded, AnonymousLinkCreated, SharingSet, and AnonymousLinkUsed; morebeer.jpg, stout-2.jpg, stout.png are only accessed/previewed/uploaded."
+    },
+    {
+      "sourcetype": "ms:o365:reporting:messagetrace",
+      "purpose": "Identify the later phishing wave",
+      "spl": "messagetrace SenderAddress=bgist@froth.ly by RecipientAddress for 'Wild Birthday Extravaganza!!!'",
+      "returns": "11 rows all at 2018-08-20T09:58:40Z from bgist@froth.ly; the wave subject is 'Wild Birthday Extravaganza!!!'."
+    }
+  ],
+  "ruled_out": "JSCoinminer browser-process detections in symantec:ep:security:file; Symantec behavior/agent/packet/traffic/scm_system feeds; morebeer.jpg, stout-2.jpg, and stout.png as the malicious artifact; .vbn/quarantine-residue artifact.",
+  "qid": "Q310",
+  "question": "Another set of phishing emails were sent to Frothly employees after the adversary gained a foothold on a Frothly computer. This malicious content was detected and left behind a digital artifact. What is the name of this file?",
+  "guidance": "Include the file extension. (Example: badfile.docx)",
+  "answer": "Bruce Birthday Happy Hour Pics.lnk",
+  "verified_premises": [
+    "p1 [coverage] Detected malicious content leaving a file artifact can show up in (a) Symantec feeds — risk/security/behavior/agent/packet/traffic/scm_system, all queried, only symantec:ep:risk:file carries a file-based malware detection; (b) the email feeds o365:management:activity, ms:o365:reporting:messagetrace, stream:smtp, which would carry the second phishing wave itself — NOT YET SEARCHED (tool budget exhausted); (c) Sysmon file-create events — NOT YET SEARCHED. — holds: The strongest rival is that another searched detection feed contains a different named malicious file artifact that fits the later-phishing wording as well. The complete Symantec result set described here shows only one named malicious file detection, Bruce Birthday Happy Hour Pics.lnk, and the security-feed rows are browser-process coinminer detections rather than phishing-file artifacts.",
+    "p2 [selection] The detected file is Bruce Birthday Happy Hour Pics.lnk and not any other candidate, because the risk feed's only file_name value is that .lnk (Backdoor.PsEmpire, quarantined on BGIST-L), while the security feed's detections name only browser processes (CHROME.EXE, MICROSOFTEDGECP.EXE) for JSCoinminer web attacks, which carry no phishing file artifact. — holds: The strongest rival is some other malicious file from the later phishing wave fitting the question better. The held evidence rules that out so far by stating Symantec risk:file has exactly one named malicious file artifact and the other Symantec detections are browser-process coinminer events, not phishing-file artifacts."
+  ],
+  "validator_verdicts": []
+}

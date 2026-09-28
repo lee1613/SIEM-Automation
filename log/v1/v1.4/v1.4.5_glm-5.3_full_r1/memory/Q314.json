@@ -1,0 +1,102 @@
+{
+  "flow": [
+    "On FYODOR-L, the adversary’s tool-drop process (powershell.exe) created hdoor.exe and the unzipped toolset, so the search focused on network retrieval tied to that host and process.",
+    "Sysmon EC3 showed the only one-off external connection for the download path was to 45.77.53.176:3333, while 45.77.53.176:443 was a separate, high-volume recurring connection pattern.",
+    "stream:http showed a single GET to http://45.77.53.176:3333/images/logos.png on dest_port 3333, matching the download socket rather than the 443 traffic.",
+    "The same ProcessGuid {EBF7A186-C442-5B58-0000-00109914D901} linked the 3333 connection to the later EC11 file creations for hdoor.exe and the unzipped lsof-master files.",
+    "A raw stream:http read of the 3333 event established it was a download: GET, status 200, content_length 5782482, bytes_out 5542140 versus bytes_in 177, from 45.77.53.176:3333 to FYODOR-L.",
+    "The adversary used port 3333 to download their attack tools; 443 was ruled out because it had recurring beacon-like connections but no HTTP retrieval record."
+  ],
+  "derivation": "The question was answered by correlating FYODOR-L Sysmon and stream:http. First, EC11 showed powershell.exe created the attack tools (hdoor.exe and the unzipped lsof-master files), so the investigation centered on that process and host. EC3 then isolated the external traffic: 45.77.53.176 had one connection on 3333 and many on 443, making 3333 the likely retrieval channel and 443 the likely C2 channel. stream:http confirmed a single GET to /images/logos.png on dest_port 3333, and the raw HTTP event showed the transfer direction and size consistent with a download. The same ProcessGuid tied the 3333 socket to the later tool-file creations, while 443 lacked any retrieval record and behaved like recurring beaconing. The port number used to download the attack tools was 3333.",
+  "entities": [
+    {
+      "key": "FYODOR-L",
+      "fact": "Host where the adversary downloaded and dropped the attack tools."
+    },
+    {
+      "key": "45.77.53.176",
+      "fact": "External IP that served the download and also had recurring 443 connections."
+    },
+    {
+      "key": "3333",
+      "fact": "Destination port used for the tool download."
+    },
+    {
+      "key": "443",
+      "fact": "Recurring external port to 45.77.53.176 that behaved like beaconing, not the download."
+    },
+    {
+      "key": "powershell.exe",
+      "fact": "Process on FYODOR-L that retrieved the payload and created the tool files."
+    },
+    {
+      "key": "hdoor.exe",
+      "fact": "Tool dropped on FYODOR-L."
+    },
+    {
+      "key": "unziped\\lsof-master\\iexeplorer.exe",
+      "fact": "Dropped tool file on FYODOR-L."
+    },
+    {
+      "key": "unziped\\lsof-master\\powershell.exe",
+      "fact": "Dropped tool file on FYODOR-L."
+    },
+    {
+      "key": "{EBF7A186-C442-5B58-0000-00109914D901}",
+      "fact": "ProcessGuid linking the 3333 connection, the stream:http retrieval, and the tool-file creations."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "EventCode 3 captures network connections; EventCode 11 captures file creation. On FYODOR-L, these fields linked the 3333 connection to the tool drops."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "Records HTTP retrievals with fields like dest_ip, dest_port, http_method, status, http_content_length, bytes_in, bytes_out, src_ip, src_port, uri_path, and http_user_agent."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Show external connections from FYODOR-L by destination port",
+      "spl": "Sysmon host=FYODOR-L | stats count by EventCode",
+      "returns": "EventCode 3 traffic existed, including one connection to 45.77.53.176:3333 and many to 45.77.53.176:443."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Show the connection tied to the download socket",
+      "spl": "EC3 to 45.77.53.176 by port",
+      "returns": "3333: 1 connection at 18:47:06; 443: 3,849 connections over a long interval."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Find the retrieval record for the external tool download",
+      "spl": "stream:http (src_ip=45.77.53.176 OR dest_ip=45.77.53.176)",
+      "returns": "One GET /images/logos.png on dest_port 3333."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Tie the download socket to the dropped tools",
+      "spl": "EC11 for the tools",
+      "returns": "hdoor.exe and the unzipped lsof-master files were created by the same ProcessGuid."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Read the raw retrieval event and confirm it was a download",
+      "spl": "index=botsv3 sourcetype=stream:http dest_ip=45.77.53.176 dest_port=3333 | stats count values(...) ...",
+      "returns": "GET, status 200, content_length 5782482, bytes_out 5542140, bytes_in 177, src_ip 192.168.70.186, src_port 64104."
+    }
+  ],
+  "ruled_out": "45.77.53.176:443 as the download port (it was recurring beacon-like traffic with no HTTP retrieval record); internal 192.168.9.x ports from hdoor.exe/iexeplorer.exe (lateral scanning by already-dropped tools); benign browser/port-80 traffic and the Edge LNK download (not the attack tools).",
+  "qid": "Q314",
+  "question": "What port number did the adversary use to download their attack tools?",
+  "guidance": "",
+  "answer": "3333",
+  "verified_premises": [
+    "p1 [coverage] Coverage: On FYODOR-L, the port used to download the adversary's attack tools can be established by correlating external PowerShell network connections in Sysmon EventCode 3 with the subsequent tool file creations in Sysmon EventCode 11 and any matching HTTP retrieval record in stream:http. — holds: The strongest rival is that another feed or another port on FYODOR-L better captures the tool-download act. The same held results show the only retrieval-bearing external HTTP event is on 3333 and the tool-drop ProcessGuid is on FYODOR-L, so this coverage claim fits the question.",
+    "p2 [selection] Selection: The adversary used port 3333 to download the attack tools, not 443, because the same ProcessGuid and socket details tie the single 45.77.53.176:3333 HTTP GET directly to the later tool-file creations, while 443 has no retrieval record and only recurring beacon-like traffic. — holds: The strongest rival is port 443 to the same IP. The evidence rules it out by showing no HTTP retrieval record on 443 and by contrasting it with the single large 3333 GET tied to the tool-drop ProcessGuid, so 3333 is the better fit for 'used to download their attack tools'.",
+    "p3 [other] In stream:http, the 45.77.53.176:3333 GET /images/logos.png record's bytes_out=5,542,140 (http_content_length 5,782,482, content_type image/png, status 200) is the server-to-client bulk payload of the retrieval — the download itself, not an upload. — holds: The strongest rival is that the 3333 record is some other HTTP act such as an upload, but GET plus status 200 plus bytes_out greatly exceeding bytes_in rules that out. No rival in the same held evidence fits 'used to download their attack tools' as well as this row does."
+  ],
+  "validator_verdicts": []
+}

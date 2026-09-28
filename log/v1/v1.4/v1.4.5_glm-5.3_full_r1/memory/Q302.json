@@ -1,0 +1,77 @@
+{
+  "flow": [
+    "The first useful step was to identify the macro-enabled file in scope; the evidence settled on Frothly-Brewery-Financial-Planning-FY2019-Draft[66].xlsm, which also appeared quarantined as AP4D3C539B.xlsm.",
+    "The next step was to find whether any feed tied a malware name to that macro-enabled file. Early searches found no such linkage in O365, SMTP, or the obvious Symantec feeds, but later Sysmon and Symantec risk data showed a same-host sequence around BGIST-L and BruceGist.",
+    "A Symantec risk detection on the same host/user context named Backdoor.PsEmpire, while the macro-enabled workbook was present as a quarantined .xlsm; the report treated that as the strongest malware candidate associated with the campaign.",
+    "The asked value, however, was a Symantec website discovery date for the malware. The final report explicitly said the date 07/20/18 was only recalled from memory and not verified from any dataset artifact or live site, so no evidence-backed discovery date was established.",
+    "As a result, the question stopped at a tentative malware name and an unsupported candidate date, not a confirmed Symantec-website date."
+  ],
+  "derivation": "The chain began with macro-enabled-file hunting across O365 and Symantec feeds. Initial searches found one benign macro-enabled file, Brewing.xlsm, but no malware name tied to it. Broader searches across additional Symantec endpoint/file feeds then found a macro-enabled workbook, Frothly-Brewery-Financial-Planning-FY2019-Draft[66].xlsm, which was also quarantined by Symantec as AP4D3C539B.xlsm. In the same host/user context, Symantec risk telemetry named Backdoor.PsEmpire on BGIST-L / BruceGist, so that became the strongest malware candidate linked to the macro-enabled file campaign. However, the final report explicitly stated that the discovery date 07/20/18 came from memory rather than a searched Symantec artifact or live website lookup, so the requested Symantec website discovery date was not established from evidence.",
+  "entities": [
+    {
+      "key": "Frothly-Brewery-Financial-Planning-FY2019-Draft[66].xlsm",
+      "fact": "macro-enabled workbook on BGIST-L, saved by Windows Mail"
+    },
+    {
+      "key": "AP4D3C539B.xlsm",
+      "fact": "Symantec quarantine artifact for the workbook"
+    },
+    {
+      "key": "Backdoor.PsEmpire",
+      "fact": "Symantec risk name tied to the same host/user context"
+    },
+    {
+      "key": "BGIST-L",
+      "fact": "host where the risk detection appeared"
+    },
+    {
+      "key": "BruceGist",
+      "fact": "user context associated with the workbook and detection"
+    },
+    {
+      "key": "Brewing.xlsm",
+      "fact": "another macro-enabled file found earlier, but benign in the evidence"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "fact": "carries Risk_Name and file_name/file_path; in this question it produced one risk detection, Backdoor.PsEmpire on Bruce Birthday Happy Hour Pics.lnk"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "can show macro-enabled file activity; Brewing.xlsm appeared here as a benign FileAccessed event by app@sharepoint (ExportWorker)"
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "can surface file creation of macro-enabled artifacts, including the .xlsm workbook and the Symantec quarantine file"
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "purpose": "check for malware names and document-linked detections",
+      "spl": "symantec:ep:risk:file | stats count by Risk_Name, file_name, file_path, _time",
+      "returns": "1 event: Backdoor.PsEmpire on Bruce Birthday Happy Hour Pics.lnk at BGIST-L / BruceGist"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "find macro-enabled files and whether they are suspicious",
+      "spl": "o365:management:activity macro-extension search",
+      "returns": "Only Brewing.xlsm, with Operation=FileAccessed by app@sharepoint (ExportWorker)"
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "find .xlsm/.docm/.dotm file creations and link them to the campaign",
+      "spl": "Sysmon TargetFilename=\"*.xlsm\" OR \"*.docm\" OR \"*.dotm\" OR \"*.xlam\"",
+      "returns": "2 events: Frothly-Brewery-Financial-Planning-FY2019-Draft[66].xlsm created by HxTsr.exe and AP4D3C539B.xlsm created by System in Symantec quarantine"
+    }
+  ],
+  "ruled_out": "Brewing.xlsm as the malicious macro-enabled file; symantec:ep:security:file as a source of a macro-enabled-file malware name; JSCoinminer as document-linked malware; Bruce Birthday Happy Hour Pics.lnk as the macro-enabled file itself; and any Symantec-website discovery date as evidence-backed, because the only stated 07/20/18 came from memory rather than a searched artifact.",
+  "qid": "Q302",
+  "question": "According to Symantec's website, what is the discovery date of the malware identified in the macro-enabled file?",
+  "guidance": "Provide the US date format MM/DD/YY. (Example: January 1, 2019 should be provided as 01/01/19)",
+  "answer": "SH retired without answering",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

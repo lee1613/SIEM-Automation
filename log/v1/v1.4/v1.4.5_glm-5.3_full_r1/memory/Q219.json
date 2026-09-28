@@ -1,0 +1,65 @@
+{
+  "flow": [
+    "The only Amazon-originating email in the SMTP capture was found in index=botsv3 sourcetype=stream:smtp, and it was the one tied to the AWS compromise notification.",
+    "That message was shown to be addressed to bstoll@froth.ly as TO, which is Bud’s mailbox in the Frothly data, and the body said the AWS account was compromised.",
+    "The subject line of that same message read 'Amazon Web Services: New Support case: 5244329601', making 5244329601 the labeled support case value.",
+    "ms:o365:reporting:messagetrace was used as a cross-check and later showed the same message and subject, corroborating the case ID.",
+    "The final stated answer was 5244329601.",
+    "The question asks for the support case ID Amazon opens on Bud’s behalf after the compromise notification; the report chain established that literal value in the Amazon-authenticated SMTP message."
+  ],
+  "derivation": "Start with the email-bearing feeds. ms:o365:reporting:messagetrace had only internal Frothly messages, so it did not contain the AWS notification. stream:smtp contained one Amazon-originating event. That event was checked and found to be authenticated from Amazon, addressed to bstoll@froth.ly, and to contain compromise-notification text. The same message’s subject line explicitly labeled the support case as 5244329601. A later cross-check in messagetrace corroborated the same subject and delivery. The value used as the answer was therefore 5244329601.",
+  "entities": [
+    {
+      "key": "bstoll@froth.ly",
+      "fact": "Frothly email account that received the Amazon AWS compromise notification"
+    },
+    {
+      "key": "5244329601",
+      "fact": "Amazon support case ID named in the subject line of the notification"
+    },
+    {
+      "key": "622676721278",
+      "fact": "AWS account ID mentioned in the body as compromised"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "stream:smtp",
+      "fact": "Contains full email content; the only Amazon-originating message in the capture was found here"
+    },
+    {
+      "sourcetype": "ms:o365:reporting:messagetrace",
+      "fact": "Contained only internal Frothly mail in the initial check, then later corroborated the same Amazon message and subject"
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "stream:smtp",
+      "purpose": "Find the Amazon-originating compromise notification and extract its case ID",
+      "spl": "index=botsv3 sourcetype=stream:smtp \"amazon\" | stats count by src_ip, bytes",
+      "returns": "Exactly one Amazon-related event from src_ip=40.107.72.55; its raw event contained the case ID 5244329601"
+    },
+    {
+      "sourcetype": "stream:smtp",
+      "purpose": "Verify recipient, subject, and compromise wording in the Amazon message",
+      "spl": "Email-address extraction from the Amazon event -> only froth.ly address present: bstoll@froth.ly; sender no-reply-aws@amazon.com",
+      "returns": "receiver_email=[\"bstoll@froth.ly\"], receiver_type=[\"TO\"], subject=\"Amazon Web Services: New Support case: 5244329601\", and body text stating the AWS account is compromised"
+    },
+    {
+      "sourcetype": "ms:o365:reporting:messagetrace",
+      "purpose": "Cross-check the same Amazon message and subject",
+      "spl": "messagetrace search for the case ID / amazon / compromised",
+      "returns": "3 events from no-reply-aws@amazon.com with the same subject; bstoll@froth.ly delivered"
+    }
+  ],
+  "ruled_out": "ms:o365:reporting:messagetrace as the sole source (initially it showed only internal Frothly mail); AWS account ID 622676721278 as the support case ID; other stream:smtp events and forwarded recipients hyunki1984@naver.com and ubuntu@ec2-52-38-112-145 as the Bud-recipient notification",
+  "qid": "Q219",
+  "question": "Bud accidentally commits AWS access keys to an external code repository. Shortly after, he receives a notification from AWS that the account had been compromised. What is the support case ID that Amazon opens on his behalf?",
+  "guidance": "",
+  "answer": "5244329601",
+  "verified_premises": [
+    "p1 [coverage] The AWS compromise notification to Bud is captured in stream:smtp as the single Amazon-authenticated event (2018-08-20T09:16:54Z); no other feed carries it. — holds: The strongest rival is another Amazon message to Bud about a different matter. The evidence rules that out by showing the compromise wording and the matching subject/case context on the same message, with messagetrace corroborating the same event.",
+    "p2 [selection] The support case ID is the value labeled in the subject line of that message, not any other digit string in the email. — holds: The strongest rival is the other long number in the body, 622676721278, but the same evidence labels that as the AWS account ID, not the support case. No other labeled case value is shown."
+  ],
+  "validator_verdicts": []
+}

@@ -1,0 +1,141 @@
+{
+  "flow": [
+    "The question was framed as a host/entity lookup first: identify the web servers, then read their processor number from host or hardware inventory.",
+    "Prior work established the web-server set as the gacrux EC2 fleet in the WebServers autoscaling group, and ruled out hoth as a rival because its only literal CPU string is AMD FX(tm)-8120 and it serves internal SuiteCRM, not the web tier.",
+    "Three gacrux hosts directly recorded the same hardware CPU string, Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz, which maps to processor number E5-2676 v3.",
+    "The remaining selected web host, gacrux.i-0920036c8ca91e501, had host-bound telemetry but no readable processor string: osquery system_info ran there, yet no result rows were captured; hardware, cpu, cloud-init, bootstrap, amazon-ssm-agent, and aws:cloudwatch did not yield a processor model.",
+    "After the full in-scope sweep, the only processor number literally evidenced for the verified web-server set remained E5-2676 v3, with no live rival CPU string inside the set."
+  ],
+  "derivation": "The chain started by pinning the question to the gacrux web-server fleet rather than generic AWS identity data. Hardware feed evidence (`cpu_type`) on three gacrux instances gave the repeated literal string `Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz`, which the reports normalized to processor number `E5-2676 v3`. A rival CPU string, `AMD FX(tm)-8120 Eight-Core Processor`, was found only on host `hoth`; later investigation showed `hoth` is an internal SuiteCRM server and not part of the web-server set, so that rival was excluded. The unresolved host was `gacrux.i-0920036c8ca91e501`: osquery `system_info` was shown to run there, but no readable result rows were captured; the other host-bound feeds named in scope did not contain a processor model for that host. The final held state is that the verified web-server set has one directly evidenced processor number, `E5-2676 v3`, and no alternative processor string remains live within the set.",
+  "entities": [
+    {
+      "key": "gacrux",
+      "fact": "EC2 web-tier fleet in Frothly's environment."
+    },
+    {
+      "key": "i-06fea586f3d3c8ce8",
+      "fact": "One of the gacrux web-server instances; directly recorded cpu_type Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    },
+    {
+      "key": "i-09cbc261e84259b54",
+      "fact": "One of the gacrux web-server instances; directly recorded cpu_type Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    },
+    {
+      "key": "i-0cc93bade2b3cba63",
+      "fact": "One of the gacrux web-server instances; directly recorded cpu_type Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    },
+    {
+      "key": "gacrux.i-0920036c8ca91e501",
+      "fact": "A selected web-server instance in the WebServers ASG; host-bound telemetry exists, but no readable processor string was captured."
+    },
+    {
+      "key": "hoth",
+      "fact": "Internal SuiteCRM server; ruled out as a web server and the host of the dataset's only other literal CPU string."
+    },
+    {
+      "key": "AMD FX(tm)-8120",
+      "fact": "The only other literal CPU string found in the dataset; appears on hoth, not on the web-server set."
+    },
+    {
+      "key": "E5-2676 v3",
+      "fact": "Processor number evidenced on three gacrux web servers from the hardware cpu_type string Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "hardware",
+      "fact": "Carries cpu_type with literal CPU model strings; on three gacrux hosts it held Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "Contains CPU strings in some tables (for example cpuid product_name on hoth), but no readable CPU-model row was captured for gacrux.i-0920036c8ca91e501."
+    },
+    {
+      "sourcetype": "system_profile",
+      "fact": "On gacrux.i-0920036c8ca91e501 it was only osquery query-performance metadata; it did not carry a processor model string."
+    },
+    {
+      "sourcetype": "system_info",
+      "fact": "The system_info query ran on gacrux.i-0920036c8ca91e501, but the result rows were not captured in the readable output."
+    },
+    {
+      "sourcetype": "cpu",
+      "fact": "Held utilization data, not a processor model string."
+    },
+    {
+      "sourcetype": "cloud-init",
+      "fact": "Did not cover gacrux.i-0920036c8ca91e501 in the held evidence."
+    },
+    {
+      "sourcetype": "cloud-init-output",
+      "fact": "Did not cover gacrux.i-0920036c8ca91e501 in the held evidence."
+    },
+    {
+      "sourcetype": "bootstrap",
+      "fact": "Did not carry the web-server CPU model; the rival CPU string was on hoth only."
+    },
+    {
+      "sourcetype": "amazon-ssm-agent",
+      "fact": "For gacrux.i-0920036c8ca91e501, no processor string was found in the held sweep."
+    },
+    {
+      "sourcetype": "aws:cloudwatch",
+      "fact": "For gacrux.i-0920036c8ca91e501, no processor string was found in the held sweep."
+    },
+    {
+      "sourcetype": "aws:description",
+      "fact": "Provided instance metadata such as t2.medium and WebServers ASG membership, but no CPU-model string."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "hardware",
+      "purpose": "Find direct CPU model strings on the web-server hosts.",
+      "spl": "index=botsv3 sourcetype=hardware (get_sourcetype_fields) -> cpu_type \"Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz\" on 3 gacrux hosts",
+      "returns": "Three gacrux hosts returned cpu_type Intel(R) Xeon(R) CPU E5-2676 v3 @ 2.40GHz."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "Check for other CPU strings and host-specific CPU evidence.",
+      "spl": "index=botsv3 sourcetype=osquery:results columns.cpu_brand=* | stats count by host, columns.cpu_brand",
+      "returns": "cpu_brand evidence was found on some hosts, but not as a readable CPU record for gacrux.i-0920036c8ca91e501 in the held output."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "Identify the only rival CPU string in the dataset.",
+      "spl": "index=botsv3 sourcetype=osquery:results columns.feature=\"product_name\" | stats count by host, columns.value",
+      "returns": "Exactly one rival literal CPU string was found: AMD FX(tm)-8120 Eight-Core Processor on host hoth."
+    },
+    {
+      "sourcetype": "aws:description",
+      "purpose": "Confirm the selected web-server instance and its metadata.",
+      "spl": "sourcetype=aws:description \"i-0920036c8ca91e501\" | stats count by source",
+      "returns": "The instance metadata showed WebServers ASG membership and t2.medium, but no CPU-model string."
+    },
+    {
+      "sourcetype": "system_profile",
+      "purpose": "Test whether the remaining host artifact carries a processor string.",
+      "spl": "host=\"gacrux.i-0920036c8ca91e501\" name=system_profile | stats count by columns.name",
+      "returns": "system_profile contained only osquery query-performance rows, not a processor model."
+    },
+    {
+      "sourcetype": "hardware",
+      "purpose": "Verify whether the missing host had hardware coverage.",
+      "spl": "sourcetype=hardware host=\"gacrux.i-0920036c8ca91e501\"",
+      "returns": "0 events for gacrux.i-0920036c8ca91e501."
+    }
+  ],
+  "ruled_out": "hoth as a web server; AMD FX(tm)-8120 as the web-server CPU; osquery system_profile as a processor-model source; aws:description as a CPU-model source; cpu as a processor-model source; cloud-init/cloud-init-output/bootstrap as sources of the missing host's processor string; any live rival processor-number string inside the verified web-server set.",
+  "qid": "Q202",
+  "question": "What is the processor number used on the web servers?",
+  "guidance": "Include any special characters/punctuation. (Example: The processor number for Intel Core i7-8650U is i7-8650U.)",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p2 [selection] The web servers are the gacrux EC2 fleet (i-06fea586f3d3c8ce8, i-0920036c8ca91e501, i-09cbc261e84259b54, i-0cc93bade2b3cba63), which serve Apache behind the Frothly ELB, not hoth. — holds: The strongest rival is that hoth also counts as a web server because it emits Apache access logs. The evidence rules that out by showing hoth serves only internal /suitecrm/* traffic from 192.168.8.x clients and is not in the WebServers ASG, while gacrux is explicitly tagged into that web tier.",
+    "p6 [coverage] Direct processor-identity evidence for i-0920036c8ca91e501 specifically can appear in: its osquery:results tables (searched: 12 tables enumerated; no cpuid, no system_info; system_profile's 166 events NOT yet read), hardware-feed coverage of that host (not searched), sourcetype=cpu / cloud-init / cloud-init-output / bootstrap for that host (not searched), aws:cloudwatch (411 events present, not searched for CPU). Fleet-wide osquery:results carries no E5-2676 string (0 events). — holds: The strongest rival reading is that another host-bound artifact within the searched scope could still hold the processor identity, but the evidence rules out the named remaining feeds one by one. No rival within that scope remains unsearched in the report.",
+    "p8 [other] On i-0920036c8ca91e501 the osquery system_info query (SELECT hostname, cpu_brand, physical_memory FROM system_info;) executed 7 times, each producing 109 bytes of output, but no system_info result rows were captured in osquery:results for that host — so its cpu_brand value is unreadable from captured telemetry, and no direct processor string exists for this host in osquery:results. — holds: The strongest rival reading is that readable system_info result rows for this host might already exist elsewhere in the same osquery results set, which would make the claim too strong. The report rules that out for this host by stating its 12 captured result tables exclude system_info rows, so the claim about generated-but-unreadable output holds."
+  ],
+  "validator_verdicts": [
+    "p7 → REFUTED by v1 (rival tested: AMD FX(tm)-8120 Eight-Core Processor (osquery:results columns.feature=product_name))"
+  ]
+}

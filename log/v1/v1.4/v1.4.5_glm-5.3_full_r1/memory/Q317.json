@@ -1,0 +1,137 @@
+{
+  "flow": [
+    "Microsoft admin-activity evidence showed fyodor@froth.ly alone performing the strongest tenant-admin actions in scope, including the Company Administrator/TenantAdmins role grant, while bstoll@froth.ly was limited to group/distribution-group operations.",
+    "Endpoint telemetry tied fyodor-associated activity to FYODOR-L and no other host in the searched identity-link feeds.",
+    "On FYODOR-L, the complete Sysmon EventCode=11 executable-creation ordering showed several earlier non-executables, then C:\\Windows\\Temp\\hdoor.exe at 2018-08-20 18:42:49 as the first executable, followed later by iexeplorer.exe and powershell.exe.",
+    "Residual coverage checks across symantec:ep:risk:file, symantec:ep:security:file, osquery:results, stream:smb, and stream:http found no earlier executable arrival on FYODOR-L.",
+    "So the first executable uploaded to the domain admin account's compromised endpoint system is hdoor.exe."
+  ],
+  "derivation": "The answer chain starts with Microsoft identity/admin telemetry to identify the domain admin account: fyodor@froth.ly is the only actor performing role administration strong enough to mark the admin identity, while bstoll@froth.ly only does group-level actions. That identity is then tied to FYODOR-L through endpoint telemetry, where fyodor-associated events appear only on FYODOR-L. After that, complete Sysmon EventCode=11 results on FYODOR-L are read in time order: the early files are non-executables, and the first executable creation is C:\\Windows\\Temp\\hdoor.exe at 2018-08-20 18:42:49. Additional endpoint/file feeds were checked for coverage; none showed an earlier executable arrival on FYODOR-L, so the Sysmon ordering holds as the first uploaded executable.",
+  "entities": [
+    {
+      "key": "fyodor@froth.ly",
+      "fact": "Domain admin account identified from Microsoft admin-activity evidence"
+    },
+    {
+      "key": "FYODOR-L",
+      "fact": "Compromised endpoint tied to fyodor@froth.ly"
+    },
+    {
+      "key": "hdoor.exe",
+      "fact": "First executable uploaded to FYODOR-L"
+    },
+    {
+      "key": "bstoll@froth.ly",
+      "fact": "Other admin actor, but limited to group/distribution-group operations"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "ms:aad:audit",
+      "fact": "fyodor@froth.ly performs the strongest admin actions in scope, including role administration; bstoll@froth.ly does not."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "fyodor@froth.ly performs Exchange admin operations such as Update-RoleGroupMember, New-MailboxSearch, New-TransportRule, Add-MailboxPermission, and Set-Mailbox."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "On FYODOR-L, EventCode=11 file-creation ordering shows hdoor.exe first among executables."
+    },
+    {
+      "sourcetype": "stream:smb",
+      "fact": "FYODOR-L events are NetBIOS browse broadcasts with no filename transfer evidence."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "No FYODOR-L events were present."
+    },
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "fact": "No FYODOR-L record showed an earlier executable arrival."
+    },
+    {
+      "sourcetype": "symantec:ep:security:file",
+      "fact": "No FYODOR-L record showed an earlier executable arrival."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "No FYODOR-L record showed an earlier executable arrival."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "ms:aad:audit",
+      "purpose": "Identify the domain admin actor",
+      "spl": "ms:aad:audit | stats count by activity, actor.userPrincipalName, targets{}.userPrincipalName | sort activity",
+      "returns": "15/15 rows read; fyodor@froth.ly alone performs role/account admin actions, bstoll@froth.ly only group-level actions."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "Confirm Exchange admin behavior for the same actor",
+      "spl": "o365:management:activity Workload=Exchange | stats count by Operation, UserId | sort Operation",
+      "returns": "9/9 rows read; fyodor@froth.ly alone performs Exchange admin operations."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Read executable-creation order on FYODOR-L",
+      "spl": "Sysmon host=FYODOR-L EventCode=11 | stats count by _time, TargetFilename, Image | sort + _time",
+      "returns": "21/21 rows read; hdoor.exe is the first executable at 18:42:49."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Confirm fyodor-linked host identity",
+      "spl": "Sysmon EventCode=1 user=\"*fyodor*\" | stats count by host, user",
+      "returns": "1 row; FYODOR-L, AzureAD\\FyodorMalteskesko, 107 events."
+    },
+    {
+      "sourcetype": "WinEventLog",
+      "purpose": "Confirm fyodor-linked host identity in Windows telemetry",
+      "spl": "WinEventLog fyodor | stats count by host",
+      "returns": "1 row; FYODOR-L only (2,543 events)."
+    },
+    {
+      "sourcetype": "symantec:ep:risk:file",
+      "purpose": "Check for earlier executable arrival on FYODOR-L",
+      "spl": "get_sourcetype_fields symantec:ep:risk:file",
+      "returns": "91 of 91 rows; host field only BGIST-L, no FYODOR-L record."
+    },
+    {
+      "sourcetype": "symantec:ep:security:file",
+      "purpose": "Check for earlier executable arrival on FYODOR-L",
+      "spl": "get_sourcetype_fields symantec:ep:security:file",
+      "returns": "63 of 63 rows; host field only BTUN-L, no FYODOR-L record."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "Check for earlier executable arrival on FYODOR-L",
+      "spl": "sourcetype=osquery:results | stats count by host",
+      "returns": "8 of 8 rows; FYODOR-L absent."
+    },
+    {
+      "sourcetype": "stream:smb",
+      "purpose": "Check for file-transfer evidence on FYODOR-L",
+      "spl": "sourcetype=stream:smb host=FYODOR-L | stats count by _time, src_ip, dest_ip, service, command, bytes",
+      "returns": "10/10 rows read; browse broadcasts only, no filename field."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Check for web transfer evidence on FYODOR-L",
+      "spl": "sourcetype=stream:http host=FYODOR-L | stats count by uri, src_ip, dest_ip",
+      "returns": "0 events."
+    }
+  ],
+  "ruled_out": "WinEventLog 47xx/group-membership logs as the domain-admin source; bstoll@froth.ly as the domain admin; other hosts as the compromised endpoint; and symantec:ep:risk:file, symantec:ep:security:file, osquery:results, stream:smb, and stream:http as sources of an earlier executable on FYODOR-L.",
+  "qid": "Q317",
+  "question": "What is the first executable uploaded to the domain admin account's compromised endpoint system?",
+  "guidance": "Include the file extension.",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p1 [coverage] The concept 'executable uploaded to a compromised endpoint' can appear as: (a) Sysmon EventCode=11 with TargetFilename=*.exe — SEARCHED, 39 events on 8 hosts, all rows read; (b) Symantec EP file/risk feeds (symantec:ep:risk:file, symantec:ep:security:file) — NOT YET searched; (c) network transfer records (stream:http, stream:smb) — NOT YET searched; (d) osquery:results file tables — NOT YET searched. The concept 'domain admin account' can appear as: (e) WinEventLog group-membership events — SEARCHED, none exist (only EventCodes 5156/4689/4688); (f) osquery:results user/group tables — NOT YET searched; (g) ms:aad:audit directory-role events — NOT YET searched. — holds: The strongest rival reading is that another searched in-scope feed on FYODOR-L records an earlier uploaded executable than Sysmon does. The reported complete results rule that out within the searched scope: Symantec file feeds have no FYODOR-L executable rows, osquery has no FYODOR-L rows, FYODOR-L stream:smb has only MAILSLOT browse broadcasts, and FYODOR-L stream:http has zero events.",
+    "p2 [selection] FYODOR-L is the leading candidate for the compromised endpoint because its Sysmon exe creations are attacker artifacts in C:\\Windows\\Temp (hdoor.exe, unziped\\lsof-master\\iexeplorer.exe, unziped\\lsof-master\\powershell.exe), unlike every other host. Rival: BSTOLL-L — highest Windows event volume (24,427 WinEventLog events) but its only Sysmon exe creation is the Windows Update artifact C:\\Windows\\SoftwareDistribution\\Download\\Install\\AM_Delta_Patch_1.273.337.0.exe, so it shows no attacker executable in the full 39-row EventCode=11 listing. FYODOR-L is NOT yet confirmed as the domain admin's endpoint — that link is untested. — holds: The strongest rival is BSTOLL-L or another Windows host with executable file creations. The same results rule that out by showing the fyodor identity on FYODOR-L only, while the other hosts' executable creations are described as routine software rather than the compromise chain.",
+    "p3 [coverage] The question's concepts resolve as: domain admin identity = ms:aad:audit actor performing role administration (fyodor@froth.ly assigned 'Company Administrator'/'TenantAdmins' — searched, 4 rows all read); identity-to-endpoint = Sysmon EventCode=1 user field (AzureAD\\FyodorMalteskesko on FYODOR-L only, 107 events; WinEventLog fyodor also only FYODOR-L, 2543 events); first executable uploaded = Sysmon EventCode=11 TargetFilename=*.exe on FYODOR-L (4 events, all read, earliest C:\\Windows\\Temp\\hdoor.exe 2018-08-20 18:42:49 written by powershell.exe). NOT YET searched for an earlier executable on FYODOR-L: symantec:ep:*:file feeds, stream:http/stream:smb, osquery:results file tables. — holds: The strongest rival reading is that the first executable should be taken from a different feed than Sysmon or that the admin identity is not the one tied to the compromised endpoint. Within the searched scope, the evidence aligns the identity, host, and executable-order concepts to those feeds with no better in-scope rival shown.",
+    "p4 [selection] FYODOR-L is the domain admin's compromised endpoint. — holds: The strongest rival is that fyodor@froth.ly used some other endpoint or that another admin actor's endpoint is what the question means. The same result sets confine fyodor-linked endpoint activity to FYODOR-L and distinguish bstoll as lacking the same admin-role evidence.",
+    "p5 [selection] hdoor.exe is the first executable uploaded to FYODOR-L. — holds: The strongest rival is that another executable on FYODOR-L was uploaded earlier than hdoor.exe. Within the searched EventCode=11 executable scope, the rows read in full place hdoor.exe first and show no earlier executable creation on that host."
+  ],
+  "validator_verdicts": []
+}

@@ -1,0 +1,89 @@
+{
+  "flow": [
+    "The question is about the malicious link file already fixed earlier as BRUCE BIRTHDAY HAPPY HOUR PICS.lnk, so the search stayed in o365:management:activity on that file's lifecycle.",
+    "AnonymousLinkUsed was identified as the Microsoft activity operation that records use of an anonymous sharing link; the .lnk file had 11 such events.",
+    "The relevant aggregation on that file showed 7 distinct ClientIP values for AnonymousLinkUsed, and the same count held when cross-checked against the duplicate ms:o365:management carrier.",
+    "A separate lifecycle query on the same file showed FileAccessed events, but those were treated as authenticated/setup/duplicate/system-crawl behavior rather than the link-use act, so the question's count was taken from AnonymousLinkUsed instead.",
+    "The final count established in the transcript was 7 unique IP addresses.",
+    "The runner never accepted the selection premise p2 to its own standard, but the transcript still established the count and the operation choice from complete O365 lifecycle results."
+  ],
+  "derivation": "The investigation reused Q310's file identity, BRUCE BIRTHDAY HAPPY HOUR PICS.lnk, and focused on Microsoft O365 activity data. The first senior scoped o365:management:activity and found that AnonymousLinkUsed was the operation corresponding to link use, with 11 events and 7 unique ClientIPs for that file; FileAccessed was also present but was ruled out as the meaning of 'used'. Later runs anchored the file by ListItemUniqueId 0aa10299-8655-4f7e-b293-965cc699f48a and showed the full lifecycle: AnonymousLinkCreated, FileAccessed, FileModified, FileUploaded, SharingInheritanceBroken, SharingSet, and AnonymousLinkUsed. The decisive AnonymousLinkUsed aggregation on that file returned event_count=11, distinct_event_ids=11, and unique_client_ips=7, while FileAccessed on the same file returned 4 events / 4 IPs with authenticated or system user context. A replacement senior independently confirmed from the file's lifecycle that AnonymousLinkUsed is the operation that records use and that FileDownloaded and FilePreviewed do not occur on this file. The held answer value in the transcript is 7 unique IP addresses.",
+  "entities": [
+    {
+      "key": "BRUCE BIRTHDAY HAPPY HOUR PICS.lnk",
+      "fact": "the malicious link file sent"
+    },
+    {
+      "key": "0aa10299-8655-4f7e-b293-965cc699f48a",
+      "fact": "the file's immutable SharePoint ListItemUniqueId"
+    },
+    {
+      "key": "o365:management:activity",
+      "fact": "the O365 activity sourcetype used to measure link use"
+    },
+    {
+      "key": "AnonymousLinkUsed",
+      "fact": "the operation used to measure 'used' for the link file"
+    },
+    {
+      "key": "FileAccessed",
+      "fact": "a different lifecycle operation on the same file, ruled out as the measure of 'used'"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "ClientIP is the field used for the distinct-IP count; Operation and ObjectId/ListItemUniqueId identify the relevant link-use events."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "AnonymousLinkUsed events on the file returned 11 events and 7 distinct ClientIPs."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "FileAccessed events on the same file returned 4 events and 4 distinct ClientIPs and were treated as non-use activity."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "count distinct IPs for AnonymousLinkUsed on the malicious link file",
+      "spl": "index=botsv3 sourcetype=o365:management:activity Operation=\"AnonymousLinkUsed\" | stats count dc(ClientIP) as unique_ips values(ClientIP) as ips by Operation",
+      "returns": "11 events, 7 unique ClientIPs"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "tie AnonymousLinkUsed to the one file ObjectId",
+      "spl": "... Operation=\"AnonymousLinkUsed\" | stats count dc(ClientIP) by ObjectId",
+      "returns": "one row for the .lnk file's OneDrive URL, 11 events, 7 IPs"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "show the full lifecycle for the file by immutable ID",
+      "spl": "index=botsv3 sourcetype=o365:management:activity ListItemUniqueId=\"0aa10299-8655-4f7e-b293-965cc699f48a\" | stats count dc(ClientIP) as unique_ips by Operation",
+      "returns": "7 operations total, including AnonymousLinkUsed(11/7) and FileAccessed(4/4)"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "confirm AnonymousLinkUsed completeness on the file",
+      "spl": "index=botsv3 sourcetype=o365:management:activity ListItemUniqueId=\"0aa10299-8655-4f7e-b293-965cc699f48a\" Operation=\"AnonymousLinkUsed\" | stats count as event_count dc(Id) as distinct_event_ids dc(ClientIP) as unique_client_ips values(ObjectId) as objectid",
+      "returns": "event_count=11, distinct_event_ids=11, unique_client_ips=7, objectid=the .lnk's OneDrive URL"
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "contrast FileAccessed on the same file",
+      "spl": "... ListItemUniqueId=\"0aa10299-8655-4f7e-b293-965cc699f48a\" Operation=\"FileAccessed\" | stats count as event_count dc(Id) as distinct_event_ids dc(ClientIP) as unique_client_ips values(UserId) as userids",
+      "returns": "event_count=4, distinct_event_ids=4, unique_client_ips=4, userids=[app@sharepoint, bgist@froth.ly, bstoll@froth.ly, urn:spo:anon#21096b8a536a4443b9fd1b1f1b7d2f29970780b623b56525ab599d5c5bb7d2f3]"
+    }
+  ],
+  "ruled_out": "FileAccessed as the meaning of 'used' for the malicious link file; FileDownloaded and FilePreviewed on the file; other lifecycle operations (AnonymousLinkCreated, FileUploaded, FileModified, SharingSet, SharingInheritanceBroken) as the count source.",
+  "qid": "Q312",
+  "question": "How many unique IP addresses \"used\" the malicious link file that was sent?",
+  "guidance": "",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p1 [coverage] Coverage: In the Microsoft activity data for BRUCE BIRTHDAY HAPPY HOUR PICS.lnk, the act named by 'used' is the AnonymousLinkUsed operation; complete aggregations showed all 11 AnonymousLinkUsed events in scope and a single ObjectId for that file, while FileAccessed and other operations represent different acts such as access, upload, creation, sharing, or modification. — holds: The strongest rival reading is that another operation on the same file, such as FileAccessed, could equally represent 'used'. The same complete lifecycle result rules that out by separating AnonymousLinkUsed from creation/upload/share/access acts and showing the distinct count must be taken from the link-use operation for a malicious link file.",
+    "p2 [selection] Selection: The count must be taken from AnonymousLinkUsed events on the ObjectId for BRUCE BIRTHDAY HAPPY HOUR PICS.lnk, not from FileAccessed or other lifecycle operations, because only AnonymousLinkUsed records the anonymous sharing-link use asked by the question; those events yield 7 unique ClientIP values. — holds: The strongest rival reading is FileAccessed as 'used', but the held evidence says FileAccessed on this file is setup/authenticated access while AnonymousLinkUsed is the anonymous sharing-link act tied to the sent malicious link. No rival operation on this file fits the question wording as well."
+  ],
+  "validator_verdicts": []
+}

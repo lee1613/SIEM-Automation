@@ -1,0 +1,89 @@
+{
+  "flow": [
+    "The investigation first ruled out the obvious Linux audit/auth useradd events because they were all on EC2 hosts and involved AWS bootstrap/service accounts, not the on-prem Linux system named in the question.",
+    "It then identified hoth as the on-prem Linux host from the non-EC2 shell-history/account-artifact path, while fully reading klagerfield's .bash_history and finding no useradd or password-setting command there.",
+    "On hoth, osquery shell-history/process telemetry showed useradd-related activity, and the decisive hoth proc_events rows were narrowed to two tomcat7 useradd attempts: one by tomcat8 (non-root) and one by root.",
+    "The root-run hoth useradd command was confirmed as the successful creation event, with the raw cmdline containing the literal `-p ilovedavidverve` token, establishing the password exactly as recorded.",
+    "The answer was finalized from the complete hoth osquery proc_events evidence, not from the partial Unix:UserAccounts feed."
+  ],
+  "derivation": "Searches of linux_audit and linux_secure showed only EC2 bootstrap useradd activity (ec2-user, apache, memcached, streamfwd on ip-172-16-0-13/127/145), so those were ruled out as not matching an on-prem Linux host. The next step moved to the on-prem path and identified hoth as the relevant host, with klagerfield's .bash_history read in full but containing no account-creation or password-setting commands. The live lead became hoth's osquery telemetry, where `osquery:results` for `host=hoth` and `tomcat7` returned exactly two `pack_process-monitoring_proc_events` rows. A clarification established there were only those two attempts, one by tomcat8 and one by root, and that the root row's raw cmdline was literally `useradd -ou tomcat7 -p ilovedavidverve 0 -g 0 -M -N -r -s /bin/bash`. That makes `ilovedavidverve` the password for the user successfully created by root on the on-prem Linux system.",
+  "entities": [
+    {
+      "key": "hoth",
+      "fact": "the on-prem Linux host"
+    },
+    {
+      "key": "klagerfield",
+      "fact": "user whose .bash_history was fully read"
+    },
+    {
+      "key": "tomcat7",
+      "fact": "the user created by useradd on hoth"
+    },
+    {
+      "key": "tomcat8",
+      "fact": "the non-root user who ran one of the tomcat7 useradd attempts"
+    },
+    {
+      "key": "root",
+      "fact": "the user who successfully created tomcat7 on hoth"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "linux_audit",
+      "fact": "useradd events here were EC2 bootstrap activity, not the target on-prem creation"
+    },
+    {
+      "sourcetype": "linux_secure",
+      "fact": "useradd events here were EC2 bootstrap activity, not the target on-prem creation"
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "on hoth, proc_events contained exactly two tomcat7 useradd attempts, including the root-run successful one"
+    },
+    {
+      "sourcetype": "bash_history",
+      "fact": "klagerfield's history was fully read and did not contain the relevant user creation or password-setting command"
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "linux_audit",
+      "purpose": "rule out cloud bootstrap useradd activity",
+      "spl": "sourcetype=linux_audit (useradd OR adduser OR \"new-user\" OR \"ADD_USER\")",
+      "returns": "27 events, all uid=0 on EC2 instances; users ec2-user, apache, memcached, streamfwd"
+    },
+    {
+      "sourcetype": "linux_secure",
+      "purpose": "rule out cloud bootstrap useradd activity",
+      "spl": "linux_secure useradd search",
+      "returns": "24 events on ip-172-16-0-13, ip-172-16-0-127, ip-172-16-0-145; same four EC2/service users"
+    },
+    {
+      "sourcetype": "bash_history",
+      "purpose": "find account-creation or password-setting commands in the on-prem shell history",
+      "spl": "get_raw_events klagerfield .bash_history keyword=passwd",
+      "returns": "1 event: `cat /etc/passwd`; full history otherwise clean of useradd/passwd/chpasswd"
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "identify the host and the relevant shell-history/process-monitoring pack",
+      "spl": "osquery:results host=hoth name=pack_incident-response_shell_history (_raw=*useradd* OR *passwd* OR *chpasswd* OR *adduser*)",
+      "returns": "4 shell-history matches; hoth is the on-prem host with relevant telemetry"
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "extract the decisive root-run useradd command",
+      "spl": "osquery:results host=hoth \"tomcat7\" | stats by name, decorations.username, columns.cmdline",
+      "returns": "2 complete pack_process-monitoring_proc_events rows: one root-run and one tomcat8-run; root row cmdline contains `-p ilovedavidverve`"
+    }
+  ],
+  "ruled_out": "linux_audit/linux_secure EC2 bootstrap useradd events (ec2-user, apache, memcached, streamfwd on ip-172-16-0-13/127/145); klagerfield .bash_history as the source of the answer; history-2 (/var/log/apt/history.log); Unix:UserAccounts as a confirmation source for hoth; the non-root tomcat8 useradd attempt as the successful creation",
+  "qid": "Q303",
+  "question": "What is the password for the user that was successfully created by the user \"root\" on the on-premises Linux system?",
+  "guidance": "",
+  "answer": "ilovedavidverve",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

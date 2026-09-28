@@ -1,0 +1,92 @@
+[
+  {
+    "qid": "Q224",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Queries to brewertalk.com can appear in: (a) sourcetype=stream:dns query field — searched via raw-text 'brewertalk.com' across all 8 sources, only www.brewertalk.com found (107 events); (b) sourcetype=aws:cloudwatchlogs source=lambda:DNS (Route 53 resolver query log, 115,145 events, host=serverless, query names in _raw only) — NOT YET SEARCHED, prime candidate since the question names Route 53; (c) other feeds naming DNS queries (aws:cloudtrail, osquery:results, XmlWinEventLog:Sysmon) — not yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Both DNS feeds searched end-to-end for brewertalk.com: stream:dns (raw-text search across all 8 sources, round 1) holds only www.brewertalk.com (107 events); lambda:DNS holds 114,428 distinct brewertalk.com names over 115,145 events (the whole feed). The union adds nothing beyond lambda:DNS. Feeds in (c) (aws:cloudtrail, osquery:results, Sysmon) are not DNS query logs and are outside the granted scope; the question's concept (DNS queries to brewertalk.com, Route 53) is fully covered by these two feeds.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report shows stream:dns contains only www.brewertalk.com while lambda:DNS contains 114,428 distinct brewertalk.com names extracted from raw events, so the quoted results support the claim that the complete distinct set must be taken from the Route 53-style feed rather than stream:dns alone.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another searched feed could add brewertalk.com query names and change the metric. The union check rules out stream:dns as adding anything beyond www.brewertalk.com, and the question asks about DNS queries rather than a different telemetry type, so this coverage claim holds.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"stream_queries\": \"www.brewertalk.com\", \"r53_distinct\": \"114428\"}",
+        "evidence": "Both DNS feeds searched end-to-end for brewertalk.com: stream:dns (raw-text search across all 8 sources, round 1) holds only www.brewertalk.com (107 events); lambda:DNS holds 114,428 distinct brewertalk.com names over 115,145 events (the whole feed). The union adds nothing beyond lambda:DNS. Feeds in (c) (aws:cloudtrail, osquery:results, Sysmon) are not DNS query logs and are outside the granted scope; the question's concept (DNS queries to brewertalk.com, Route 53) is fully covered by these two feeds."
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report shows stream:dns contains only www.brewertalk.com while lambda:DNS contains 114,428 distinct brewertalk.com names extracted from raw events, so the quoted results support the claim that the complete distinct set must be taken from the Route 53-style feed rather than stream:dns alone. | rival: The strongest rival is that another searched feed could add brewertalk.com query names and change the metric. The union check rules out stream:dns as adding anything beyond www.brewertalk.com, and the question asks about DNS queries rather than a different telemetry type, so this coverage claim holds."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "8.10"
+    }
+  },
+  {
+    "qid": "Q224",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The distinct third-level subdomain set for brewertalk.com should be drawn from the Route 53 resolver query log (source=lambda:DNS, sourcetype=aws:cloudwatchlogs) rather than stream:dns, because the question names Route 53 as Frothly's DNS service. Rival stream:dns was searched (index=botsv3 sourcetype=stream:dns \"brewertalk.com\" | stats count by source, query -> 3 rows, all www.brewertalk.com) and holds only one label, so it cannot produce a multi-subdomain average; but this premise stays UNVERIFIED until lambda:DNS is actually searched for brewertalk.com.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "lambda:DNS was searched for brewertalk.com and holds 114,428 distinct query names (115,145 events, the entire feed), versus stream:dns's single name www.brewertalk.com. The question names Route 53 as Frothly's DNS service, and only the Route 53 resolver query log carries the multi-subdomain query set the question presupposes; stream:dns is a subset of it.",
+    "rival": "stream:dns (network capture)",
+    "stamp": "true",
+    "stamp_reason": "The report provides both plausible label-selection readings, shows their exact averages (8.0994 and 8.1037), and demonstrates that both round to 8.10. That supports the claim that the distinct third-level-subdomain average is 8.10 from the selected brewertalk.com query-name set.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that only exact three-label names count, rather than the label immediately left of brewertalk.com on deeper names as well. The evidence explicitly computes both and they converge to the same rounded value, so no rival reading shown in the same results changes the answer.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"stream_queries\": \"www.brewertalk.com\", \"r53_distinct\": \"114428\"}",
+        "evidence": "lambda:DNS was searched for brewertalk.com and holds 114,428 distinct query names (115,145 events, the entire feed), versus stream:dns's single name www.brewertalk.com. The question names Route 53 as Frothly's DNS service, and only the Route 53 resolver query log carries the multi-subdomain query set the question presupposes; stream:dns is a subset of it."
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report provides both plausible label-selection readings, shows their exact averages (8.0994 and 8.1037), and demonstrates that both round to 8.10. That supports the claim that the distinct third-level-subdomain average is 8.10 from the selected brewertalk.com query-name set. | rival: The strongest rival reading is that only exact three-label names count, rather than the label immediately left of brewertalk.com on deeper names as well. The evidence explicitly computes both and they converge to the same rounded value, so no rival reading shown in the same results changes the answer."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "8.10"
+    }
+  }
+]
