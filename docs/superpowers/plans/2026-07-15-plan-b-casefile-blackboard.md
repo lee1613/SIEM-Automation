@@ -2,29 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 >
-> **Supersedes** `2026-07-07-plan-b-casefile-blackboard.md` (written before run_1.2 completed;
-> re-grounded here against `docs/version_architecture/v1/v1.2_improvement_plans.md` as updated
-> by commit `17f38db`, `docs/scoreboard_result/v1/v1.2.md`, and the 8 landed v1.3 code-review
+> **Supersedes** `2026-07-07-plan-b-casefile-blackboard.md` (written before run_0.2 completed;
+> re-grounded here against `docs/version_architecture/v0/v0.2_improvement_plans.md` as updated
+> by commit `17f38db`, `docs/scoreboard_result/v0/v0.2.md`, and the 8 landed v0.3 code-review
 > fixes).
 
-**Goal:** Make every delegation's answer durable and auditable (candidate ledger — the joiner copies verbatim, never re-types), stop failed/cap-hit delegations from triggering blind fresh-context replans (failure handoff — the single biggest cost lever: 62 failed delegations burned $26.53 of run_1.2's $31.36), and turn 56 isolated solves into one investigation (case file + recon + specialists + hints).
+**Goal:** Make every delegation's answer durable and auditable (candidate ledger — the joiner copies verbatim, never re-types), stop failed/cap-hit delegations from triggering blind fresh-context replans (failure handoff — the single biggest cost lever: 62 failed delegations burned $26.53 of run_0.2's $31.36), and turn 56 isolated solves into one investigation (case file + recon + specialists + hints).
 
 **Architecture:** Pure helpers in `case_file.py` build a per-question **candidate ledger** from `ctx.q_delegations`; the joiner must choose FROM it and a deterministic snap restores the ledger's verbatim byte form. A **failure-handoff digest** (sourcetypes tried, SPL already run, where the trail went cold) is built from every failed/too_big/cap-hit delegation record and injected into replan planning and replacement-worker subquestions. A JSON-backed `CaseFile` (entities + findings, `status ∈ {verified, hypothesis, refuted}`) is the SH's cross-question substrate; Phase-0 recon seeds it; the Verifier promotes/refutes findings. The planner tags tasks `[HUNTER]`/`[CONTENT]`/`[METRICS]` and the pool selects a matching worker graph. `HintBook` buys official hints on low-confidence ≥500-pt questions.
 
-**Tech Stack:** Python 3.11, pytest, LangGraph, existing v0 worker graph (`agent/splunk_agent.py`), CSV hint data (`botsv3content/ctf_hints.csv`).
+**Tech Stack:** Python 3.11, pytest, LangGraph, existing v0.0.0 worker graph (`agent/splunk_agent.py`), CSV hint data (`botsv3content/ctf_hints.csv`).
 
-**Depends on:** Plan A (merged), observability foundation (merged), and the 8 v1.3 code-review fixes (merged, `246d444`→`5bd3283`; suite baseline **77 passing**). Build ON TOP of origin/jy HEAD `17f38db`. **The Mac working copy is behind origin/jy with rewritten history — sync it (`git fetch && git reset --hard origin/jy`, old history stays reachable via `judge`) before executing any task.**
+**Depends on:** Plan A (merged), observability foundation (merged), and the 8 v0.3 code-review fixes (merged, `246d444`→`5bd3283`; suite baseline **77 passing**). Build ON TOP of origin/jy HEAD `17f38db`. **The Mac working copy is behind origin/jy with rewritten history — sync it (`git fetch && git reset --hard origin/jy`, old history stays reachable via `judge`) before executing any task.**
 
 ## Global Constraints
 
-- Every code change gets a same-turn changelog line in `docs/version_architecture/v1/v1.3.md` (per project CLAUDE.md — v1.3 is the in-progress version; no full run has closed it).
-- Commit prefix: `feat(v1.3-planB): …`.
-- Test runs (`--ids`) auto-land in `log/temp/` — never `log/v1/`, never cost-tracked.
+- Every code change gets a same-turn changelog line in `docs/version_architecture/v0/v0.3.md` (per project CLAUDE.md — v0.3 is the in-progress version; no full run has closed it).
+- Commit prefix: `feat(v0.3-planB): …`.
+- Test runs (`--ids`) auto-land in `log/temp/` — never `log/v0/`, never cost-tracked.
 - **Validation policy (5-question smoke):** per-task micro-smokes use 1–2 questions; before declaring Plan B done, ONE combined 5-question smoke: `--ids Q216,Q303,Q329,Q330,Q331` (case-file cascade, content-inspector, recon, hunter-scope, metrics+ledger). The human triggers the full 56-Q run.
 - Selection/ranking between grounded candidates is **Plan C's job** — this plan only makes candidates durable, verbatim, and auditable. No adjudicator logic here.
-- Flags: ledger, handoff, case file default ON (they are the v1.3 fix under measurement, vs run_1.2 baseline via `compare.py`); `--recon` and `--hints` default OFF.
+- Flags: ledger, handoff, case file default ON (they are the v0.3 fix under measurement, vs run_0.2 baseline via `compare.py`); `--recon` and `--hints` default OFF.
 - No new dependencies. No change to the scoring/submit path except the explicit hint-cost deduction.
-- Success metrics for the eventual full run: `failed_delegations` trending toward v1.1's ~0 (run_1.2: 62), Senior input tokens cut >50% (run_1.2: 28.2M), run cost back under ~$5 (run_1.2: $31.36).
+- Success metrics for the eventual full run: `failed_delegations` trending toward v0.1's ~0 (run_0.2: 62), Senior input tokens cut >50% (run_0.2: 28.2M), run cost back under ~$5 (run_0.2: $31.36).
 
 ---
 
@@ -32,13 +32,13 @@
 
 | Change | Why |
 |---|---|
-| **NEW Tasks 1–3: candidate ledger + joiner copy-contract + failure handoff** — now the highest-priority items | run_1.2: 9 questions / **5,100 pts** lost with a correct grounded candidate already sitting in a delegation while the joiner picked (or re-typed) something else (Q215 `BSTOLL-L.froth.ly`→`BSTOLL-L`, Q221 `nullweb_admin`→`web_admin`, Q331 `1367.875`→`1499.25`); 103/204 delegations cap-hit, 62 failed, each failure → blind fresh-context replan = **$26.53** of Senior input tokens |
-| **Dropped `python_calc` tool** | run_1.2 Q331: the worker doing *manual* arithmetic beat out the worker using SPL `perc25()/perc75()` — despite "using Splunk commands only" in the question. A calculator tool encourages exactly that violation. Metrics-Analyst now mandates SPL-native computation instead |
-| Specialist evidence updated | Q303 (password in cloud-init raw events; workers ID'd the sourcetype then capped before reading), Q330 (3 VPN users ranked, `mkraeusen` never enumerated — scope-first), replacing v1.1-era citations |
-| Changelog target `v1.2.md` → `v1.3.md` | v1.3 is the in-progress version |
+| **NEW Tasks 1–3: candidate ledger + joiner copy-contract + failure handoff** — now the highest-priority items | run_0.2: 9 questions / **5,100 pts** lost with a correct grounded candidate already sitting in a delegation while the joiner picked (or re-typed) something else (Q215 `BSTOLL-L.froth.ly`→`BSTOLL-L`, Q221 `nullweb_admin`→`web_admin`, Q331 `1367.875`→`1499.25`); 103/204 delegations cap-hit, 62 failed, each failure → blind fresh-context replan = **$26.53** of Senior input tokens |
+| **Dropped `python_calc` tool** | run_0.2 Q331: the worker doing *manual* arithmetic beat out the worker using SPL `perc25()/perc75()` — despite "using Splunk commands only" in the question. A calculator tool encourages exactly that violation. Metrics-Analyst now mandates SPL-native computation instead |
+| Specialist evidence updated | Q303 (password in cloud-init raw events; workers ID'd the sourcetype then capped before reading), Q330 (3 VPN users ranked, `mkraeusen` never enumerated — scope-first), replacing v0.1-era citations |
+| Changelog target `v0.2.md` → `v0.3.md` | v0.3 is the in-progress version |
 | Verifier references updated | Verifier now runs on a dedicated `pool.verifier_graph` (`VERIFIER_MAX_ITER=8` baked in, lives in `splunk_subagent.py`); `verifier_node` has explicit `verifier_failed` paths — hypothesis promotion (Task 8) hooks only the success path |
 | Validation policy: "2–4 Q smokes" → 5-question smoke set | current policy |
-| Hint policy evidence updated | run_1.2's honest-refusal profile (Q328: no evidence after 5 delegations; Q303) is exactly where a 10–25 pt hint converts a 0 into 475–990 |
+| Hint policy evidence updated | run_0.2's honest-refusal profile (Q328: no evidence after 5 delegations; Q303) is exactly where a 10–25 pt hint converts a 0 into 475–990 |
 
 Task order = priority order. If execution is cut short, Tasks 1–3 alone are worth landing.
 
@@ -48,34 +48,34 @@ Task order = priority order. If execution is cut short, Tasks 1–3 alone are wo
 
 | File | Responsibility | Change |
 |------|----------------|--------|
-| `agent/v1/case_file.py` | `CaseFile` store; candidate-ledger builders (`extract_candidate`, `build_ledger`, `snap_to_ledger`); `CASE UPDATES:` parser | **Create** |
-| `agent/v1/orchestrator.py` | Joiner renders ledger + copy contract + snap; `build_handoff_digest` + handoff wiring; planner digest; specialist task tags; verifier promotes findings | Modify |
-| `agent/v1/specialists.py` | Specialist prompt configs + `parse_specialist_tag` | **Create** |
-| `agent/v1/splunk_subagent.py` | Per-specialist worker graphs; select by tag | Modify |
-| `agent/v1/recon.py` | Phase-0 recon pass | **Create** |
-| `agent/v1/hint_client.py` | `HintBook` — load hints CSV | **Create** |
-| `agent/v1/run_all_v1.py` | Init case file; record ledger per question; recon + hint flags | Modify |
-| `agent/v1/tests/` | pytest per task | add files |
+| `agent/v0/case_file.py` | `CaseFile` store; candidate-ledger builders (`extract_candidate`, `build_ledger`, `snap_to_ledger`); `CASE UPDATES:` parser | **Create** |
+| `agent/v0/orchestrator.py` | Joiner renders ledger + copy contract + snap; `build_handoff_digest` + handoff wiring; planner digest; specialist task tags; verifier promotes findings | Modify |
+| `agent/v0/specialists.py` | Specialist prompt configs + `parse_specialist_tag` | **Create** |
+| `agent/v0/splunk_subagent.py` | Per-specialist worker graphs; select by tag | Modify |
+| `agent/v0/recon.py` | Phase-0 recon pass | **Create** |
+| `agent/v0/hint_client.py` | `HintBook` — load hints CSV | **Create** |
+| `agent/v0/run_all_v0.py` | Init case file; record ledger per question; recon + hint flags | Modify |
+| `agent/v0/tests/` | pytest per task | add files |
 
-Run all commands from project root. The case file lives at `<run_dir>/case_file.json` (survives resume, like `metrics.json`). Tests import bare module names — `agent/v1/tests/conftest.py` already puts `agent/` and `agent/v1/` on `sys.path`.
+Run all commands from project root. The case file lives at `<run_dir>/case_file.json` (survives resume, like `metrics.json`). Tests import bare module names — `agent/v0/tests/conftest.py` already puts `agent/` and `agent/v0/` on `sys.path`.
 
 ---
 
 ## Task 1: Candidate ledger (pure functions, the Plan-C substrate)
 
 **Files:**
-- Create: `agent/v1/case_file.py` (ledger half; `CaseFile` class arrives in Task 4)
-- Create: `agent/v1/tests/test_ledger.py`
+- Create: `agent/v0/case_file.py` (ledger half; `CaseFile` class arrives in Task 4)
+- Create: `agent/v0/tests/test_ledger.py`
 
 **Interfaces:**
 - Consumes: delegation record dicts as built in `executor_node` (`orchestrator.py:380` — keys `answer`, `status`, `worker`, `spl_used`, `sourcetypes`, `iterations`, `cap_hit`).
 - Produces: `extract_candidate(delegation: dict) -> dict | None`, `build_ledger(delegations: list) -> list[dict]`, `snap_to_ledger(answer: str, ledger: list) -> str` — used by Task 2's joiner wiring and recorded by the runner for Plan C.
 
-**Context:** run_1.2 lost 5,100 pts to selection/re-typing after the correct value was already in a delegation's answer. The ledger records each delegation's **verbatim** FINAL/PARTIAL value + evidence + SPL at capture time. The joiner then copies, never re-types. Snap is deliberately narrow: it restores byte-exact form only when the joiner's pick case-insensitively equals a ledger value — it never *changes* which value was picked (prefix/superset arbitration like Q215's FQDN-vs-short-hostname is a ranking judgment, i.e. Plan C).
+**Context:** run_0.2 lost 5,100 pts to selection/re-typing after the correct value was already in a delegation's answer. The ledger records each delegation's **verbatim** FINAL/PARTIAL value + evidence + SPL at capture time. The joiner then copies, never re-types. Snap is deliberately narrow: it restores byte-exact form only when the joiner's pick case-insensitively equals a ledger value — it never *changes* which value was picked (prefix/superset arbitration like Q215's FQDN-vs-short-hostname is a ranking judgment, i.e. Plan C).
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_ledger.py`:
+Create `agent/v0/tests/test_ledger.py`:
 
 ```python
 from case_file import extract_candidate, build_ledger, snap_to_ledger
@@ -128,21 +128,21 @@ def test_snap_never_changes_a_different_value():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_ledger.py -v`
+Run: `python -m pytest agent/v0/tests/test_ledger.py -v`
 Expected: FAIL — no `case_file` module.
 
 - [ ] **Step 3: Implement the ledger half of `case_file.py`**
 
-Create `agent/v1/case_file.py`:
+Create `agent/v0/case_file.py`:
 
 ```python
 #!/usr/bin/env python3
 """
-Candidate ledger + (Task 4) case-file store for the v1 SH.
+Candidate ledger + (Task 4) case-file store for the v0 SH.
 
 Ledger: every delegation's FINAL/PARTIAL ANSWER value is captured VERBATIM at
 delegation time, with its evidence and SPL. The joiner chooses FROM the ledger
-and copies — never re-types. run_1.2 lost 5,100 pts to values that existed in
+and copies — never re-types. run_0.2 lost 5,100 pts to values that existed in
 a worker's answer and were mangled or bypassed at synthesis time (Q215
 BSTOLL-L.froth.ly -> BSTOLL-L, Q221 nullweb_admin -> web_admin, Q331
 1367.875 -> 1499.25). The ledger is also Plan C's adjudication input.
@@ -214,16 +214,16 @@ def render_ledger(ledger: list) -> str:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_ledger.py -v`
+Run: `python -m pytest agent/v0/tests/test_ledger.py -v`
 Expected: 6 passed.
 
 - [ ] **Step 5: Changelog + commit**
 
-Add to `docs/version_architecture/v1/v1.3.md` changelog: "Plan B Task 1: candidate ledger (`case_file.py`) — verbatim per-delegation value + evidence + SPL, dedupe, narrow snap-to-verbatim."
+Add to `docs/version_architecture/v0/v0.3.md` changelog: "Plan B Task 1: candidate ledger (`case_file.py`) — verbatim per-delegation value + evidence + SPL, dedupe, narrow snap-to-verbatim."
 
 ```bash
-git add agent/v1/case_file.py agent/v1/tests/test_ledger.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): candidate ledger — verbatim capture, dedupe, snap-to-verbatim"
+git add agent/v0/case_file.py agent/v0/tests/test_ledger.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): candidate ledger — verbatim capture, dedupe, snap-to-verbatim"
 ```
 
 ---
@@ -231,9 +231,9 @@ git commit -m "feat(v1.3-planB): candidate ledger — verbatim capture, dedupe, 
 ## Task 2: Joiner chooses FROM the ledger (copy, never re-type)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`JOINER_SYSTEM_PROMPT`, `joiner_node`)
-- Modify: `agent/v1/run_all_v1.py` (record ledger per question)
-- Create: `agent/v1/tests/test_joiner_ledger.py`
+- Modify: `agent/v0/orchestrator.py` (`JOINER_SYSTEM_PROMPT`, `joiner_node`)
+- Modify: `agent/v0/run_all_v0.py` (record ledger per question)
+- Create: `agent/v0/tests/test_joiner_ledger.py`
 
 **Interfaces:**
 - Consumes: `build_ledger`, `render_ledger`, `snap_to_ledger` from Task 1; `ctx.q_delegations` (all rounds' delegation records).
@@ -243,7 +243,7 @@ git commit -m "feat(v1.3-planB): candidate ledger — verbatim capture, dedupe, 
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_joiner_ledger.py`:
+Create `agent/v0/tests/test_joiner_ledger.py`:
 
 ```python
 from case_file import build_ledger, render_ledger, snap_to_ledger
@@ -271,11 +271,11 @@ def test_empty_delegations_render_empty():
 
 - [ ] **Step 2: Run tests** (these exercise Task-1 code plus `render_ledger`; if all pass immediately, proceed)
 
-Run: `python -m pytest agent/v1/tests/test_joiner_ledger.py -v`
+Run: `python -m pytest agent/v0/tests/test_joiner_ledger.py -v`
 
 - [ ] **Step 3: Wire into `joiner_node`**
 
-In `agent/v1/orchestrator.py`:
+In `agent/v0/orchestrator.py`:
 
 1. Import at top (with the other local imports, after `from grounding import ...`):
 
@@ -320,7 +320,7 @@ constraints, and copy it exactly.
 
 - [ ] **Step 4: Record the ledger for Plan C**
 
-In `agent/v1/run_all_v1.py`, import `from case_file import build_ledger` and add one key to the per-question results dict (line ~407, next to `"delegations"`):
+In `agent/v0/run_all_v0.py`, import `from case_file import build_ledger` and add one key to the per-question results dict (line ~407, next to `"delegations"`):
 
 ```python
             "candidate_ledger": build_ledger(ctx.q_delegations),
@@ -328,21 +328,21 @@ In `agent/v1/run_all_v1.py`, import `from case_file import build_ledger` and add
 
 - [ ] **Step 5: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -q` — expect 77 + new, all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import orchestrator; print('ok')"`
+Run: `python -m pytest agent/v0/tests/ -q` — expect 77 + new, all green.
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import orchestrator; print('ok')"`
 
 - [ ] **Step 6: Micro-smoke — the re-typing class**
 
-Run: `python agent/v1/run_all_v1.py --ids Q221`
+Run: `python agent/v0/run_all_v0.py --ids Q221`
 Expected: completes; `log/temp/<ts>/questions/Q221.json` contains `candidate_ledger`; report whether the joiner message showed a CANDIDATES block and whether the submitted value is byte-identical to a ledger entry.
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 2: joiner renders candidate ledger, copy contract in prompt, deterministic snap-to-verbatim before the grounding gate; runner records `candidate_ledger` per question."
+v0.3.md changelog: "Plan B Task 2: joiner renders candidate ledger, copy contract in prompt, deterministic snap-to-verbatim before the grounding gate; runner records `candidate_ledger` per question."
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/run_all_v1.py agent/v1/tests/test_joiner_ledger.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): joiner copies from candidate ledger, never re-types"
+git add agent/v0/orchestrator.py agent/v0/run_all_v0.py agent/v0/tests/test_joiner_ledger.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): joiner copies from candidate ledger, never re-types"
 ```
 
 ---
@@ -350,18 +350,18 @@ git commit -m "feat(v1.3-planB): joiner copies from candidate ledger, never re-t
 ## Task 3: Failure handoff (the cost lever)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`build_handoff_digest`, `DelegationContext`, `executor_node`, `joiner_node`)
-- Create: `agent/v1/tests/test_handoff.py`
+- Modify: `agent/v0/orchestrator.py` (`build_handoff_digest`, `DelegationContext`, `executor_node`, `joiner_node`)
+- Create: `agent/v0/tests/test_handoff.py`
 
 **Interfaces:**
 - Consumes: delegation record dicts (same shape as Task 1).
 - Produces: `build_handoff_digest(record: dict) -> str`; `ctx.q_handoffs: list[str]` (reset per question); handoff text appended to replacement-worker subquestions and to the joiner message.
 
-**Context:** run_1.2's $26.53 Senior burn: 62 failed + 103 cap-hit delegations, each triggering a REPLAN whose fresh workers re-ran the same discovery searches from zero. The handoff digest tells worker #2 what was already tried (sourcetypes, SPL) and where the trail went cold, so it resumes the hunt instead of restarting it. Target: `failed_delegations` → ~0, Senior input tokens −50%.
+**Context:** run_0.2's $26.53 Senior burn: 62 failed + 103 cap-hit delegations, each triggering a REPLAN whose fresh workers re-ran the same discovery searches from zero. The handoff digest tells worker #2 what was already tried (sourcetypes, SPL) and where the trail went cold, so it resumes the hunt instead of restarting it. Target: `failed_delegations` → ~0, Senior input tokens −50%.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_handoff.py`:
+Create `agent/v0/tests/test_handoff.py`:
 
 ```python
 from orchestrator import build_handoff_digest
@@ -400,12 +400,12 @@ def test_digest_labels_cap_hit():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_handoff.py -v`
+Run: `python -m pytest agent/v0/tests/test_handoff.py -v`
 Expected: FAIL — no `build_handoff_digest`.
 
 - [ ] **Step 3: Implement digest + context plumbing**
 
-In `agent/v1/orchestrator.py`, add module-level (near `substitute_deps`):
+In `agent/v0/orchestrator.py`, add module-level (near `substitute_deps`):
 
 ```python
 HANDOFF_MAX_CHARS = 1500
@@ -415,7 +415,7 @@ HANDOFF_KEEP      = 3      # most recent digests injected per question
 def build_handoff_digest(record: dict) -> str:
     """Structured handoff for the worker that replaces a failed/too_big/cap-hit
     delegation: what was tried, what to not repeat, where the trail went cold.
-    run_1.2 burned $26.53 on replacement workers re-running discovery from zero.
+    run_0.2 burned $26.53 on replacement workers re-running discovery from zero.
     """
     label = record.get("status", "?")
     if record.get("cap_hit"):
@@ -482,20 +482,20 @@ and include `handoff_block` in `joiner_msg_text` between the ledger block and th
 
 - [ ] **Step 5: Full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
 
 - [ ] **Step 6: Micro-smoke — the cap-out-then-replan class**
 
-Run: `python agent/v1/run_all_v1.py --ids Q303`
+Run: `python agent/v0/run_all_v0.py --ids Q303`
 Expected: completes. In the log, if any delegation fails/caps: report whether the next round's worker subquestion contained "CONTEXT FROM PRIOR ATTEMPTS" and whether its SPL avoided repeating the digest's queries. (Correctness on Q303 not required — the handoff appearing and changing worker behavior is the signal.)
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 3: failure handoff — failed/too_big/cap-hit delegations emit a bounded digest (sourcetypes, SPL-do-not-repeat, trail tail) injected into replacement-worker subquestions and the joiner's replan context."
+v0.3.md changelog: "Plan B Task 3: failure handoff — failed/too_big/cap-hit delegations emit a bounded digest (sourcetypes, SPL-do-not-repeat, trail tail) injected into replacement-worker subquestions and the joiner's replan context."
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_handoff.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): failure handoff — replacement workers resume, not restart"
+git add agent/v0/orchestrator.py agent/v0/tests/test_handoff.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): failure handoff — replacement workers resume, not restart"
 ```
 
 ---
@@ -503,19 +503,19 @@ git commit -m "feat(v1.3-planB): failure handoff — replacement workers resume,
 ## Task 4: CaseFile store + planner digest + CASE UPDATES
 
 **Files:**
-- Modify: `agent/v1/case_file.py` (add the `CaseFile` class + `parse_case_updates`)
-- Modify: `agent/v1/orchestrator.py`, `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_case_file.py`, `agent/v1/tests/test_case_integration.py`
+- Modify: `agent/v0/case_file.py` (add the `CaseFile` class + `parse_case_updates`)
+- Modify: `agent/v0/orchestrator.py`, `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_case_file.py`, `agent/v0/tests/test_case_integration.py`
 
 **Interfaces:**
 - Consumes: nothing new.
 - Produces: `CaseFile(path)` with `.add_entity(etype, value, *, qid="")`, `.add_finding(claim, *, evidence="", source_qid="", status="hypothesis", confidence=0.5) -> int`, `.get_finding(fid) -> dict`, `.iter_findings() -> list`, `.set_status(fid, status)`, `.render_digest(*, max_chars=4000) -> str`; `parse_case_updates(text) -> list[dict]`; `apply_case_updates(case_file, joiner_text, *, source_qid) -> int` in orchestrator; `DelegationContext(pool, logger, case_file=None, use_case_file=True)`.
 
-**Context:** cross-question memory today is the SH's chat thread, windowed to `MAX_HISTORY_MSGS=24` (~3–5 questions visible) — older findings silently fall out, and wrong verdicts propagate untagged (v1.1: Q210→Q216 cascade). The case file is a compact, confidence-tagged store injected into the planner; carried-forward claims arrive as `hypothesis` until the Verifier promotes them (Task 8).
+**Context:** cross-question memory today is the SH's chat thread, windowed to `MAX_HISTORY_MSGS=24` (~3–5 questions visible) — older findings silently fall out, and wrong verdicts propagate untagged (v0.1: Q210→Q216 cascade). The case file is a compact, confidence-tagged store injected into the planner; carried-forward claims arrive as `hypothesis` until the Verifier promotes them (Task 8).
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_case_file.py`:
+Create `agent/v0/tests/test_case_file.py`:
 
 ```python
 from case_file import CaseFile, parse_case_updates
@@ -571,12 +571,12 @@ def test_parse_case_updates_absent_returns_empty():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_case_file.py -v`
+Run: `python -m pytest agent/v0/tests/test_case_file.py -v`
 Expected: FAIL — no `CaseFile` in `case_file`.
 
 - [ ] **Step 3: Add `CaseFile` + parser to `case_file.py`**
 
-Append to `agent/v1/case_file.py`:
+Append to `agent/v0/case_file.py`:
 
 ```python
 import json
@@ -691,11 +691,11 @@ def parse_case_updates(text: str) -> list[dict]:
     return updates
 ```
 
-Run: `python -m pytest agent/v1/tests/test_case_file.py -v` — 6 passed.
+Run: `python -m pytest agent/v0/tests/test_case_file.py -v` — 6 passed.
 
 - [ ] **Step 4: Integration — `apply_case_updates`, planner digest, context, runner**
 
-Create `agent/v1/tests/test_case_integration.py`:
+Create `agent/v0/tests/test_case_integration.py`:
 
 ```python
 from case_file import CaseFile
@@ -719,7 +719,7 @@ def test_apply_case_updates_noop_when_absent(tmp_path):
     assert apply_case_updates(cf, "FINAL ANSWER: x", source_qid="Q1") == 0
 ```
 
-Run it, verify FAIL (no `apply_case_updates`). Then in `agent/v1/orchestrator.py`:
+Run it, verify FAIL (no `apply_case_updates`). Then in `agent/v0/orchestrator.py`:
 
 1. Extend the Task-2 import line: `from case_file import build_ledger, render_ledger, snap_to_ledger, CaseFile, parse_case_updates`.
 
@@ -774,7 +774,7 @@ Only include facts a future question could reuse. Mark [verified] only if a
 worker proved it with a query this round.
 ```
 
-7. In `agent/v1/run_all_v1.py`, after `logger = RunLogger(...)` (line ~243):
+7. In `agent/v0/run_all_v0.py`, after `logger = RunLogger(...)` (line ~243):
 
 ```python
     case_file = CaseFile(os.path.join(logger.run_dir, "case_file.json"))
@@ -784,21 +784,21 @@ with `from case_file import CaseFile, build_ledger` at the top, and change `ctx 
 
 - [ ] **Step 5: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import orchestrator; print('ok')"`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import orchestrator; print('ok')"`
 
 - [ ] **Step 6: Micro-smoke — the cascade pair**
 
-Run: `python agent/v1/run_all_v1.py --ids Q210,Q216`
+Run: `python agent/v0/run_all_v0.py --ids Q210,Q216`
 Expected: `log/temp/<ts>/case_file.json` exists with entities/findings after Q210; report whether Q216's planner context contained the CASE FILE block and with which status markers.
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 4: CaseFile store (entities + confidence-tagged findings, bounded digest) injected into planner; joiner emits CASE UPDATES; persisted at `<run_dir>/case_file.json`."
+v0.3.md changelog: "Plan B Task 4: CaseFile store (entities + confidence-tagged findings, bounded digest) injected into planner; joiner emits CASE UPDATES; persisted at `<run_dir>/case_file.json`."
 
 ```bash
-git add agent/v1/case_file.py agent/v1/orchestrator.py agent/v1/run_all_v1.py agent/v1/tests/test_case_file.py agent/v1/tests/test_case_integration.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): case-file digest in planner + CASE UPDATES from joiner"
+git add agent/v0/case_file.py agent/v0/orchestrator.py agent/v0/run_all_v0.py agent/v0/tests/test_case_file.py agent/v0/tests/test_case_integration.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): case-file digest in planner + CASE UPDATES from joiner"
 ```
 
 ---
@@ -806,27 +806,27 @@ git commit -m "feat(v1.3-planB): case-file digest in planner + CASE UPDATES from
 ## Task 5: Specialist workers (HUNTER / CONTENT / METRICS)
 
 **Files:**
-- Create: `agent/v1/specialists.py`
-- Modify: `agent/v1/splunk_subagent.py`, `agent/v1/orchestrator.py`
-- Create: `agent/v1/tests/test_specialists.py`
+- Create: `agent/v0/specialists.py`
+- Modify: `agent/v0/splunk_subagent.py`, `agent/v0/orchestrator.py`
+- Create: `agent/v0/tests/test_specialists.py`
 
 **Interfaces:**
 - Consumes: `agent_mod.create_agent(...)` (existing), `ESCALATE_INSTRUCTIONS`, `web_lookup`, `iter_budget`/`MAX_ITER`/`HIGH_VALUE_THRESHOLD`.
 - Produces: `SPECIALISTS: dict[str, str]`, `parse_specialist_tag(subquestion: str) -> str`; `SplunkWorkerPool.run_senior` selects the specialist graph from the task tag.
 
-**Context (run_1.2 evidence, one row per specialist):**
+**Context (run_0.2 evidence, one row per specialist):**
 
-| Specialist | Config delta | run_1.2 evidence |
+| Specialist | Config delta | run_0.2 evidence |
 |---|---|---|
 | **Hunter** (default) | scope-first rule: enumerate ALL hosts/users with `stats by` before filtering | Q208 (`chrome#5` never found — searched one host), Q211 (1 of 6 mining destinations), Q330 (3 VPN users ranked, `mkraeusen` never enumerated) — 1,200 pts |
 | **Content-Inspector** | drill to raw events FIRST, map sourcetypes second (`get_raw_events` is already a first-class tool from Plan A) | Q303 (password `ilovedavidverve` in cloud-init raw events; workers ID'd the sourcetype then capped), Q315, Q321, Q322, Q328 — 2,600 pts |
 | **Metrics-Analyst** | SPL-native stats (`perc25/perc75`, `eval`) mandatory; show formula + inputs; obey "using Splunk commands only" literally | Q206 (2.9348 mis-rounded), Q216 (duration eval chain never completed), Q224 (avg over wrong set), Q331 (manual Tukey beat the SPL `perc` worker) — 2,600 pts |
 
-**Deliberate deviation from the 2026-07-07 plan: no `python_calc` tool.** run_1.2's Q331 loss was caused by a worker computing fences manually instead of with SPL — a calculator invites exactly that. Metrics-Analyst mandates SPL-native computation instead.
+**Deliberate deviation from the 2026-07-07 plan: no `python_calc` tool.** run_0.2's Q331 loss was caused by a worker computing fences manually instead of with SPL — a calculator invites exactly that. Metrics-Analyst mandates SPL-native computation instead.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_specialists.py`:
+Create `agent/v0/tests/test_specialists.py`:
 
 ```python
 from specialists import parse_specialist_tag, SPECIALISTS
@@ -852,19 +852,19 @@ def test_all_specialists_have_prompt_text():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_specialists.py -v`
+Run: `python -m pytest agent/v0/tests/test_specialists.py -v`
 Expected: FAIL — no `specialists` module.
 
 - [ ] **Step 3: Implement `specialists.py`**
 
-Create `agent/v1/specialists.py`:
+Create `agent/v0/specialists.py`:
 
 ```python
 #!/usr/bin/env python3
 """
-Specialist worker roles: same v0 graph, different prompt emphasis. The planner
+Specialist worker roles: same v0.0.0 graph, different prompt emphasis. The planner
 tags each task [HUNTER]/[CONTENT]/[METRICS]; the pool picks the matching graph.
-run_1.2 evidence per role: docs/version_architecture/v1/v1.2_improvement_plans.md (B3).
+run_0.2 evidence per role: docs/version_architecture/v0/v0.2_improvement_plans.md (B3).
 """
 
 import re
@@ -904,12 +904,12 @@ def parse_specialist_tag(subquestion: str) -> str:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_specialists.py -v`
+Run: `python -m pytest agent/v0/tests/test_specialists.py -v`
 Expected: 4 passed.
 
 - [ ] **Step 5: Build specialist graphs + select by tag**
 
-In `agent/v1/splunk_subagent.py`:
+In `agent/v0/splunk_subagent.py`:
 
 1. Import: `from specialists import SPECIALISTS, parse_specialist_tag`.
 
@@ -940,7 +940,7 @@ In `agent/v1/splunk_subagent.py`:
                          subquestion, parent_qid, idx, max_iter=budget)
 ```
 
-4. In `agent/v1/orchestrator.py`, append to `PLANNER_SYSTEM_PROMPT` RULES:
+4. In `agent/v0/orchestrator.py`, append to `PLANNER_SYSTEM_PROMPT` RULES:
 
 ```
 - Prefix every task with a specialist tag: [HUNTER] for entity hunts across
@@ -952,21 +952,21 @@ In `agent/v1/splunk_subagent.py`:
 
 - [ ] **Step 6: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import splunk_subagent, specialists; print('ok')"`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import splunk_subagent, specialists; print('ok')"`
 
 - [ ] **Step 7: Micro-smoke — a metrics question**
 
-Run: `python agent/v1/run_all_v1.py --ids Q331`
+Run: `python agent/v0/run_all_v0.py --ids Q331`
 Expected: completes; report whether the planner tagged a `[METRICS]` task, whether the worker's answer shows an SPL formula (`perc25`/`perc75`), and whether the ledger captured the SPL worker's value verbatim.
 
 - [ ] **Step 8: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 5: specialist workers — hunter (scope-first) / content-inspector (raw-events-first) / metrics-analyst (SPL-native arithmetic, no python_calc by design); planner tags tasks, pool selects graph."
+v0.3.md changelog: "Plan B Task 5: specialist workers — hunter (scope-first) / content-inspector (raw-events-first) / metrics-analyst (SPL-native arithmetic, no python_calc by design); planner tags tasks, pool selects graph."
 
 ```bash
-git add agent/v1/specialists.py agent/v1/splunk_subagent.py agent/v1/orchestrator.py agent/v1/tests/test_specialists.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): specialist workers (hunter/content/metrics) selected by task tag"
+git add agent/v0/specialists.py agent/v0/splunk_subagent.py agent/v0/orchestrator.py agent/v0/tests/test_specialists.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): specialist workers (hunter/content/metrics) selected by task tag"
 ```
 
 ---
@@ -974,19 +974,19 @@ git commit -m "feat(v1.3-planB): specialist workers (hunter/content/metrics) sel
 ## Task 6: Phase-0 recon pass (`--recon`, default off)
 
 **Files:**
-- Create: `agent/v1/recon.py`
-- Modify: `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_recon.py`
+- Create: `agent/v0/recon.py`
+- Modify: `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_recon.py`
 
 **Interfaces:**
 - Consumes: `CaseFile` (Task 4), `orchestrator.MAX_WORKERS` and `orchestrator._run_senior`, `ctx.logger.next_worker`.
 - Produces: `RECON_TASKS: list[str]`, `seed_case_from_recon(case_file, results) -> int`, `run_recon(ctx) -> list[dict]`.
 
-**Context:** build the incident skeleton once before the question loop. run_1.2 re-confirmed the need: Q310 (500) chased the wave-2 `.lnk` artifact instead of the wave-1 `Frothly-Brewery-Financial-Planning-FY2019-Draft.xlsm` phishing attachment (wave confusion), Q329 (1000) answered `Beer` from the wrong uploaded file (no "which files were uploaded, by whom, what's in them" narrative). ~$0.10 at GLM pricing.
+**Context:** build the incident skeleton once before the question loop. run_0.2 re-confirmed the need: Q310 (500) chased the wave-2 `.lnk` artifact instead of the wave-1 `Frothly-Brewery-Financial-Planning-FY2019-Draft.xlsm` phishing attachment (wave confusion), Q329 (1000) answered `Beer` from the wrong uploaded file (no "which files were uploaded, by whom, what's in them" narrative). ~$0.10 at GLM pricing.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_recon.py`:
+Create `agent/v0/tests/test_recon.py`:
 
 ```python
 from case_file import CaseFile
@@ -1017,18 +1017,18 @@ def test_seed_skips_failed_results(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_recon.py -v`
+Run: `python -m pytest agent/v0/tests/test_recon.py -v`
 Expected: FAIL — no `recon` module.
 
 - [ ] **Step 3: Implement `recon.py`**
 
-Create `agent/v1/recon.py`:
+Create `agent/v0/recon.py`:
 
 ```python
 #!/usr/bin/env python3
 """
 Phase-0 recon: build the incident skeleton once, before the question loop,
-and seed the case file as verified baseline. run_1.2: Q310 chased the wrong
+and seed the case file as verified baseline. run_0.2: Q310 chased the wrong
 phishing wave, Q329 read the wrong uploaded file — both are scoping errors a
 one-time incident narrative prevents.
 """
@@ -1100,12 +1100,12 @@ def run_recon(ctx) -> list[dict]:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_recon.py -v`
+Run: `python -m pytest agent/v0/tests/test_recon.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 5: Wire `--recon` into the runner**
 
-In `agent/v1/run_all_v1.py`:
+In `agent/v0/run_all_v0.py`:
 
 1. Add the flag: `parser.add_argument("--recon", action="store_true", help="Run the Phase-0 recon pass before the question loop (seeds the case file).")`
 2. After `ctx = DelegationContext(...)` and the case-file init, before the question loop:
@@ -1128,17 +1128,17 @@ In `agent/v1/run_all_v1.py`:
 
 - [ ] **Step 6: Full suite + micro-smoke**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python agent/v1/run_all_v1.py --ids Q329 --recon`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python agent/v0/run_all_v0.py --ids Q329 --recon`
 Expected: recon runs first (report seeded count), then Q329; report whether Q329's planner CASE FILE block contained recon findings. (Slow — best effort; unit tests are the gate.)
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 6: Phase-0 recon (`--recon`, default off) — 5 parallel skeleton tasks seed the case file as verified baseline; resume-safe (skips if RECON findings exist)."
+v0.3.md changelog: "Plan B Task 6: Phase-0 recon (`--recon`, default off) — 5 parallel skeleton tasks seed the case file as verified baseline; resume-safe (skips if RECON findings exist)."
 
 ```bash
-git add agent/v1/recon.py agent/v1/run_all_v1.py agent/v1/tests/test_recon.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): phase-0 recon pass seeds verified case-file baseline (--recon)"
+git add agent/v0/recon.py agent/v0/run_all_v0.py agent/v0/tests/test_recon.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): phase-0 recon pass seeds verified case-file baseline (--recon)"
 ```
 
 ---
@@ -1146,19 +1146,19 @@ git commit -m "feat(v1.3-planB): phase-0 recon pass seeds verified case-file bas
 ## Task 7: Hint economy (`--hints`, default off)
 
 **Files:**
-- Create: `agent/v1/hint_client.py`
-- Modify: `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_hint_client.py`
+- Create: `agent/v0/hint_client.py`
+- Modify: `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_hint_client.py`
 
 **Interfaces:**
 - Consumes: `botsv3content/ctf_hints.csv` (97 hints, columns `Hint,HintCost,HintNumber,Number`), `is_grounded` (existing import in the runner), `run_sh` (existing).
 - Produces: `HintBook(hints_csv)` with `.get_hint(number, hint_number) -> dict | None` (`{"number", "hint_number", "text", "cost"}`), `.count_for(number) -> int`; `hint_cost` recorded in the results record + metrics row and deducted from `pts_earned`.
 
-**Context:** 97 official hints unused after three full runs. Hint cost 10–25 pts vs 100–1000-pt questions; a wrong answer scores 0, a hint-assisted correct one scores 75–990. run_1.2's honest-refusal questions (Q328: no evidence after 5 delegations; Q303 refusal) are exactly the profile where a hint converts a 0 into 475–990. Policy: ungrounded answer AND ≥500 pts → buy hint 1 (one hint max per question), one extra `run_sh` pass with the hint embedded, deduct cost honestly.
+**Context:** 97 official hints unused after three full runs. Hint cost 10–25 pts vs 100–1000-pt questions; a wrong answer scores 0, a hint-assisted correct one scores 75–990. run_0.2's honest-refusal questions (Q328: no evidence after 5 delegations; Q303 refusal) are exactly the profile where a hint converts a 0 into 475–990. Policy: ungrounded answer AND ≥500 pts → buy hint 1 (one hint max per question), one extra `run_sh` pass with the hint embedded, deduct cost honestly.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_hint_client.py`:
+Create `agent/v0/tests/test_hint_client.py`:
 
 ```python
 import csv
@@ -1191,12 +1191,12 @@ def test_missing_hint_returns_none(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_hint_client.py -v`
+Run: `python -m pytest agent/v0/tests/test_hint_client.py -v`
 Expected: FAIL — no `hint_client`.
 
 - [ ] **Step 3: Implement `hint_client.py`**
 
-Create `agent/v1/hint_client.py`:
+Create `agent/v0/hint_client.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -1241,12 +1241,12 @@ class HintBook:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_hint_client.py -v`
+Run: `python -m pytest agent/v0/tests/test_hint_client.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 5: Hint policy in the runner**
 
-In `agent/v1/run_all_v1.py`:
+In `agent/v0/run_all_v0.py`:
 
 1. Flag: `parser.add_argument("--hints", action="store_true", help="Buy official hint 1 on ungrounded >=500pt answers (cost deducted from earned points).")`
 2. Import `from hint_client import HintBook` at the top; init after the scoreboard: `hint_book = HintBook(os.path.join(PROJECT_ROOT, "botsv3content", "ctf_hints.csv")) if args.hints else None`.
@@ -1283,17 +1283,17 @@ In `agent/v1/run_all_v1.py`:
 
 - [ ] **Step 6: Full suite + micro-smoke**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python agent/v1/run_all_v1.py --ids Q328 --hints`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python agent/v0/run_all_v0.py --ids Q328 --hints`
 Expected: if the answer comes back ungrounded/refused, a `hint_bought` event fires and the cost deduction lands; report bought-or-not, cost, and net earned.
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 7: hint economy (`--hints`, default off) — ungrounded ≥500pt answer buys official hint 1, one re-plan pass, cost deducted from earned points and recorded in metrics."
+v0.3.md changelog: "Plan B Task 7: hint economy (`--hints`, default off) — ungrounded ≥500pt answer buys official hint 1, one re-plan pass, cost deducted from earned points and recorded in metrics."
 
 ```bash
-git add agent/v1/hint_client.py agent/v1/run_all_v1.py agent/v1/tests/test_hint_client.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): hint economy — buy hint 1 on ungrounded >=500pt answers (--hints)"
+git add agent/v0/hint_client.py agent/v0/run_all_v0.py agent/v0/tests/test_hint_client.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): hint economy — buy hint 1 on ungrounded >=500pt answers (--hints)"
 ```
 
 ---
@@ -1301,18 +1301,18 @@ git commit -m "feat(v1.3-planB): hint economy — buy hint 1 on ungrounded >=500
 ## Task 8: Verifier promotes/refutes case-file findings
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`promote_from_verdict` + call in `verifier_node`)
-- Create: `agent/v1/tests/test_verifier_promotes.py`
+- Modify: `agent/v0/orchestrator.py` (`promote_from_verdict` + call in `verifier_node`)
+- Create: `agent/v0/tests/test_verifier_promotes.py`
 
 **Interfaces:**
 - Consumes: `CaseFile.iter_findings()` / `.set_status()` (Task 4), `parse_verifier_verdict` output (`{"verdict": "confirmed"|"refuted", "correction": str}`).
 - Produces: `promote_from_verdict(case_file, answer: str, verdict: dict) -> None`.
 
-**Context:** closes the cascade loop — when the Verifier (now on its dedicated `verifier_graph`, cap actually enforced since v1.3 Task 1) confirms/refutes a ≥500-pt answer, reflect that into the case file so later questions inherit the corrected status. Hook ONLY the success path of `verifier_node` — the `verifier_failed` paths (crash, failed/too_big/cap-hit) must not touch the case file.
+**Context:** closes the cascade loop — when the Verifier (now on its dedicated `verifier_graph`, cap actually enforced since v0.3 Task 1) confirms/refutes a ≥500-pt answer, reflect that into the case file so later questions inherit the corrected status. Hook ONLY the success path of `verifier_node` — the `verifier_failed` paths (crash, failed/too_big/cap-hit) must not touch the case file.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_verifier_promotes.py`:
+Create `agent/v0/tests/test_verifier_promotes.py`:
 
 ```python
 from case_file import CaseFile
@@ -1345,12 +1345,12 @@ def test_empty_answer_is_noop(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_verifier_promotes.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier_promotes.py -v`
 Expected: FAIL — no `promote_from_verdict`.
 
 - [ ] **Step 3: Implement + wire**
 
-Add to `agent/v1/orchestrator.py` (module level):
+Add to `agent/v0/orchestrator.py` (module level):
 
 ```python
 def promote_from_verdict(case_file, answer: str, verdict: dict) -> None:
@@ -1376,16 +1376,16 @@ In `verifier_node`, right after `verdict = parse_verifier_verdict(result.get("an
 
 - [ ] **Step 4: Run tests, verify they pass; full suite**
 
-Run: `python -m pytest agent/v1/tests/test_verifier_promotes.py -v` — 3 passed.
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
+Run: `python -m pytest agent/v0/tests/test_verifier_promotes.py -v` — 3 passed.
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
 
 - [ ] **Step 5: Changelog + commit**
 
-v1.3.md changelog: "Plan B Task 8: Verifier promotes/refutes case-file findings on its success path (verifier_failed paths untouched) — closes the Q210→Q216 cascade loop."
+v0.3.md changelog: "Plan B Task 8: Verifier promotes/refutes case-file findings on its success path (verifier_failed paths untouched) — closes the Q210→Q216 cascade loop."
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_verifier_promotes.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planB): verifier promotes/refutes case-file findings"
+git add agent/v0/orchestrator.py agent/v0/tests/test_verifier_promotes.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planB): verifier promotes/refutes case-file findings"
 ```
 
 ---
@@ -1396,12 +1396,12 @@ git commit -m "feat(v1.3-planB): verifier promotes/refutes case-file findings"
 
 - [ ] **Step 1: Full unit suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 77 baseline + all Plan-B tests, zero failures.
 
 - [ ] **Step 2: The 5-question smoke**
 
-Run: `python agent/v1/run_all_v1.py --ids Q216,Q303,Q329,Q330,Q331 --recon --hints`
+Run: `python agent/v0/run_all_v0.py --ids Q216,Q303,Q329,Q330,Q331 --recon --hints`
 
 Report, per feature (correctness is a bonus, mechanism-firing is the gate):
 
@@ -1417,14 +1417,14 @@ Also report from the run summary: `failed_delegations`, per-role token usage, an
 
 - [ ] **Step 3: Hand off to the human**
 
-Per CLAUDE.md: the human triggers the full 56-Q run and provides the dollar cost afterward. On full-run completion: fold the v1.3.md changelog into a "What changed vs v1.2" section, write `docs/scoreboard_result/v1/v1.3.md` (including wrong questions), compare against run_1.2 with `compare.py` — success = `failed_delegations` near 0, Senior input tokens < 14M (−50%), cost < ~$5, score ≥ 26/56 with the 5,100-pt selection block now auditable in `candidate_ledger` for Plan C.
+Per CLAUDE.md: the human triggers the full 56-Q run and provides the dollar cost afterward. On full-run completion: fold the v0.3.md changelog into a "What changed vs v0.2" section, write `docs/scoreboard_result/v0/v0.3.md` (including wrong questions), compare against run_0.2 with `compare.py` — success = `failed_delegations` near 0, Senior input tokens < 14M (−50%), cost < ~$5, score ≥ 26/56 with the 5,100-pt selection block now auditable in `candidate_ledger` for Plan C.
 
 ---
 
 ## Done criteria
 
-- All tasks committed with per-task changelog lines in `docs/version_architecture/v1/v1.3.md`.
-- `python -m pytest agent/v1/tests/ -q` fully green.
+- All tasks committed with per-task changelog lines in `docs/version_architecture/v0/v0.3.md`.
+- `python -m pytest agent/v0/tests/ -q` fully green.
 - Ledger + handoff + case file default ON; `--recon`/`--hints` opt-in; no scoring-path change except the explicit hint-cost deduction.
 - `candidate_ledger` present in every `questions/<qid>.json` — Plan C's adjudicator input exists.
 - Whole-implementation review focus: (a) joiner/planner context stays bounded (ledger block + handoff digests + case digest are all char-capped); (b) case-file thread safety; (c) recon/hints resume-safe; (d) snap never substitutes a different value — only restores byte form.

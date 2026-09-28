@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the v1 multi-agent runner complete, machine-first observability — a canonical event stream, per-question/per-role cost+latency attribution, truthful worker-status labels, and an auto-rendered report — plus the P0 bugfixes that currently crash the next full run.
+**Goal:** Give the v0 multi-agent runner complete, machine-first observability — a canonical event stream, per-question/per-role cost+latency attribution, truthful worker-status labels, and an auto-rendered report — plus the P0 bugfixes that currently crash the next full run.
 
 **Architecture:** Add a thin append-only `EventLog` (JSONL) owned by `RunLogger`; extend `UsageTracker` to bucket usage by `(qid, role, model)` and expose stage timers; fix the status classifier and the `ext[...]` NameError in the runner; wrap the raw-SDK Extractor call so LangSmith sees it and restore per-run LangSmith project naming; add `make_report.py` that turns the event stream + metrics into human views. All changes are instrumentation only — no agent decision logic changes, so behavior on the scoreboard is unchanged and each task is smoke-testable with `--ids Q200,Q210`.
 
@@ -14,40 +14,40 @@
 
 | File | Responsibility | Change |
 |------|----------------|--------|
-| `agent/v1/event_log.py` | Append-only JSONL event stream + schema | **Create** |
-| `agent/v1/agent_logger.py` | Run dir mgmt; owns the `EventLog`; honor `SIEM_LOG_ROOT` | Modify |
-| `agent/v1/usage_tracker.py` | Bucket usage by `(qid, role, model)`; stage timers | Modify |
-| `agent/v1/splunk_subagent.py` | Truthful `_classify`; return `iterations`/`cap_hit` | Modify |
-| `agent/v1/run_all_v1.py` | Fix `ext` NameError; emit events; write `metrics.json`; split summary; LangSmith project name | Modify |
-| `agent/v1/extractor.py` | `@traceable` wrap so extractor shows in LangSmith | Modify |
-| `agent/v1/make_report.py` | Render `report.md` from `events.jsonl` + `metrics.json` | **Create** |
-| `agent/v1/tests/` | pytest tests for the above | **Create** |
+| `agent/v0/event_log.py` | Append-only JSONL event stream + schema | **Create** |
+| `agent/v0/agent_logger.py` | Run dir mgmt; owns the `EventLog`; honor `SIEM_LOG_ROOT` | Modify |
+| `agent/v0/usage_tracker.py` | Bucket usage by `(qid, role, model)`; stage timers | Modify |
+| `agent/v0/splunk_subagent.py` | Truthful `_classify`; return `iterations`/`cap_hit` | Modify |
+| `agent/v0/run_all_v0.py` | Fix `ext` NameError; emit events; write `metrics.json`; split summary; LangSmith project name | Modify |
+| `agent/v0/extractor.py` | `@traceable` wrap so extractor shows in LangSmith | Modify |
+| `agent/v0/make_report.py` | Render `report.md` from `events.jsonl` + `metrics.json` | **Create** |
+| `agent/v0/tests/` | pytest tests for the above | **Create** |
 
 Run all commands from the project root:
 `C:/Users/Lee023/OneDrive - National University of Singapore/Desktop/Project/SIEM Automation`
-Tests import modules from `agent/v1/`; add a `conftest.py` that puts `agent/` and `agent/v1/` on `sys.path` (mirrors how `run_all_v1.py` does it).
+Tests import modules from `agent/v0/`; add a `conftest.py` that puts `agent/` and `agent/v0/` on `sys.path` (mirrors how `run_all_v0.py` does it).
 
 ---
 
 ## Task 1: Test harness + P0 bugfixes (unblock the next run)
 
-**Why first:** `run_all_v1.py` currently references `ext["valid"]`/`ext["reason"]` (lines ~262-263) which were deleted when the extractor-validation node was removed — the next full run throws `NameError` on the first question. And `_classify` in `splunk_subagent.py` marks a delegation `solved` whenever the answer string is non-empty, even when the transcript ended mid-tool-call with no `FINAL ANSWER` (confirmed on Q330). Both must be fixed before any instrumentation is meaningful.
+**Why first:** `run_all_v0.py` currently references `ext["valid"]`/`ext["reason"]` (lines ~262-263) which were deleted when the extractor-validation node was removed — the next full run throws `NameError` on the first question. And `_classify` in `splunk_subagent.py` marks a delegation `solved` whenever the answer string is non-empty, even when the transcript ended mid-tool-call with no `FINAL ANSWER` (confirmed on Q330). Both must be fixed before any instrumentation is meaningful.
 
 **Files:**
-- Create: `agent/v1/tests/conftest.py`
-- Create: `agent/v1/tests/test_classify.py`
-- Modify: `agent/v1/splunk_subagent.py` (`_classify`, `_run` return dict)
-- Modify: `agent/v1/run_all_v1.py` (remove `ext[...]` references)
+- Create: `agent/v0/tests/conftest.py`
+- Create: `agent/v0/tests/test_classify.py`
+- Modify: `agent/v0/splunk_subagent.py` (`_classify`, `_run` return dict)
+- Modify: `agent/v0/run_all_v0.py` (remove `ext[...]` references)
 
 - [ ] **Step 1: Create the test conftest**
 
-Create `agent/v1/tests/conftest.py`:
+Create `agent/v0/tests/conftest.py`:
 
 ```python
 import os
 import sys
 
-AGENT_V1 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # agent/v1
+AGENT_V1 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # agent/v0
 AGENT    = os.path.dirname(AGENT_V1)                                    # agent
 for p in (AGENT, AGENT_V1):
     if p not in sys.path:
@@ -56,7 +56,7 @@ for p in (AGENT, AGENT_V1):
 
 - [ ] **Step 2: Write failing tests for the truthful classifier**
 
-Create `agent/v1/tests/test_classify.py`:
+Create `agent/v0/tests/test_classify.py`:
 
 ```python
 from splunk_subagent import _classify
@@ -81,12 +81,12 @@ def test_prose_without_final_answer_tag_is_failed():
 
 - [ ] **Step 3: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_classify.py -v`
+Run: `python -m pytest agent/v0/tests/test_classify.py -v`
 Expected: `test_prose_without_final_answer_tag_is_failed` FAILS (current code returns "solved"); the others may pass.
 
 - [ ] **Step 4: Fix `_classify`**
 
-In `agent/v1/splunk_subagent.py` replace the `_classify` function with:
+In `agent/v0/splunk_subagent.py` replace the `_classify` function with:
 
 ```python
 def _classify(answer: str) -> str:
@@ -111,12 +111,12 @@ def _classify(answer: str) -> str:
 
 - [ ] **Step 5: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_classify.py -v`
+Run: `python -m pytest agent/v0/tests/test_classify.py -v`
 Expected: 5 passed.
 
 - [ ] **Step 6: Add `iterations`/`cap_hit` to the worker result**
 
-In `agent/v1/splunk_subagent.py`, at the top add the MAX_ITER import:
+In `agent/v0/splunk_subagent.py`, at the top add the MAX_ITER import:
 
 ```python
 from splunk_agent import MAX_ITER
@@ -138,7 +138,7 @@ and add these two keys to the returned dict:
 
 - [ ] **Step 7: Fix the `ext[...]` NameError in the runner**
 
-In `agent/v1/run_all_v1.py`, in the `results.append({...})` block, delete these two lines:
+In `agent/v0/run_all_v0.py`, in the `results.append({...})` block, delete these two lines:
 
 ```python
             "extractor_valid":  ext["valid"],
@@ -149,14 +149,14 @@ In `agent/v1/run_all_v1.py`, in the `results.append({...})` block, delete these 
 
 - [ ] **Step 8: Smoke-check the runner imports and parses**
 
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import run_all_v1; import splunk_subagent; print('import ok')"`
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import run_all_v0; import splunk_subagent; print('import ok')"`
 Expected: `import ok` (no NameError, no ImportError).
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agent/v1/tests/conftest.py agent/v1/tests/test_classify.py agent/v1/splunk_subagent.py agent/v1/run_all_v1.py
-git commit -m "fix(v1): truthful worker status classifier + remove dead ext[] refs"
+git add agent/v0/tests/conftest.py agent/v0/tests/test_classify.py agent/v0/splunk_subagent.py agent/v0/run_all_v0.py
+git commit -m "fix(v0): truthful worker status classifier + remove dead ext[] refs"
 ```
 
 ---
@@ -164,12 +164,12 @@ git commit -m "fix(v1): truthful worker status classifier + remove dead ext[] re
 ## Task 2: EventLog — canonical append-only JSONL event stream
 
 **Files:**
-- Create: `agent/v1/event_log.py`
-- Create: `agent/v1/tests/test_event_log.py`
+- Create: `agent/v0/event_log.py`
+- Create: `agent/v0/tests/test_event_log.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_event_log.py`:
+Create `agent/v0/tests/test_event_log.py`:
 
 ```python
 import json
@@ -235,17 +235,17 @@ def test_concurrent_emit_is_line_safe(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_event_log.py -v`
+Run: `python -m pytest agent/v0/tests/test_event_log.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'event_log'`.
 
 - [ ] **Step 3: Implement `EventLog`**
 
-Create `agent/v1/event_log.py`:
+Create `agent/v0/event_log.py`:
 
 ```python
 #!/usr/bin/env python3
 """
-Canonical append-only event stream for a v1 multi-agent run.
+Canonical append-only event stream for a v0 multi-agent run.
 
 One JSON object per line (JSONL). This is the machine-first system of record:
 timeline.md and report.md are rendered views of it. Every event shares an
@@ -307,29 +307,29 @@ class EventLog:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_event_log.py -v`
+Run: `python -m pytest agent/v0/tests/test_event_log.py -v`
 Expected: 5 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/event_log.py agent/v1/tests/test_event_log.py
-git commit -m "feat(v1): add EventLog canonical JSONL event stream"
+git add agent/v0/event_log.py agent/v0/tests/test_event_log.py
+git commit -m "feat(v0): add EventLog canonical JSONL event stream"
 ```
 
 ---
 
 ## Task 3: RunLogger owns the EventLog + honor SIEM_LOG_ROOT
 
-**Why:** the ~30-min periodic crashes during run_1.1 were consistent with OneDrive syncing the run dir (logs + `sh_checkpoints.sqlite`) and locking files. Allow redirecting the log root to a non-synced path via env var, defaulting to today's behavior so nothing breaks if unset.
+**Why:** the ~30-min periodic crashes during run_0.1 were consistent with OneDrive syncing the run dir (logs + `sh_checkpoints.sqlite`) and locking files. Allow redirecting the log root to a non-synced path via env var, defaulting to today's behavior so nothing breaks if unset.
 
 **Files:**
-- Modify: `agent/v1/agent_logger.py`
-- Create: `agent/v1/tests/test_run_logger.py`
+- Modify: `agent/v0/agent_logger.py`
+- Create: `agent/v0/tests/test_run_logger.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_run_logger.py`:
+Create `agent/v0/tests/test_run_logger.py`:
 
 ```python
 import os
@@ -353,12 +353,12 @@ def test_event_log_created_in_run_dir(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_run_logger.py -v`
+Run: `python -m pytest agent/v0/tests/test_run_logger.py -v`
 Expected: FAIL — `RunLogger` has no `events` attr and ignores `SIEM_LOG_ROOT`.
 
 - [ ] **Step 3: Implement the override + EventLog wiring**
 
-In `agent/v1/agent_logger.py`:
+In `agent/v0/agent_logger.py`:
 
 Replace the `log_root` line in `__init__`:
 
@@ -376,14 +376,14 @@ After `self._counters = {"senior": 0, "junior": 0}` add:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_run_logger.py -v`
+Run: `python -m pytest agent/v0/tests/test_run_logger.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/agent_logger.py agent/v1/tests/test_run_logger.py
-git commit -m "feat(v1): RunLogger owns EventLog + SIEM_LOG_ROOT override"
+git add agent/v0/agent_logger.py agent/v0/tests/test_run_logger.py
+git commit -m "feat(v0): RunLogger owns EventLog + SIEM_LOG_ROOT override"
 ```
 
 ---
@@ -393,13 +393,13 @@ git commit -m "feat(v1): RunLogger owns EventLog + SIEM_LOG_ROOT override"
 **Why:** today only SH tokens are broken out per question; Senior and Extractor cost cannot be attributed to a question. The callback already receives `tags=["senior", qid]` / `["SH", qid]`, so the qid+role are available — bucket by them.
 
 **Files:**
-- Modify: `agent/v1/usage_tracker.py`
-- Modify: `agent/v1/extractor.py` (pass qid+role into `add_nim_usage`)
-- Create: `agent/v1/tests/test_usage_attribution.py`
+- Modify: `agent/v0/usage_tracker.py`
+- Modify: `agent/v0/extractor.py` (pass qid+role into `add_nim_usage`)
+- Create: `agent/v0/tests/test_usage_attribution.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_usage_attribution.py`:
+Create `agent/v0/tests/test_usage_attribution.py`:
 
 ```python
 from types import SimpleNamespace
@@ -443,12 +443,12 @@ def test_totals_still_work():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_usage_attribution.py -v`
+Run: `python -m pytest agent/v0/tests/test_usage_attribution.py -v`
 Expected: FAIL — no `by_question`; `add_nim_usage` has no `qid`/`role` params.
 
 - [ ] **Step 3: Implement per-question buckets**
 
-In `agent/v1/usage_tracker.py`:
+In `agent/v0/usage_tracker.py`:
 
 In `__init__` add:
 
@@ -513,28 +513,28 @@ Add a `by_question()` method:
 
 - [ ] **Step 4: Update the Extractor call site**
 
-In `agent/v1/extractor.py`, change `extract` to accept an optional `qid` and forward it:
+In `agent/v0/extractor.py`, change `extract` to accept an optional `qid` and forward it:
 
 - Change signature: `def extract(self, question: str, guidance: str, verbose_answer: str, qid: str = "") -> str:`
 - In the `self.tracker.add_nim_usage(...)` call add `qid=qid, role="extractor"`.
 
-In `agent/v1/run_all_v1.py` update the call: `clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)`.
+In `agent/v0/run_all_v0.py` update the call: `clean = extractor.extract(qtext, guidance, sh_answer, qid=qid)`.
 
 - [ ] **Step 5: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_usage_attribution.py -v`
+Run: `python -m pytest agent/v0/tests/test_usage_attribution.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 6: Run the full test suite (no regressions)**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/v1/usage_tracker.py agent/v1/extractor.py agent/v1/run_all_v1.py agent/v1/tests/test_usage_attribution.py
-git commit -m "feat(v1): per-question per-role token/cost attribution"
+git add agent/v0/usage_tracker.py agent/v0/extractor.py agent/v0/run_all_v0.py agent/v0/tests/test_usage_attribution.py
+git commit -m "feat(v0): per-question per-role token/cost attribution"
 ```
 
 ---
@@ -542,17 +542,17 @@ git commit -m "feat(v1): per-question per-role token/cost attribution"
 ## Task 5: Wire events into the runner + write metrics.json + split summary
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_metrics_row.py`
+- Modify: `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_metrics_row.py`
 
 The per-question metric row is pure data assembly — extract it into a small testable helper so it doesn't require a live run to verify.
 
 - [ ] **Step 1: Write failing test for the metrics-row builder**
 
-Create `agent/v1/tests/test_metrics_row.py`:
+Create `agent/v0/tests/test_metrics_row.py`:
 
 ```python
-from run_all_v1 import build_metrics_row
+from run_all_v0 import build_metrics_row
 
 
 def test_metrics_row_flags_ungrounded_and_verdict():
@@ -591,12 +591,12 @@ def test_metrics_row_grounded_true_when_answer_in_worker_text():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_metrics_row.py -v`
+Run: `python -m pytest agent/v0/tests/test_metrics_row.py -v`
 Expected: FAIL — `build_metrics_row` not defined.
 
-- [ ] **Step 3: Implement `build_metrics_row` in run_all_v1.py**
+- [ ] **Step 3: Implement `build_metrics_row` in run_all_v0.py**
 
-Add this module-level function to `agent/v1/run_all_v1.py` (above `main`):
+Add this module-level function to `agent/v0/run_all_v0.py` (above `main`):
 
 ```python
 def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations,
@@ -635,12 +635,12 @@ def build_metrics_row(*, qid, points, verdict, earned, clean_answer, delegations
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_metrics_row.py -v`
+Run: `python -m pytest agent/v0/tests/test_metrics_row.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Emit events + metrics in the question loop**
 
-In `agent/v1/run_all_v1.py` `main()`, integrate (do NOT change any scoring logic):
+In `agent/v0/run_all_v0.py` `main()`, integrate (do NOT change any scoring logic):
 
 - After building `logger`, emit run manifest:
   ```python
@@ -723,7 +723,7 @@ with open(os.path.join(logger.run_dir, "questions", f"{qid}.json"), "w",
 
 - [ ] **Step 7: Smoke-test the runner end-to-end on two questions**
 
-Run: `python agent/v1/run_all_v1.py --ids Q200,Q301`
+Run: `python agent/v0/run_all_v0.py --ids Q200,Q301`
 Expected: completes without error; `log/temp/<ts>/` (or `$SIEM_LOG_ROOT/temp/...`) contains
 `events.jsonl` (with run_start/question_start/submit/question_end/run_end rows), `metrics.json`
 (2 rows, each with `grounded`, `latency_s.total` > 0), `questions/Q200.json`, and a light
@@ -732,8 +732,8 @@ Expected: completes without error; `log/temp/<ts>/` (or `$SIEM_LOG_ROOT/temp/...
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py agent/v1/tests/test_metrics_row.py
-git commit -m "feat(v1): emit event stream + per-question metrics.json + split summary"
+git add agent/v0/run_all_v0.py agent/v0/tests/test_metrics_row.py
+git commit -m "feat(v0): emit event stream + per-question metrics.json + split summary"
 ```
 
 ---
@@ -741,12 +741,12 @@ git commit -m "feat(v1): emit event stream + per-question metrics.json + split s
 ## Task 6: LangSmith hygiene — traceable extractor + per-run project + resume metadata
 
 **Files:**
-- Modify: `agent/v1/extractor.py`
-- Modify: `agent/v1/run_all_v1.py`
+- Modify: `agent/v0/extractor.py`
+- Modify: `agent/v0/run_all_v0.py`
 
 - [ ] **Step 1: Make the Extractor visible in LangSmith**
 
-In `agent/v1/extractor.py`, import and wrap the network call with the langsmith decorator so it appears as a span:
+In `agent/v0/extractor.py`, import and wrap the network call with the langsmith decorator so it appears as a span:
 
 ```python
 from langsmith import traceable
@@ -765,7 +765,7 @@ except Exception:
 
 - [ ] **Step 2: Restore per-run LangSmith project naming**
 
-In `agent/v1/run_all_v1.py`, replace the hardcoded line
+In `agent/v0/run_all_v0.py`, replace the hardcoded line
 `os.environ["LANGSMITH_PROJECT"] = "V1.1"` with:
 
 ```python
@@ -775,13 +775,13 @@ In `agent/v1/run_all_v1.py`, replace the hardcoded line
 ```
 
 (Both branches use the run name — full runs give `botsv3-run_1.x`, test runs
-`botsv3-test_<ts>` — matching the v1.1 architecture doc's stated behavior. Set it
+`botsv3-test_<ts>` — matching the v0.1 architecture doc's stated behavior. Set it
 **after** `logger` is created and **before** the first `run_sh`.)
 
 - [ ] **Step 3: Tag resumed attempts**
 
 Where the SH config is built (`run_sh` in `orchestrator.py` sets `config["metadata"]`),
-pass an `attempt`/`resumed` flag through. Minimal approach: in `run_all_v1.py`, when the
+pass an `attempt`/`resumed` flag through. Minimal approach: in `run_all_v0.py`, when the
 resume branch fires (`if os.path.exists(summary_path)`), set a module/local
 `resumed = True` (default `False`) and include it in the `run_start` event
 (`logger.events.emit("run_start", ..., resumed=resumed)`). Full per-trace metadata
@@ -789,15 +789,15 @@ tagging can stay in the event log; do not over-engineer the LangSmith side.
 
 - [ ] **Step 4: Smoke-test tracing still works**
 
-Run: `python agent/v1/run_all_v1.py --ids Q200`
+Run: `python agent/v0/run_all_v0.py --ids Q200`
 Expected: run completes; console prints `LangSmith project: botsv3-test_<ts>`; no tracing
 exceptions. (Actual span visibility is verified in LangSmith UI, out of scope for the test.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/extractor.py agent/v1/run_all_v1.py
-git commit -m "feat(v1): traceable extractor + per-run LangSmith project + resume flag"
+git add agent/v0/extractor.py agent/v0/run_all_v0.py
+git commit -m "feat(v0): traceable extractor + per-run LangSmith project + resume flag"
 ```
 
 ---
@@ -805,12 +805,12 @@ git commit -m "feat(v1): traceable extractor + per-run LangSmith project + resum
 ## Task 7: make_report.py — render human views from the event stream
 
 **Files:**
-- Create: `agent/v1/make_report.py`
-- Create: `agent/v1/tests/test_make_report.py`
+- Create: `agent/v0/make_report.py`
+- Create: `agent/v0/tests/test_make_report.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_make_report.py`:
+Create `agent/v0/tests/test_make_report.py`:
 
 ```python
 import json
@@ -866,19 +866,19 @@ def test_slowest_questions_ranked(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_make_report.py -v`
+Run: `python -m pytest agent/v0/tests/test_make_report.py -v`
 Expected: FAIL — no `make_report` module.
 
 - [ ] **Step 3: Implement `make_report.py`**
 
-Create `agent/v1/make_report.py`:
+Create `agent/v0/make_report.py`:
 
 ```python
 #!/usr/bin/env python3
 """
 Render human-readable views from a run's canonical event stream + metrics.json.
 
-    python agent/v1/make_report.py <run_dir>
+    python agent/v0/make_report.py <run_dir>
 
 Writes <run_dir>/report.md. Pure rendering — reads events.jsonl and metrics.json,
 computes score/cost/latency rollups, ranks slowest & most expensive questions,
@@ -992,30 +992,30 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_make_report.py -v`
+Run: `python -m pytest agent/v0/tests/test_make_report.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Render a report from the Task 5 smoke-run dir**
 
-Run: `python agent/v1/make_report.py <the log/temp/... dir from Task 5>`
+Run: `python agent/v0/make_report.py <the log/temp/... dir from Task 5>`
 Expected: `wrote .../report.md`; open it and confirm score/latency/ungrounded sections populate.
 
 - [ ] **Step 6: Full suite + commit**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green.
 
 ```bash
-git add agent/v1/make_report.py agent/v1/tests/test_make_report.py
-git commit -m "feat(v1): make_report.py renders report.md from event stream"
+git add agent/v0/make_report.py agent/v0/tests/test_make_report.py
+git commit -m "feat(v0): make_report.py renders report.md from event stream"
 ```
 
 ---
 
 ## Done criteria
 
-- `python -m pytest agent/v1/tests/ -v` all green.
-- `python agent/v1/run_all_v1.py --ids Q200,Q301` produces `events.jsonl`, `metrics.json`
+- `python -m pytest agent/v0/tests/ -v` all green.
+- `python agent/v0/run_all_v0.py --ids Q200,Q301` produces `events.jsonl`, `metrics.json`
   (with `grounded` + `latency_s`), `questions/*.json`, light `run_summary.json`, and
   `make_report.py` renders `report.md`.
 - No change to scoring logic — score on the two smoke questions matches pre-change behavior.

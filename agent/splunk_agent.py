@@ -50,7 +50,7 @@ MAX_ITER       = 15
 # Runaway guard, NOT a working limit, counted per invoke (one round of a live
 # senior). A graph built WITHOUT a context window uses this flat cap: one-shot
 # workers emit ~11-12K output tokens in total (measured over two Q216 runs), so
-# 100K is ~8x typical. A graph built WITH one (v1.4 seniors) caps each round at
+# 100K is ~8x typical. A graph built WITH one (v0.4 seniors) caps each round at
 # what the window can still hold: window minus the context the round started
 # with — see round_output_cap(). GLM-5.3 at 12 iterations spends ~16K per call,
 # so a flat 100K cut off a working senior 7 steps into its round (Q216,
@@ -95,7 +95,7 @@ def token_limit_kwargs(base_url: str | None, limit: int = 65536) -> dict:
     model spends the budget on hidden chain-of-thought and is cut off before it
     writes its `submit_finding` call, which reaches SH as a blank report.
 
-    The default was 32768, GLM-5.3's ceiling as probed on Featherless. v1.4.2
+    The default was 32768, GLM-5.3's ceiling as probed on Featherless. v0.4.2
     raises it to 65536: AI& accepts 65536 and 131072 without error (probed
     2026-09-20), and 32768 was being spent in full on hidden reasoning — two
     smoke3_r2 rounds came back finish_reason=length with 32768 output tokens and
@@ -436,7 +436,7 @@ def make_tools(splunk: SplunkClient) -> list:
         those names (orientation, stacking, axis) and do the naming yourself.
 
         Nothing encoded enters this conversation: a call costs you one short answer."""
-        # Imported here, not at module scope: agent/v1 is only on sys.path for the v1
+        # Imported here, not at module scope: agent/v0 is only on sys.path for the v0
         # runner, and a missing openai/NIM key must not break importing this module.
         try:
             import vision
@@ -623,7 +623,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         base_url:           OpenAI-compatible endpoint. None → OpenAI; pass the NIM
                             base URL to run a Llama worker through the same code path.
         extra_instructions: appended to SYSTEM_PROMPT — used by the v1 worker pool to
-                            inject the submit_finding contract without altering v0 behaviour.
+                            inject the submit_finding contract without altering v0.0.0 behaviour.
         extra_tools:        additional LangChain tools appended after the Splunk tool
                             set — used by the v1 worker pool to give workers the
                             keyless `web_lookup` tool without changing v0's tool list.
@@ -647,7 +647,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
     # worker cannot start another hunt, but any TERMINAL tool the caller
     # supplied stays bound - otherwise a capped worker has no way to report
     # except prose, and prose is exactly what the structured contract exists to
-    # avoid. v0 passes no extra_tools, so for it this is still a bare model.
+    # avoid. v0.0.0 passes no extra_tools, so for it this is still a bare model.
     _terminal  = [t for t in (extra_tools or []) if getattr(t, "name", "") == "submit_finding"]
     model_bare = llm.bind_tools(_terminal, parallel_tool_calls=False) if _terminal else llm
 
@@ -724,7 +724,7 @@ def create_agent(api_key: str, splunk: SplunkClient, *,
         um = getattr(response, "usage_metadata", None) or {}
         out_total = state.get("output_tokens", 0) + wasted_out + int(um.get("output_tokens", 0))
         # The prompt size of the call just made IS this thread's current context
-        # size. v1.4 projects a round's growth off it to decide whether to
+        # size. v0.4 projects a round's growth off it to decide whether to
         # compact before working (spec §6); nothing else reads it.
         prompt_tokens = int(um.get("input_tokens", 0))
         cap = state.get("output_cap") or round_output_cap(context_window, prompt_tokens)

@@ -16,7 +16,7 @@ Source: `log/temp/test_20260716_095627` (Q216, Q303, Q329, Q330, Q331 + `--recon
 
 | # | Defect | Evidence | Status |
 |---|--------|----------|--------|
-| 1 | **Hint path bypasses ledger snap + label prose reaches scoreboard.** Post-hint flow in `run_all_v1.py` is `run_sh → extractor.extract → submit`; `snap_to_ledger` only runs inside `joiner_node`, and the extractor kept a label prefix. | Q331 submitted `'UF = 2059'` — prose prefix, not byte-identical to any ledger entry (`1374`, `1368`). | **Fixed by Task 2–3** |
+| 1 | **Hint path bypasses ledger snap + label prose reaches scoreboard.** Post-hint flow in `run_all_v0.py` is `run_sh → extractor.extract → submit`; `snap_to_ledger` only runs inside `joiner_node`, and the extractor kept a label prefix. | Q331 submitted `'UF = 2059'` — prose prefix, not byte-identical to any ledger entry (`1374`, `1368`). | **Fixed by Task 2–3** |
 | 2 | **Joiner marks every CASE UPDATE `[verified]`.** Prompt says "Mark [verified] only if a worker proved it with a query this round" — model ignored it; all 12 findings landed `verified`, including ones from questions scored WRONG (Q216 `0 seconds`, Q330 `bstoll`, Q331 `1374`). Verifier-promotion path (Plan B Task 8) never exercised. | `case_file.json`: 12/12 findings `status=verified`. | **Mitigated by Task 4** (post-submit demotion). Prompt-tightening deliberately skipped — deterministic demotion is the reliable lever; revisit only if hypothesis discipline still matters after a full run. |
 | 3 | ~~Encoding corruption (`bstoll � 65,291,570`)~~ | **Disproven.** `python` check on `questions/Q330.json`: the char is `0x2014` (em-dash), intact UTF-8. The `�` was a console display artifact during review, not data corruption. | No action |
 
@@ -24,38 +24,38 @@ Source: `log/temp/test_20260716_095627` (Q216, Q303, Q329, Q330, Q331 + `--recon
 
 ## Global constraints
 
-- Every code change gets a same-turn changelog line in `docs/version_architecture/v1/v1.3.md` (in-progress version).
-- Commit prefix: `fix(v1.3-planB): …`.
-- Suite baseline after Plan B: run `python -m pytest agent/v1/tests/ -q` before starting and note the passing count; every task ends green at that count + its new tests.
-- Tests import bare module names — `agent/v1/tests/conftest.py` already puts `agent/` and `agent/v1/` on `sys.path`.
+- Every code change gets a same-turn changelog line in `docs/version_architecture/v0/v0.3.md` (in-progress version).
+- Commit prefix: `fix(v0.3-planB): …`.
+- Suite baseline after Plan B: run `python -m pytest agent/v0/tests/ -q` before starting and note the passing count; every task ends green at that count + its new tests.
+- Tests import bare module names — `agent/v0/tests/conftest.py` already puts `agent/` and `agent/v0/` on `sys.path`.
 
 ## File structure
 
 | File | Responsibility | Change |
 |------|----------------|--------|
-| `agent/v1/case_file.py` | add `finalize_answer` (label strip + snap) and `reconcile_findings` (post-submit demotion) | Modify |
-| `agent/v1/run_all_v1.py` | apply `finalize_answer` at both extract sites; call `reconcile_findings` after submit | Modify |
-| `agent/v1/tests/test_finalize_answer.py` | tests for defect 1 | Create |
-| `agent/v1/tests/test_reconcile_findings.py` | tests for defect 2 | Create |
-| `docs/version_architecture/v1/v1.3.md` | defect record + changelog lines | Modify |
+| `agent/v0/case_file.py` | add `finalize_answer` (label strip + snap) and `reconcile_findings` (post-submit demotion) | Modify |
+| `agent/v0/run_all_v0.py` | apply `finalize_answer` at both extract sites; call `reconcile_findings` after submit | Modify |
+| `agent/v0/tests/test_finalize_answer.py` | tests for defect 1 | Create |
+| `agent/v0/tests/test_reconcile_findings.py` | tests for defect 2 | Create |
+| `docs/version_architecture/v0/v0.3.md` | defect record + changelog lines | Modify |
 
 ---
 
-## Task 1: Record the smoke result + defects in v1.3.md
+## Task 1: Record the smoke result + defects in v0.3.md
 
 **Files:**
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 - [ ] **Step 1: Add a "Plan B combined smoke (test_20260716_095627)" section**
 
-Append to `docs/version_architecture/v1/v1.3.md` (after the changelog):
+Append to `docs/version_architecture/v0/v0.3.md` (after the changelog):
 
 ```markdown
 ## Plan B combined smoke — test_20260716_095627 (2026-07-16)
 
-`python agent/v1/run_all_v1.py --ids Q216,Q303,Q329,Q330,Q331 --recon --hints`
-Result: 1/5 correct (Q303 `ilovedavidverve`, a 0 in run_1.2), 100/4100 pts,
-`failed_delegations=2` (run_1.2: 62), 3.02M tokens, est $1.09.
+`python agent/v0/run_all_v0.py --ids Q216,Q303,Q329,Q330,Q331 --recon --hints`
+Result: 1/5 correct (Q303 `ilovedavidverve`, a 0 in run_0.2), 100/4100 pts,
+`failed_delegations=2` (run_0.2: 62), 3.02M tokens, est $1.09.
 All Plan-B mechanisms fired: recon seeded 5 findings; planner tasks cited case
 entities; specialist tags on every task; handoff digests injected on Q303/Q329/Q331;
 ledger recorded per question; hint bought on Q331.
@@ -74,8 +74,8 @@ Defects found:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/version_architecture/v1/v1.3.md
-git commit -m "docs(v1.3-planB): record combined-smoke result + defects (hint-path snap bypass, verified inflation)"
+git add docs/version_architecture/v0/v0.3.md
+git commit -m "docs(v0.3-planB): record combined-smoke result + defects (hint-path snap bypass, verified inflation)"
 ```
 
 ---
@@ -83,8 +83,8 @@ git commit -m "docs(v1.3-planB): record combined-smoke result + defects (hint-pa
 ## Task 2: `finalize_answer` — label strip + snap (pure function)
 
 **Files:**
-- Modify: `agent/v1/case_file.py`
-- Create: `agent/v1/tests/test_finalize_answer.py`
+- Modify: `agent/v0/case_file.py`
+- Create: `agent/v0/tests/test_finalize_answer.py`
 
 **Interfaces:**
 - Consumes: `build_ledger`, `snap_to_ledger` (already in `case_file.py`).
@@ -94,7 +94,7 @@ git commit -m "docs(v1.3-planB): record combined-smoke result + defects (hint-pa
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_finalize_answer.py`:
+Create `agent/v0/tests/test_finalize_answer.py`:
 
 ```python
 from case_file import finalize_answer
@@ -137,12 +137,12 @@ def test_empty_is_safe():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_finalize_answer.py -v`
+Run: `python -m pytest agent/v0/tests/test_finalize_answer.py -v`
 Expected: FAIL — `ImportError: cannot import name 'finalize_answer'`.
 
 - [ ] **Step 3: Implement**
 
-Append to `agent/v1/case_file.py` (after `snap_to_ledger`):
+Append to `agent/v0/case_file.py` (after `snap_to_ledger`):
 
 ```python
 # 'UF = 2059' — short alnum label, '=', then the value. Deliberately narrow so
@@ -169,16 +169,16 @@ def finalize_answer(clean: str, delegations: list) -> str:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_finalize_answer.py -v`
+Run: `python -m pytest agent/v0/tests/test_finalize_answer.py -v`
 Expected: 6 passed.
 
 - [ ] **Step 5: Changelog + commit**
 
-Add to `docs/version_architecture/v1/v1.3.md` changelog: "Smoke-defect fix: `finalize_answer` in `case_file.py` — snap-first label-prefix strip, the single normalization for every to-be-submitted answer."
+Add to `docs/version_architecture/v0/v0.3.md` changelog: "Smoke-defect fix: `finalize_answer` in `case_file.py` — snap-first label-prefix strip, the single normalization for every to-be-submitted answer."
 
 ```bash
-git add agent/v1/case_file.py agent/v1/tests/test_finalize_answer.py docs/version_architecture/v1/v1.3.md
-git commit -m "fix(v1.3-planB): finalize_answer — label strip + snap for every submitted answer"
+git add agent/v0/case_file.py agent/v0/tests/test_finalize_answer.py docs/version_architecture/v0/v0.3.md
+git commit -m "fix(v0.3-planB): finalize_answer — label strip + snap for every submitted answer"
 ```
 
 ---
@@ -186,13 +186,13 @@ git commit -m "fix(v1.3-planB): finalize_answer — label strip + snap for every
 ## Task 3: Wire `finalize_answer` at both extract sites
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py`
+- Modify: `agent/v0/run_all_v0.py`
 
-**Context:** two extractor call sites exist — the normal one (`run_all_v1.py:388-400`) and the post-hint one (`run_all_v1.py:421-426`). Both must route through `finalize_answer` so the hint path stops bypassing the snap.
+**Context:** two extractor call sites exist — the normal one (`run_all_v0.py:388-400`) and the post-hint one (`run_all_v0.py:421-426`). Both must route through `finalize_answer` so the hint path stops bypassing the snap.
 
 - [ ] **Step 1: Import**
 
-In `agent/v1/run_all_v1.py`, extend the existing import (line ~53, `from case_file import CaseFile, build_ledger`):
+In `agent/v0/run_all_v0.py`, extend the existing import (line ~53, `from case_file import CaseFile, build_ledger`):
 
 ```python
 from case_file import CaseFile, build_ledger, finalize_answer
@@ -216,16 +216,16 @@ Inside the hint block, after the post-hint try/except, immediately before `print
 
 - [ ] **Step 4: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import run_all_v1; print('ok')"`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import run_all_v0; print('ok')"`
 
 - [ ] **Step 5: Changelog + commit**
 
-v1.3.md changelog: "Smoke-defect fix: both runner extract sites (normal + post-hint) route through `finalize_answer` — hint path no longer bypasses the ledger snap (Q331 `'UF = 2059'` regression)."
+v0.3.md changelog: "Smoke-defect fix: both runner extract sites (normal + post-hint) route through `finalize_answer` — hint path no longer bypasses the ledger snap (Q331 `'UF = 2059'` regression)."
 
 ```bash
-git add agent/v1/run_all_v1.py docs/version_architecture/v1/v1.3.md
-git commit -m "fix(v1.3-planB): hint path routes through finalize_answer (no more snap bypass)"
+git add agent/v0/run_all_v0.py docs/version_architecture/v0/v0.3.md
+git commit -m "fix(v0.3-planB): hint path routes through finalize_answer (no more snap bypass)"
 ```
 
 ---
@@ -233,8 +233,8 @@ git commit -m "fix(v1.3-planB): hint path routes through finalize_answer (no mor
 ## Task 4: Post-submit case-file reconciliation
 
 **Files:**
-- Modify: `agent/v1/case_file.py`, `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_reconcile_findings.py`
+- Modify: `agent/v0/case_file.py`, `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_reconcile_findings.py`
 
 **Interfaces:**
 - Consumes: `CaseFile.iter_findings()` / `.set_status()`.
@@ -244,7 +244,7 @@ git commit -m "fix(v1.3-planB): hint path routes through finalize_answer (no mor
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_reconcile_findings.py`:
+Create `agent/v0/tests/test_reconcile_findings.py`:
 
 ```python
 from case_file import CaseFile, reconcile_findings
@@ -281,12 +281,12 @@ def test_refuted_and_hypothesis_untouched_on_wrong(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_reconcile_findings.py -v`
+Run: `python -m pytest agent/v0/tests/test_reconcile_findings.py -v`
 Expected: FAIL — no `reconcile_findings`.
 
 - [ ] **Step 3: Implement**
 
-Append to `agent/v1/case_file.py`:
+Append to `agent/v0/case_file.py`:
 
 ```python
 def reconcile_findings(case_file, qid: str, correct: bool) -> int:
@@ -306,12 +306,12 @@ def reconcile_findings(case_file, qid: str, correct: bool) -> int:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_reconcile_findings.py -v`
+Run: `python -m pytest agent/v0/tests/test_reconcile_findings.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 5: Wire into the runner (inside the successful-submit branch only)**
 
-In `agent/v1/run_all_v1.py`, extend the import: `from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings`.
+In `agent/v0/run_all_v0.py`, extend the import: `from case_file import CaseFile, build_ledger, finalize_answer, reconcile_findings`.
 
 In the submit block (line ~429), add the call INSIDE the `try`, after `verdict = ...` — so an SB outage (except branch) never demotes:
 
@@ -333,16 +333,16 @@ In the submit block (line ~429), add the call INSIDE the `try`, after `verdict =
 
 - [ ] **Step 6: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -q` — all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import run_all_v1; print('ok')"`
+Run: `python -m pytest agent/v0/tests/ -q` — all green.
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import run_all_v0; print('ok')"`
 
 - [ ] **Step 7: Changelog + commit**
 
-v1.3.md changelog: "Smoke-defect fix: `reconcile_findings` — WRONG scoreboard verdict demotes that question's verified case findings to hypothesis (SB-outage-safe: only on successful submit); closes the verified-inflation hole the joiner prompt alone couldn't."
+v0.3.md changelog: "Smoke-defect fix: `reconcile_findings` — WRONG scoreboard verdict demotes that question's verified case findings to hypothesis (SB-outage-safe: only on successful submit); closes the verified-inflation hole the joiner prompt alone couldn't."
 
 ```bash
-git add agent/v1/case_file.py agent/v1/run_all_v1.py agent/v1/tests/test_reconcile_findings.py docs/version_architecture/v1/v1.3.md
-git commit -m "fix(v1.3-planB): wrong verdicts demote case findings to hypothesis (reconcile_findings)"
+git add agent/v0/case_file.py agent/v0/run_all_v0.py agent/v0/tests/test_reconcile_findings.py docs/version_architecture/v0/v0.3.md
+git commit -m "fix(v0.3-planB): wrong verdicts demote case findings to hypothesis (reconcile_findings)"
 ```
 
 ---
@@ -355,12 +355,12 @@ git commit -m "fix(v1.3-planB): wrong verdicts demote case findings to hypothesi
 
 - [ ] **Step 1: Full unit suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: baseline + 9 new tests, zero failures.
 
 - [ ] **Step 2: Micro-smoke exercising both fixes**
 
-Run: `python agent/v1/run_all_v1.py --ids Q216,Q331 --hints`
+Run: `python agent/v0/run_all_v0.py --ids Q216,Q331 --hints`
 
 Report (mechanism-firing is the gate, correctness is bonus):
 
@@ -379,7 +379,7 @@ Report the micro-smoke signals and stop. The user decides if/when the full 56-Q 
 
 ## Done criteria
 
-- Defect record landed in `docs/version_architecture/v1/v1.3.md` (including the disproven encoding suspicion).
+- Defect record landed in `docs/version_architecture/v0/v0.3.md` (including the disproven encoding suspicion).
 - `finalize_answer` guards BOTH extract sites; `reconcile_findings` runs only on successful submits.
-- `python -m pytest agent/v1/tests/ -q` fully green.
+- `python -m pytest agent/v0/tests/ -q` fully green.
 - Micro-smoke signals reported; no full run without explicit user go-ahead.

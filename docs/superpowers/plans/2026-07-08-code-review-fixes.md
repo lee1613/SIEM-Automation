@@ -1,4 +1,4 @@
-# Code Review Fixes (v1.2 post-run review) Implementation Plan
+# Code Review Fixes (v0.2 post-run review) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
@@ -7,11 +7,11 @@
 > instead of inventing new helpers. Do not add abstractions beyond what each
 > task's fix needs.
 
-**Goal:** Fix the 8 findings from the `/code-review` pass on the v1.2 diff
-(`docs/version_architecture/v1/v1.2.md`), none of which changed run_1.2's score —
+**Goal:** Fix the 8 findings from the `/code-review` pass on the v0.2 diff
+(`docs/version_architecture/v0/v0.2.md`), none of which changed run_0.2's score —
 they're bugs in verification, reporting, and retry-budget machinery.
 
-**Architecture:** Eight independent, small fixes across `agent/v1/`. No new
+**Architecture:** Eight independent, small fixes across `agent/v0/`. No new
 files, no new abstractions. Each task is TDD'd and independently committable.
 
 **Tech Stack:** Python 3.11, pytest 9.x.
@@ -21,9 +21,9 @@ files, no new abstractions. Each task is TDD'd and independently committable.
 ## Task 1: Verifier max_iter never reaches the graph's real step-cap
 
 **Files:**
-- Modify: `agent/v1/splunk_subagent.py:105-141` (`SplunkWorkerPool.__init__`, `run_senior`)
-- Modify: `agent/v1/orchestrator.py:37` (remove local `VERIFIER_MAX_ITER`, import from splunk_subagent)
-- Test: `agent/v1/tests/test_verifier.py`
+- Modify: `agent/v0/splunk_subagent.py:105-141` (`SplunkWorkerPool.__init__`, `run_senior`)
+- Modify: `agent/v0/orchestrator.py:37` (remove local `VERIFIER_MAX_ITER`, import from splunk_subagent)
+- Test: `agent/v0/tests/test_verifier.py`
 
 **Context:** `create_agent(max_iter=...)` in `agent/splunk_agent.py` closes over
 `max_iter` inside `agent_node`/`should_continue` at graph-BUILD time (lines 437,
@@ -39,7 +39,7 @@ its own pre-built graph with the real cap baked in.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_verifier.py`:
+Add to `agent/v0/tests/test_verifier.py`:
 
 ```python
 def test_pool_builds_dedicated_verifier_graph():
@@ -65,12 +65,12 @@ def test_pool_builds_dedicated_verifier_graph():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_verifier.py::test_pool_builds_dedicated_verifier_graph -v`
+Run: `python -m pytest agent/v0/tests/test_verifier.py::test_pool_builds_dedicated_verifier_graph -v`
 Expected: FAIL — `AttributeError: 'SplunkWorkerPool' object has no attribute 'verifier_graph'` (or `VERIFIER_MAX_ITER` not importable from `splunk_subagent`).
 
 - [ ] **Step 3: Move `VERIFIER_MAX_ITER` to splunk_subagent.py and build the dedicated graph**
 
-In `agent/v1/splunk_subagent.py`, near the top-level constants (find `MAX_ITER`
+In `agent/v0/splunk_subagent.py`, near the top-level constants (find `MAX_ITER`
 import and `HIGH_VALUE_THRESHOLD` — add alongside them):
 
 ```python
@@ -110,14 +110,14 @@ points-based graphs:
                          subquestion, parent_qid, idx, max_iter=budget)
 ```
 
-In `agent/v1/orchestrator.py`, remove the local constant definition:
+In `agent/v0/orchestrator.py`, remove the local constant definition:
 
 ```python
 VERIFIER_MAX_ITER = 8  # verifier runs <=3 targeted queries; no 25-iter wandering
 ```
 
 and add a new import line near the other `from ... import ...` lines at the
-top of `agent/v1/orchestrator.py` (after `from grounding import is_grounded,
+top of `agent/v0/orchestrator.py` (after `from grounding import is_grounded,
 best_candidate`) instead:
 
 ```python
@@ -128,23 +128,23 @@ so there is one definition of `VERIFIER_MAX_ITER`, not two.
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_verifier.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier.py -v`
 Expected: all PASS.
 
 - [ ] **Step 5: Run full suite + smoke a >=500pt question**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green (66+ tests).
 
-Run: `python agent/v1/run_all_v1.py --ids Q209` (a 500pt question — triggers
+Run: `python agent/v0/run_all_v0.py --ids Q209` (a 500pt question — triggers
 the verifier). Check the console for `[SH VERIFIER OUTPUT] verdict=...` instead
 of `VERIFIER FAILED (status=too_big...)` on a normal-length verifier run.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/splunk_subagent.py agent/v1/orchestrator.py agent/v1/tests/test_verifier.py
-git commit -m "fix(v1): verifier gets a dedicated 8-iter graph, not a mismatched cap"
+git add agent/v0/splunk_subagent.py agent/v0/orchestrator.py agent/v0/tests/test_verifier.py
+git commit -m "fix(v0): verifier gets a dedicated 8-iter graph, not a mismatched cap"
 ```
 
 ---
@@ -152,8 +152,8 @@ git commit -m "fix(v1): verifier gets a dedicated 8-iter graph, not a mismatched
 ## Task 2: metrics.json grounded-check duplicates pre-fix naive logic
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py` (`build_metrics_row`, its call site)
-- Test: `agent/v1/tests/test_metrics_row.py`
+- Modify: `agent/v0/run_all_v0.py` (`build_metrics_row`, its call site)
+- Test: `agent/v0/tests/test_metrics_row.py`
 
 **Context:** `build_metrics_row`'s `grounded` field does
 `ca in (d.get("answer") or "").lower()` on the WHOLE `clean_answer` string —
@@ -162,7 +162,7 @@ comma-list matching. Reuse `is_grounded` instead of a second, stale copy.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_metrics_row.py` (check existing imports/fixtures in
+Add to `agent/v0/tests/test_metrics_row.py` (check existing imports/fixtures in
 that file first and match its style):
 
 ```python
@@ -182,13 +182,13 @@ def test_grounded_uses_component_wise_check_for_list_answers():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_metrics_row.py::test_grounded_uses_component_wise_check_for_list_answers -v`
+Run: `python -m pytest agent/v0/tests/test_metrics_row.py::test_grounded_uses_component_wise_check_for_list_answers -v`
 Expected: FAIL — either `TypeError: unexpected keyword argument 'question_text'`
 or `assert False is True` (naive check rejects the list answer).
 
 - [ ] **Step 3: Reuse `is_grounded` in `build_metrics_row`**
 
-In `agent/v1/run_all_v1.py`, find the existing import line for extractor/etc.
+In `agent/v0/run_all_v0.py`, find the existing import line for extractor/etc.
 near the top and add:
 
 ```python
@@ -228,19 +228,19 @@ Update the call site in `main()` (currently around line 396-399):
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_metrics_row.py -v`
+Run: `python -m pytest agent/v0/tests/test_metrics_row.py -v`
 Expected: all PASS.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py agent/v1/tests/test_metrics_row.py
-git commit -m "fix(v1): metrics.json grounded field reuses is_grounded (was naive whole-string check)"
+git add agent/v0/run_all_v0.py agent/v0/tests/test_metrics_row.py
+git commit -m "fix(v0): metrics.json grounded field reuses is_grounded (was naive whole-string check)"
 ```
 
 ---
@@ -248,8 +248,8 @@ git commit -m "fix(v1): metrics.json grounded field reuses is_grounded (was naiv
 ## Task 3: plan_round double-increments on grounding-forced replan
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py:451-459` (`joiner_node`'s grounding-replan branch)
-- Test: `agent/v1/tests/test_joiner_guard.py`
+- Modify: `agent/v0/orchestrator.py:451-459` (`joiner_node`'s grounding-replan branch)
+- Test: `agent/v0/tests/test_joiner_guard.py`
 
 **Context:** When `decide_joiner_answer` returns `action="replan"`, `joiner_node`
 sets `plan_round: plan_round + 1` and `needs_replan: True`; `route_joiner`
@@ -262,7 +262,7 @@ only this path needs the fix: don't increment here, let `planner_node` do it.
 
 - [ ] **Step 1: Write the failing test**
 
-Check `agent/v1/tests/test_joiner_guard.py` for existing fixtures/imports and
+Check `agent/v0/tests/test_joiner_guard.py` for existing fixtures/imports and
 match its style. Add:
 
 ```python
@@ -290,14 +290,14 @@ Step 4 plus the manual trace in Step 5.
 
 - [ ] **Step 2: Run test, verify it passes (it's a contract-documentation test, not a failing-first one)**
 
-Run: `python -m pytest agent/v1/tests/test_joiner_guard.py -v`
+Run: `python -m pytest agent/v0/tests/test_joiner_guard.py -v`
 Expected: PASS (this step just confirms `decide_joiner_answer` still returns
 `action="replan"` for an ungrounded answer with rounds remaining — the actual
 bug is in `joiner_node`'s handling of that decision, fixed in Step 3).
 
 - [ ] **Step 3: Remove the double-increment**
 
-In `agent/v1/orchestrator.py`, find the grounding-forced-replan return block
+In `agent/v0/orchestrator.py`, find the grounding-forced-replan return block
 (currently around lines 451-459):
 
 ```python
@@ -332,20 +332,20 @@ single-increment behavior.)
 
 - [ ] **Step 4: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 5: Manual trace check**
 
-Read `agent/v1/orchestrator.py`'s `planner_node` (line ~275) and `joiner_node`'s
+Read `agent/v0/orchestrator.py`'s `planner_node` (line ~275) and `joiner_node`'s
 grounding branch again side by side; confirm: starting at `plan_round=1`, one
 grounding failure now produces `plan_round=2` after `planner_node` runs (not 3).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_joiner_guard.py
-git commit -m "fix(v1): grounding-forced replan no longer double-increments plan_round"
+git add agent/v0/orchestrator.py agent/v0/tests/test_joiner_guard.py
+git commit -m "fix(v0): grounding-forced replan no longer double-increments plan_round"
 ```
 
 ---
@@ -353,8 +353,8 @@ git commit -m "fix(v1): grounding-forced replan no longer double-increments plan
 ## Task 4: is_grounded whole-string check should run before component split
 
 **Files:**
-- Modify: `agent/v1/grounding.py`
-- Test: `agent/v1/tests/test_grounding.py`
+- Modify: `agent/v0/grounding.py`
+- Test: `agent/v0/tests/test_grounding.py`
 
 **Context:** `is_grounded` always splits on `,` and checks each component
 independently. For a non-list value like `"1,234"`, this can vacuously ground
@@ -367,7 +367,7 @@ plausibly a real list).
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_grounding.py`:
+Add to `agent/v0/tests/test_grounding.py`:
 
 ```python
 def test_short_numeric_value_not_vacuously_grounded_by_stray_digit():
@@ -387,7 +387,7 @@ def test_whole_string_match_checked_before_split():
 
 - [ ] **Step 2: Run tests, verify the first one fails**
 
-Run: `python -m pytest agent/v1/tests/test_grounding.py -v`
+Run: `python -m pytest agent/v0/tests/test_grounding.py -v`
 Expected: `test_short_numeric_value_not_vacuously_grounded_by_stray_digit` FAILS
 (current code splits and vacuously grounds); `test_whole_string_match_checked_before_split`
 already PASSES (whole string also passes the current split logic since both
@@ -395,7 +395,7 @@ fragments happen to be present together).
 
 - [ ] **Step 3: Reorder the check — whole string first, split only as fallback**
 
-In `agent/v1/grounding.py`, replace `is_grounded`'s body:
+In `agent/v0/grounding.py`, replace `is_grounded`'s body:
 
 ```python
 def is_grounded(answer: str, task_results: dict, question_text: str = "") -> bool:
@@ -425,21 +425,21 @@ def is_grounded(answer: str, task_results: dict, question_text: str = "") -> boo
 
 - [ ] **Step 4: Run tests, verify all pass**
 
-Run: `python -m pytest agent/v1/tests/test_grounding.py -v`
+Run: `python -m pytest agent/v0/tests/test_grounding.py -v`
 Expected: all PASS (including the pre-existing list-answer tests from Plan A —
 `bstoll,btun,splunk_access,web_admin` still grounds via the component fallback
 since its whole joined string won't appear verbatim, exactly as before).
 
 - [ ] **Step 5: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/grounding.py agent/v1/tests/test_grounding.py
-git commit -m "fix(v1): is_grounded checks whole-string before comma-split (prevents vacuous digit matches)"
+git add agent/v0/grounding.py agent/v0/tests/test_grounding.py
+git commit -m "fix(v0): is_grounded checks whole-string before comma-split (prevents vacuous digit matches)"
 ```
 
 ---
@@ -447,8 +447,8 @@ git commit -m "fix(v1): is_grounded checks whole-string before comma-split (prev
 ## Task 5: Grounding check loses evidence from earlier replan rounds
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`joiner_node`'s FINAL ANSWER branch)
-- Test: `agent/v1/tests/test_joiner_guard.py`
+- Modify: `agent/v0/orchestrator.py` (`joiner_node`'s FINAL ANSWER branch)
+- Test: `agent/v0/tests/test_joiner_guard.py`
 
 **Context:** `task_results` resets to `{}` on every `REPLAN` (both the
 grounding-forced path and the Option-B path). If a correct value was proven in
@@ -463,7 +463,7 @@ lines below) as additional grounding evidence, not just the current round's
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_joiner_guard.py`:
+Add to `agent/v0/tests/test_joiner_guard.py`:
 
 ```python
 def test_decide_joiner_answer_grounds_against_prior_round_evidence():
@@ -488,14 +488,14 @@ def test_decide_joiner_answer_grounds_against_prior_round_evidence():
 
 - [ ] **Step 2: Run test, verify it passes (documents the expected merged-dict shape)**
 
-Run: `python -m pytest agent/v1/tests/test_joiner_guard.py::test_decide_joiner_answer_grounds_against_prior_round_evidence -v`
+Run: `python -m pytest agent/v0/tests/test_joiner_guard.py::test_decide_joiner_answer_grounds_against_prior_round_evidence -v`
 Expected: PASS (`decide_joiner_answer`/`is_grounded` already handle any dict
 shape correctly — the bug is that `joiner_node` doesn't build this merged dict
 today; Step 3 fixes that).
 
 - [ ] **Step 3: Merge `ctx.q_delegations` into the grounding check in `joiner_node`**
 
-In `agent/v1/orchestrator.py`, find the FINAL ANSWER branch in `joiner_node`
+In `agent/v0/orchestrator.py`, find the FINAL ANSWER branch in `joiner_node`
 (around line 438-443, right before the `decide_joiner_answer` call):
 
 ```python
@@ -503,7 +503,7 @@ In `agent/v1/orchestrator.py`, find the FINAL ANSWER branch in `joiner_node`
             # ctx.current_question, NOT a scan of state["messages"]: the persistent
             # cross-question thread's first HumanMessage is always the run's first
             # question, and later HumanMessages are joiner/replan scaffolding.
-            # run_1.2 ground-checked (and verifier-refuted) answers against Q200's
+            # run_0.2 ground-checked (and verifier-refuted) answers against Q200's
             # question text because of this.
             qtext = ctx.current_question
             decision = decide_joiner_answer(
@@ -519,7 +519,7 @@ evidence, not just the current round's `task_results`:
             # ctx.current_question, NOT a scan of state["messages"]: the persistent
             # cross-question thread's first HumanMessage is always the run's first
             # question, and later HumanMessages are joiner/replan scaffolding.
-            # run_1.2 ground-checked (and verifier-refuted) answers against Q200's
+            # run_0.2 ground-checked (and verifier-refuted) answers against Q200's
             # question text because of this.
             qtext = ctx.current_question
             # task_results resets to {} on every REPLAN, but a value proven in
@@ -538,14 +538,14 @@ evidence, not just the current round's `task_results`:
 
 - [ ] **Step 4: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_joiner_guard.py
-git commit -m "fix(v1): joiner grounding check includes prior-round delegations, not just current round"
+git add agent/v0/orchestrator.py agent/v0/tests/test_joiner_guard.py
+git commit -m "fix(v0): joiner grounding check includes prior-round delegations, not just current round"
 ```
 
 ---
@@ -553,10 +553,10 @@ git commit -m "fix(v1): joiner grounding check includes prior-round delegations,
 ## Task 6: make_report.py crashes on a truncated metrics.json/events.jsonl during --watch
 
 **Files:**
-- Modify: `agent/v1/make_report.py` (`load_events`, `load_metrics`)
-- Test: `agent/v1/tests/test_make_report.py`
+- Modify: `agent/v0/make_report.py` (`load_events`, `load_metrics`)
+- Test: `agent/v0/tests/test_make_report.py`
 
-**Context:** `run_all_v1.py` fully rewrites `metrics.json` with `json.dump` on
+**Context:** `run_all_v0.py` fully rewrites `metrics.json` with `json.dump` on
 every question (not append), and appends `events.jsonl` line-by-line.
 `make_report.py --watch`'s entire purpose is polling these files WHILE a run
 is in progress — a poll landing mid-write raises `JSONDecodeError` with no
@@ -565,7 +565,7 @@ the right defensive pattern (return empty on read failure) — reuse it.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_make_report.py` (check existing imports/style first):
+Add to `agent/v0/tests/test_make_report.py` (check existing imports/style first):
 
 ```python
 def test_load_metrics_survives_truncated_json(tmp_path):
@@ -584,12 +584,12 @@ def test_load_events_survives_truncated_line(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_make_report.py -v`
+Run: `python -m pytest agent/v0/tests/test_make_report.py -v`
 Expected: both FAIL with `json.decoder.JSONDecodeError` (uncaught).
 
 - [ ] **Step 3: Guard both loaders**
 
-In `agent/v1/make_report.py`, replace `load_events` and `load_metrics`:
+In `agent/v0/make_report.py`, replace `load_events` and `load_metrics`:
 
 ```python
 def load_events(path: str) -> list[dict]:
@@ -619,19 +619,19 @@ def load_metrics(path: str) -> list[dict]:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_make_report.py -v`
+Run: `python -m pytest agent/v0/tests/test_make_report.py -v`
 Expected: all PASS.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/make_report.py agent/v1/tests/test_make_report.py
-git commit -m "fix(v1): make_report --watch survives mid-write truncated JSON"
+git add agent/v0/make_report.py agent/v0/tests/test_make_report.py
+git commit -m "fix(v0): make_report --watch survives mid-write truncated JSON"
 ```
 
 ---
@@ -639,32 +639,32 @@ git commit -m "fix(v1): make_report --watch survives mid-write truncated JSON"
 ## Task 7: Extractor-outage fallback should reuse best_candidate, not raw last-line
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py` (extractor try/except block)
-- Test: `agent/v1/tests/test_extractor_shape.py`
+- Modify: `agent/v0/run_all_v0.py` (extractor try/except block)
+- Test: `agent/v0/tests/test_extractor_shape.py`
 
 **Context:** `decide_joiner_answer`'s ungrounded-rounds-exhausted path assigns
 `best_candidate(task_results)` — the FULL raw multi-line worker answer —
 directly as `final_answer` (not forced to one line like the FINAL-ANSWER-tag
 path is). If the extractor then fails all retries on that specific question,
-`run_all_v1.py`'s crash-fallback takes `.splitlines()[-1]` of that raw prose
+`run_all_v0.py`'s crash-fallback takes `.splitlines()[-1]` of that raw prose
 instead of reusing `best_candidate` (imported already, `ctx.q_delegations`
 available at that point in the loop) — this is the exact class of bug
-`grounding.best_candidate` exists to avoid (see the `docs/version_architecture/v1/v1.2.md`
+`grounding.best_candidate` exists to avoid (see the `docs/version_architecture/v0/v0.2.md`
 Q200 changelog entry for the original last-line-submission bug).
 
 - [ ] **Step 1: Write the failing test**
 
-Check `agent/v1/tests/test_extractor_shape.py` for existing style/imports.
-This fix touches `run_all_v1.py`'s inline try/except, which isn't a standalone
+Check `agent/v0/tests/test_extractor_shape.py` for existing style/imports.
+This fix touches `run_all_v0.py`'s inline try/except, which isn't a standalone
 function — extract the fallback logic into a small pure function first so it's
 testable, then call it from the try/except.
 
-In `agent/v1/run_all_v1.py`, this pure helper does not exist yet. Add the test
+In `agent/v0/run_all_v0.py`, this pure helper does not exist yet. Add the test
 first (it will fail with an import error, which is correct TDD sequencing):
 
 ```python
 def test_extractor_fallback_prefers_best_candidate_over_raw_last_line():
-    from run_all_v1 import extractor_fallback_answer
+    from run_all_v0 import extractor_fallback_answer
 
     delegations = [
         {"answer": "here is a lot of unrelated prose\nthe real answer is FYODOR-L",
@@ -679,7 +679,7 @@ def test_extractor_fallback_prefers_best_candidate_over_raw_last_line():
 
 
 def test_extractor_fallback_uses_last_line_when_no_delegations():
-    from run_all_v1 import extractor_fallback_answer
+    from run_all_v0 import extractor_fallback_answer
 
     result = extractor_fallback_answer("line one\nFYODOR-L", [])
     assert result == "FYODOR-L"
@@ -687,12 +687,12 @@ def test_extractor_fallback_uses_last_line_when_no_delegations():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_extractor_shape.py -v`
+Run: `python -m pytest agent/v0/tests/test_extractor_shape.py -v`
 Expected: FAIL — `ImportError: cannot import name 'extractor_fallback_answer'`.
 
 - [ ] **Step 3: Extract the fallback into a pure function, reuse best_candidate**
 
-In `agent/v1/run_all_v1.py`, add near `build_metrics_row` (both are pure
+In `agent/v0/run_all_v0.py`, add near `build_metrics_row` (both are pure
 helpers usable outside the main loop) — check the existing import line for
 `from grounding import is_grounded` added in Task 2 and extend it:
 
@@ -732,19 +732,19 @@ Update the extractor try/except (currently ~line 336-343):
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_extractor_shape.py -v`
+Run: `python -m pytest agent/v0/tests/test_extractor_shape.py -v`
 Expected: all PASS.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py agent/v1/tests/test_extractor_shape.py
-git commit -m "fix(v1): extractor-outage fallback reuses best_candidate instead of raw last line"
+git add agent/v0/run_all_v0.py agent/v0/tests/test_extractor_shape.py
+git commit -m "fix(v0): extractor-outage fallback reuses best_candidate instead of raw last line"
 ```
 
 ---
@@ -752,8 +752,8 @@ git commit -m "fix(v1): extractor-outage fallback reuses best_candidate instead 
 ## Task 8: _classify checks PARTIAL ANSWER before FINAL ANSWER
 
 **Files:**
-- Modify: `agent/v1/splunk_subagent.py:85-102` (`_classify`)
-- Test: `agent/v1/tests/test_classify.py`
+- Modify: `agent/v0/splunk_subagent.py:85-102` (`_classify`)
+- Test: `agent/v0/tests/test_classify.py`
 
 **Context:** The worker system prompt says "If in doubt, use PARTIAL ANSWER" —
 if a model's free-form response contains BOTH phrases (e.g. "No partial answer
@@ -763,7 +763,7 @@ order so a genuine `FINAL ANSWER` commitment always wins.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `agent/v1/tests/test_classify.py` (check existing style first):
+Add to `agent/v0/tests/test_classify.py` (check existing style first):
 
 ```python
 def test_final_answer_wins_when_partial_phrase_also_present():
@@ -775,12 +775,12 @@ def test_final_answer_wins_when_partial_phrase_also_present():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_classify.py::test_final_answer_wins_when_partial_phrase_also_present -v`
+Run: `python -m pytest agent/v0/tests/test_classify.py::test_final_answer_wins_when_partial_phrase_also_present -v`
 Expected: FAIL — `assert 'partial' == 'solved'`.
 
 - [ ] **Step 3: Swap the check order**
 
-In `agent/v1/splunk_subagent.py`, `_classify` currently:
+In `agent/v0/splunk_subagent.py`, `_classify` currently:
 
 ```python
     if "PARTIAL ANSWER" in upper:
@@ -802,28 +802,28 @@ Swap to check `FINAL ANSWER` first:
 
 - [ ] **Step 4: Run tests, verify all pass**
 
-Run: `python -m pytest agent/v1/tests/test_classify.py -v`
+Run: `python -m pytest agent/v0/tests/test_classify.py -v`
 Expected: all PASS (including the pre-existing test that a genuine partial-only
 response — no FINAL ANSWER tag — still classifies as `"partial"`).
 
 - [ ] **Step 5: Run full suite**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/splunk_subagent.py agent/v1/tests/test_classify.py
-git commit -m "fix(v1): _classify checks FINAL ANSWER before PARTIAL ANSWER"
+git add agent/v0/splunk_subagent.py agent/v0/tests/test_classify.py
+git commit -m "fix(v0): _classify checks FINAL ANSWER before PARTIAL ANSWER"
 ```
 
 ---
 
 ## Done criteria
 
-- `python -m pytest agent/v1/tests/ -v` all green (66 + ~12 new = ~78 tests).
-- `docs/version_architecture/v1/v1.2.md` (or a fresh `v1.3.md` changelog, per
+- `python -m pytest agent/v0/tests/ -v` all green (66 + ~12 new = ~78 tests).
+- `docs/version_architecture/v0/v0.2.md` (or a fresh `v0.3.md` changelog, per
   CLAUDE.md's in-progress-version rule — check which version is "in progress"
   when this plan is executed) gets a one-line entry per task in the same turn
   as each fix.

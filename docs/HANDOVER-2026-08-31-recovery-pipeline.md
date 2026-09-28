@@ -21,7 +21,7 @@ Started as: "the $0.63 cost figure for 26 correct answers looks wrong, find and
 fix the cost-calculation bug."
 
 Ended as: an unfinished design for an **automatic recovery pipeline** for
-`agent/v1/run_all_v1.py` full BOTSv3 runs — making LLM/API failures not kill the
+`agent/v0/run_all_v0.py` full BOTSv3 runs — making LLM/API failures not kill the
 run, making runs resumable, and making the pipeline actually reach completion.
 
 Along the way the working directory was disrupted by a OneDrive change (see
@@ -35,10 +35,10 @@ Section 5).
 
 | Change | File | Status |
 |---|---|---|
-| SH/Senior cost-attribution fix (tag precedence: `is_senior` checked before `is_sh`) | `agent/v1/usage_tracker.py` | **Unverified** — file was missing from working dir at session end |
-| Regression test `test_senior_call_with_leaked_sh_tag_bills_to_senior_not_sh` | `agent/v1/tests/test_usage_attribution.py` | **Unverified** |
-| Changelog entry "Cost-attribution bug fix (2026-08-21)" | `docs/version_architecture/v1/v1.3.md` | **Confirmed present** (file grew 11.9K → 13.5K) |
-| New section "Resilience — Resume & Recovery (v1.3)" | `README.md` | **Unverified** — `README.md` missing from working dir at session end |
+| SH/Senior cost-attribution fix (tag precedence: `is_senior` checked before `is_sh`) | `agent/v0/usage_tracker.py` | **Unverified** — file was missing from working dir at session end |
+| Regression test `test_senior_call_with_leaked_sh_tag_bills_to_senior_not_sh` | `agent/v0/tests/test_usage_attribution.py` | **Unverified** |
+| Changelog entry "Cost-attribution bug fix (2026-08-21)" | `docs/version_architecture/v0/v0.3.md` | **Confirmed present** (file grew 11.9K → 13.5K) |
+| New section "Resilience — Resume & Recovery (v0.3)" | `README.md` | **Unverified** — `README.md` missing from working dir at session end |
 
 Also changed, outside the project: `caveman@caveman` plugin set to `false` in
 `~/.claude/settings.json` (user asked for caveman mode off). Unrelated to the
@@ -46,7 +46,7 @@ project; no action needed.
 
 **First task for the next agent:** confirm which of these four survived, and
 re-apply anything lost. The `usage_tracker.py` fix is described in full in the
-`v1.3.md` changelog entry, so it can be reconstructed from there.
+`v0.3.md` changelog entry, so it can be reconstructed from there.
 
 ---
 
@@ -67,7 +67,7 @@ re-apply anything lost. The `usage_tracker.py` fix is described in full in the
 
 - **README framing.** The user originally wanted the README to claim an
   automatic API-recovery loop and cost-tracking-continuity fixes landing in
-  "v3.3". Corrected in-session: the version is **v1.3, not v3.3**, and there is
+  "v3.3". Corrected in-session: the version is **v0.3, not v3.3**, and there is
   **no automatic recovery loop** — resume is manual (`--start` / `--run-name`).
   The user accepted the accurate framing. The written section describes
   per-question extractor fallback and human-triggered resume, and explicitly
@@ -90,7 +90,7 @@ re-apply anything lost. The `usage_tracker.py` fix is described in full in the
   Every bucket logged. Retry-exhausted failures tagged with a reason
   (`api_down` vs `reasoning_dead_end`) so replan logic can react differently —
   today it cannot tell these apart, and blindly REPLANs a fresh worker either
-  way (this is the documented root cause of v1.2's 62 failed delegations and
+  way (this is the documented root cause of v0.2's 62 failed delegations and
   50x cost blowup).
 - **Uniformity:** the user's instruction was *"make this a wrapper that wraps
   around for every single LLM inference api call regardless of what their role
@@ -130,7 +130,7 @@ user plainly whether configuring the built-in engine is sufficient, and where
 delegates to the same underlying package, so one answer covers SH, Senior, and
 Extractor.
 
-Relevant existing code: `agent/v1/extractor.py` already hand-rolls a retry loop
+Relevant existing code: `agent/v0/extractor.py` already hand-rolls a retry loop
 (`EXTRACT_MAX_RETRIES = 5`, 10s doubling ≈ 2.5 min ceiling). If the SDK covers
 this, that loop is duplicated work and should be simplified — confirm with the
 user before deleting it.
@@ -151,7 +151,7 @@ has a function that kept the reasoning midway... Even if the whole process
 failed? Where did it store these values?"*
 
 **There is an unresolved contradiction here that must be investigated first:**
-`docs/version_architecture/v1/v1.1.md` states the SH graph uses a single
+`docs/version_architecture/v0/v0.1.md` states the SH graph uses a single
 `MemorySaver` thread (`sh_<run_name>`). But a grep across `agent/` for
 `MemorySaver|SqliteSaver|checkpointer` returned **no matches at all**. Either
 the docs are stale, the checkpointer was removed, or it's constructed under a
@@ -240,7 +240,7 @@ already."*
 
 Two concrete findings from this session, both real but neither confirmed as
 *the* cause:
-1. **`run_sh()` at `run_all_v1.py:392` has no `try/except` around it.** This is
+1. **`run_sh()` at `run_all_v0.py:392` has no `try/except` around it.** This is
    the only LLM call path in the pipeline without exception protection — Senior
    workers have two layers (`splunk_subagent.py:218` internally, and
    `orchestrator.py:502-510` around `fut.result()`). An SH-side exception
@@ -259,7 +259,7 @@ there any traceback, and how long is the silence?
 ## 5. Environment hazard — OneDrive
 
 Mid-session, every file in the working directory vanished while directories
-remained (`README.md`, `CLAUDE.md`, all of `agent/v1/*.py`, and `.git/HEAD` /
+remained (`README.md`, `CLAUDE.md`, all of `agent/v0/*.py`, and `.git/HEAD` /
 `.git/config` / `.git/index`, though `.git/objects/` and `.git/refs/` survived).
 `git status` failed with "Not a git repository." This happened immediately after
 the user excluded the folder from OneDrive sync.
@@ -273,7 +273,7 @@ The user reported at session end that the files exist in another folder.
 
 **Recommendation to raise again:** move the repo out of the OneDrive tree
 entirely (e.g. `C:\Projects\SIEM Automation`) rather than excluding it from sync.
-This also addresses the still-open item in `v1.2_improvement_plans.md`:
+This also addresses the still-open item in `v0.2_improvement_plans.md`:
 *"root-cause the ~30-min periodic process kills (move `log/` + checkpoint DB out
 of OneDrive-synced path or exclude from sync)."* Confirm with the user where the
 canonical working copy now lives before making any edits.

@@ -6,15 +6,15 @@
 
 **Branch:** `fix/llm-failure-resilience` (not pushed).
 **Commits:** `ac68ef1` → `59b3bfe` → `c5c5642` → `bdb37f0` → `8495757`.
-**Tests:** `python -m pytest agent/v1/tests/ -q` → **177 passed**.
+**Tests:** `python -m pytest agent/v0/tests/ -q` → **177 passed**.
 
 ---
 
 ## 1. The one job
 
-Replace `executor_node` (`agent/v1/orchestrator.py:481`) — which runs all Senior
+Replace `executor_node` (`agent/v0/orchestrator.py:481`) — which runs all Senior
 workers on a `ThreadPoolExecutor` *inside a single node* (`:504`) — with the
-fan-out graph already built and tested in `agent/v1/executor_graph.py`, where
+fan-out graph already built and tested in `agent/v0/executor_graph.py`, where
 each worker is its own node and a side-effect-free `hitl` node interrupts.
 
 `executor_graph.py` is complete, isolated, and passing 8 tests. It takes an
@@ -78,7 +78,7 @@ Read `orchestrator.py:481-580` before starting. Behaviour that must survive:
    `tracing_context(parent=parent_run_tree)` to keep LangSmith traces nested under
    the SH trace. LangGraph runs fan-out branches in its *own* executor — **re-check
    whether that wrapper is still needed, still sufficient, or now harmful.**
-4. **Checkpointer.** The SH graph is already SQLite-backed (`run_all_v1.py:294`
+4. **Checkpointer.** The SH graph is already SQLite-backed (`run_all_v0.py:294`
    into `orchestrator.py:881-885`), so interrupts are durable across process
    death. The sub-graph must share it, not create a `MemorySaver`.
 
@@ -92,7 +92,7 @@ step 2 the **executor** path should use the graph interrupt instead. The verifie
 `_run_senior` directly, so they keep using `pause_if_api_failed` unless they are
 also converted. Do not delete `hitl.py`.
 
-`EXIT_PAUSED = 75` in `run_all_v1.py` stays useful — a graph interrupt still has
+`EXIT_PAUSED = 75` in `run_all_v0.py` stays useful — a graph interrupt still has
 to stop the process and be resumable from the CLI.
 
 ---
@@ -110,7 +110,7 @@ clears.** Graph mechanics are stub-testable; "does a real 1000-pt question still
 behave" is not. When the licence is live, the first real test is a single-question
 smoke on Q216 with the Featherless Senior:
 
-    python agent/v1/run_all_v1.py --ids Q216 \
+    python agent/v0/run_all_v0.py --ids Q216 \
       --senior-model zai-org/GLM-5.3 \
       --senior-base-url https://api.featherless.ai/v1 \
       --senior-api-key-env FEATHERLESS_API_KEY
@@ -132,7 +132,7 @@ cost-tracked. Full runs need explicit user go-ahead.
 - **`api_failed` is set from the caught exception, not by parsing answer text.**
   Text parsing is what collapsed API failures onto `too_big`, making SH decompose
   the task and dispatch more workers at a dead provider — the documented cause of
-  v1.2's 62 failed delegations and 50x cost blowup.
+  v0.2's 62 failed delegations and 50x cost blowup.
 - **The HITL front-end is two-headed by necessity**: under an agent harness stdin
   is the null device, so a blocking `input()` raises `EOFError` and turns a pause
   into a new crash. The non-tty path must never call `input()`.
@@ -171,7 +171,7 @@ landed. Read this first.
 - Hazard 2 closed: `run_sh` takes `run_dir` and loops on `__interrupt__` via
   `hitl.resolve_interrupt`, which keeps the same two front-ends (tty prompt /
   `decision_request.json` + `RunPaused`). Both `run_sh` call sites in
-  `run_all_v1.py` pass `run_dir`. Without this the executor's interrupt would
+  `run_all_v0.py` pass `run_dir`. Without this the executor's interrupt would
   have been ignored and `run_sh` would have returned an empty answer — a silent
   regression introduced by removing `executor_node`'s own pause.
 - Hazard 3 handled: `get_current_run_tree()` is captured in `prepare_sends` and

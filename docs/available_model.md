@@ -46,5 +46,5 @@ Test: single tool call (`get_source_types`) with `tool_choice: auto`, 30s timeou
 ## Notes
 
 - Models listed in the NIM catalog do not guarantee availability — larger/newer models (550B, MiniMax M3, GLM-5.1) appear to require a higher subscription tier or are not yet serving traffic.
-- All tool-calling tests used a single no-arg function schema. Models that pass this test are compatible with the LangGraph v0 agent in `agent/splunk_agent.py`.
+- All tool-calling tests used a single no-arg function schema. Models that pass this test are compatible with the LangGraph v0.0.0 agent in `agent/splunk_agent.py`.
 - OpenAI models tested separately via `api.openai.com` (not NIM): `gpt-5.4-mini` ✅ (confirmed working with tool calling; requires `max_completion_tokens` not `max_tokens`).

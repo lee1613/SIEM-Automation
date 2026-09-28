@@ -7,7 +7,7 @@ the same exact-match rule as the live scoreboard, so this is a real
 re-scoring, not a replay of a cached boolean.
 
 Source-of-truth note: `run_summary.json`'s `score`/`correct`/`results` keys are
-NOT trustworthy — run_1.1's were overwritten by a later partial re-run. Only
+NOT trustworthy — run_0.1's were overwritten by a later partial re-run. Only
 `scoreboard_submissions.json` (verdicts) and `run_summary["token_usage"]`
 (cost) are used.
 """
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_ROOT = REPO / "log" / "v1"
+LOG_ROOT = REPO / "log" / "v0"
 TIERS = (100, 500, 1000)
 EVAL_DIR = REPO / "datasets" / "evaluation"
 README = REPO / "README.md"
@@ -40,7 +40,7 @@ def load_rows(run_dir: Path) -> list[dict]:
     if not path.exists():
         sys.exit(
             f"{path} not found. Only runs with a submissions file can be scored "
-            f"(run_1.0 predates it)."
+            f"(run_0.0 predates it)."
         )
     return json.loads(path.read_text())
 
@@ -90,7 +90,7 @@ def load_cost(run_dir: Path) -> dict:
     """Per-model USD from run_summary['token_usage'].
 
     Keys wrapped in double underscores are bookkeeping aggregates, not models.
-    Runs predating cost tracking (run_1.0) report total_usd=None — cost is
+    Runs predating cost tracking (run_0.0) report total_usd=None — cost is
     unknown for them, not zero.
     """
     path = run_dir / "run_summary.json"
@@ -113,10 +113,10 @@ def load_cost(run_dir: Path) -> dict:
 
 
 def latest_run() -> Path:
-    """Highest-numbered scorable run_1.N directory, compared numerically."""
+    """Highest-numbered scorable run_0.N directory, compared numerically."""
     runs = []
-    for path in LOG_ROOT.glob("run_1.*"):
-        match = re.fullmatch(r"run_1\.(\d+)", path.name)
+    for path in LOG_ROOT.glob("run_0.*"):
+        match = re.fullmatch(r"run_0\.(\d+)", path.name)
         if match and (path / "scoreboard_submissions.json").exists():
             runs.append((int(match.group(1)), path))
     if not runs:
@@ -176,8 +176,8 @@ def render_leaderboard_markdown(summary: dict, versions: list[dict]) -> str:
         )
     lines += [
         "",
-        "¹ v1.2 and earlier are compared on correctness and points only: their cost and "
-        "latency traces predate the tested tracing added in v1.3 and were never verified "
+        "¹ v0.2 and earlier are compared on correctness and points only: their cost and "
+        "latency traces predate the tested tracing added in v0.3 and were never verified "
         "(senior spend was booked to SH, the extractor was priced at $0, and the totals "
         "were not reconciled with provider billing). Latency is summed question time.",
     ]
@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score a BOTSv3 agent run offline. No API key, no Splunk, no LLM calls."
     )
-    parser.add_argument("--run", help="Run directory name, e.g. run_1.1 (default: latest scorable run)")
+    parser.add_argument("--run", help="Run directory name, e.g. run_0.1 (default: latest scorable run)")
     parser.add_argument("--tier", type=int, choices=TIERS, help="Score only this point tier")
     parser.add_argument("--ids", help="Comma-separated question ids, e.g. Q332,Q333")
     parser.add_argument("--write", action="store_true", help="Regenerate leaderboard.json and the README table")

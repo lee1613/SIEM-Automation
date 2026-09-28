@@ -63,79 +63,114 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 
 ## Run Cost Policy
 
-**Full runs are allowed again (lifted by the user 2026-09-23, for the v1.4.5 full run).** The
-earlier cost-limited policy followed v1.2's $31.36 full run with net-zero score gain. Estimated
-v1.4.5 full run: ~$41 (SH ~$18 with the prompt-cache ordering, senior ~$22, memory ~$1).
+**Full runs are allowed again (lifted by the user 2026-09-23, for the v0.4.5 full run).** The
+earlier cost-limited policy followed v0.2's $31.36 full run with net-zero score gain. Estimated
+v0.4.5 full run: ~$41 (SH ~$18 with the prompt-cache ordering, senior ~$22, memory ~$1).
 
-- Smoke tests remain the default for verifying a fix: `python agent/v1/run_all_v1.py --ids
+- Smoke tests remain the default for verifying a fix: `python agent/v0/run_all_v0.py --ids
   <ids>`, output to `log/temp/` per the smoke-test rule below.
 - Default "hard" set for smoke tests (pick 5 unless the user names IDs): the 1000-pt residue
-  per `docs/version_architecture/v1/v1.2_improvement_plans.md` — **Q216, Q217, Q224, Q328,
+  per `docs/version_architecture/v0/v0.2_improvement_plans.md` — **Q216, Q217, Q224, Q328,
   Q329, Q330, Q331**.
 - A full run still needs the user's go-ahead each time; do not start one on your own.
 
 ### New model or provider
 
 Whenever a new model or provider is added, ask the user for its price.
-Add the row to `PRICES_PER_1M` in `agent/v1/usage_tracker.py`; the extractor is
+Add the row to `PRICES_PER_1M` in `agent/v0/usage_tracker.py`; the extractor is
 priced at 0.
 
-## Versioning & Logging (v1+ multi-agent)
+## Versioning & Logging (v0+ multi-agent)
 
 ### Every change must be recorded in the current in-progress version's doc
 
-A version `v1.x` is considered **in progress** from the moment any code change is made after
-its predecessor's full run, until `v1.x`'s own first full `run_all_v1.py` run completes. While
-`v1.x` is in progress:
+A version `v0.x` is considered **in progress** from the moment any code change is made after
+its predecessor's full run, until `v0.x`'s own first full `run_all_v0.py` run completes. While
+`v0.x` is in progress:
 
 - **Every code change**, no matter how small, must be accompanied by a one-line (or short
-  paragraph, if significant) entry in `docs/version_architecture/v1/v1.x.md`'s changelog —
+  paragraph, if significant) entry in `docs/version_architecture/v0/v0.x.md`'s changelog —
   written **in the same turn as the change**, not deferred. A simple sentence is enough for
   small/mechanical changes (e.g. "Remove extractor validation node"). Give a fuller description
   — what changed, why, and how it was verified — for anything that affects correctness,
   architecture, or the scoring pipeline (e.g. swapping the planning pattern, fixing a
   persistence bug).
-- If `docs/version_architecture/v1/v1.x.md` doesn't exist yet, create it with a `## Changelog`
-  section (see `v1.2.md` for the template) rather than waiting for the version to be "finished."
-- Once `v1.x`'s first full run completes, fold the changelog into a proper "What changed vs
-  v1.(x-1)" comparison section (see `v1.1.md` for the target shape) and start a fresh `v1.(x+1)`
+- If `docs/version_architecture/v0/v0.x.md` doesn't exist yet, create it with a `## Changelog`
+  section (see `v0.2.md` for the template) rather than waiting for the version to be "finished."
+- Once `v0.x`'s first full run completes, fold the changelog into a proper "What changed vs
+  v0.(x-1)" comparison section (see `v0.1.md` for the target shape) and start a fresh `v0.(x+1)`
   changelog for whatever comes next.
 
-When a new version (e.g. `v1.x`, `v2.x`) is run **against the full scoreboard**:
+When a new version (e.g. `v0.x`) is run **against the full scoreboard**:
 
 1. **Update `docs/version_architecture/`** — finalize the version's architecture doc
-   (`docs/version_architecture/v1/v1.x.md`) and describe **how it compares to the previous
+   (`docs/version_architecture/v0/v0.x.md`) and describe **how it compares to the previous
    version** (what changed and why) — this supersedes the running changelog kept during
    development.
 2. **Update `docs/scoreboard_result/`** — write the version's result doc
-   (`docs/scoreboard_result/v1/v1.x.md`) including **which questions were not answered
+   (`docs/scoreboard_result/v0/v0.x.md`) including **which questions were not answered
    correctly**.
 3. **Prompt the user for the run's cost in dollars** — do not guess it; the user will
    provide the figure to record in the result doc.
 
 Logging rules:
-- **Only full runs are logged** under `log/v1/run_1.x/` (auto-incrementing). Run with
-  `python agent/v1/run_all_v1.py` (no `--ids`/`--limit`).
+- **Only full runs are logged** under `log/v0/run_0.x/` (auto-incrementing). Run with
+  `python agent/v0/run_all_v0.py` (no `--ids`/`--limit`).
 - **Test/smoke runs** (`--ids` or `--limit`) are written to `log/temp/` by the runner and
   are NOT cost-tracked. Once a run is finished it is **filed under its version** in
-  `log/v1/v1.<minor>/`:
+  `log/v0/v0.<minor>/`:
   - a smoke run covering **5 or more questions** sits at the version root
-    (`log/v1/v1.4/v1.4.1_glm-5.3_smoke5_r1/`) — that is the version's observable record;
+    (`log/v0/v0.4/v0.4.1_glm-5.3_smoke5_r1/`) — that is the version's observable record;
   - a run covering **fewer than 5 questions** goes in that version's `intermediate/`
-    subfolder (`log/v1/v1.4/intermediate/v1.4.3_validator_Q216_r2/`).
+    subfolder (`log/v0/v0.4/intermediate/v0.4.3_validator_Q216_r2/`).
 
   Filing is archival only — nothing reads these paths, and the runner still writes new runs
-  to `log/temp/`. Versions stay separate: v1.3 runs never sit under v1.4.
+  to `log/temp/`. Versions stay separate: v0.3 runs never sit under v0.4.
 - Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
-  v1.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
+  v0.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
   carries `failed_delegations` and each worker's full state).
 
-### v1 Key Files
+### Version numbering
+
+The whole repo is in development, so every version is `v0.x`; `v1` is reserved for the first
+published release. The single-agent baseline is `v0.0.0`. The multi-agent line was renumbered
+on 2026-09-28 from `v1.x` to `v0.x` (v1.0 → v0.0 … v1.4.5 → v0.4.5, v1.5.0 → v0.5.0; full-run
+dirs `run_1.N` → `run_0.N`). Text inside historical log files still carries the old names and
+is left as recorded.
+
+## Root Cause Analysis After Every Run
+
+After **every full run, and every smoke run of 5 or more questions**, perform a root cause
+analysis of every question not answered correctly, in the same turn the run finishes:
+
+- Work out **why** each question failed from the run's logs (conversation, reports, premise
+  ledger, tool output), not from the final answer alone. Group the failures into root-cause
+  categories (e.g. held the answer but never submitted, cross-question contamination, missing
+  capability such as web search, search miss, right evidence but wrong value) and name the fix
+  and target version for each.
+- Record it in `log/root_cause_analysis/v0.<minor>.md` — **one file per minor version**, holding a
+  **timeline**: one dated entry per run, oldest first, appended rather than rewritten. Each entry
+  names the run directory, the score, the outcomes (correct / wrong submitted / refused), a table
+  of root causes with questions and points, and what resolves each one.
+- Runs under 5 questions are not analysed here; their findings go in the version's changelog.
+
+## README Must Show the Latest Result, RCA and Forecast
+
+After every full run (and after an RCA that changes the plan), update `README.md` so it shows:
+
+1. **The most advanced full run's result** and its version (score, points, cost, latency).
+2. **The latest root cause analysis**: its categories and a link to its
+   `log/root_cause_analysis/` file.
+3. **The anticipated result once those root causes are resolved**, labelled as a forecast with
+   its basis — i.e. the prediction for the next patch version that carries the fixes (the RCA of
+   v0.5.0 is resolved by v0.5.1, so the README forecasts v0.5.1).
+
+### v0 Key Files
 
 | File | Purpose |
 |------|---------|
-| `agent/v1/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
-| `agent/v1/splunk_subagent.py` | Senior worker pool (reuses v0 graph); structured findings |
-| `agent/v1/extractor.py` | Prose-strip to bare answer; single scoreboard submit |
-| `agent/v1/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
-| `agent/v1/run_all_v1.py` | v1 runner (full run → `log/v1/run_1.x/`; test → `log/temp/`) |
+| `agent/v0/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
+| `agent/v0/splunk_subagent.py` | Senior worker pool (reuses v0.0.0 graph); structured findings |
+| `agent/v0/extractor.py` | Prose-strip to bare answer; single scoreboard submit |
+| `agent/v0/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
+| `agent/v0/run_all_v0.py` | v0 runner (full run → `log/v0/run_0.x/`; test → `log/temp/`) |

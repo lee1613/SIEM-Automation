@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, pytest 9.1.
 
-**Depends on:** observability foundation (merged). Note: old runs (`run_1.0`, `run_1.1`) predate `metrics.json` — they only have a `run_summary.json` with an inline `results` array (old schema). `compare.py` MUST read from `metrics.json` when present and fall back to `run_summary.json`'s `results`/`index` otherwise, so a new run can be compared against `run_1.1`.
+**Depends on:** observability foundation (merged). Note: old runs (`run_0.0`, `run_0.1`) predate `metrics.json` — they only have a `run_summary.json` with an inline `results` array (old schema). `compare.py` MUST read from `metrics.json` when present and fall back to `run_summary.json`'s `results`/`index` otherwise, so a new run can be compared against `run_0.1`.
 
 Run all commands from project root.
 
@@ -17,14 +17,14 @@ Run all commands from project root.
 ## Task 1: compare.py — cross-run verdict / cost / latency diff
 
 **Files:**
-- Create: `agent/v1/compare.py`
-- Create: `agent/v1/tests/test_compare.py`
+- Create: `agent/v0/compare.py`
+- Create: `agent/v0/tests/test_compare.py`
 
 **Context:** the version docs require a per-question fixes/regressions table when comparing two versions (today hand-assembled). `compare.py <run_dir_a> <run_dir_b>` produces it: per-qid verdict flip (fixed = wrong→correct, regressed = correct→wrong), plus score/cost/latency deltas.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_compare.py`:
+Create `agent/v0/tests/test_compare.py`:
 
 ```python
 import json
@@ -83,12 +83,12 @@ def test_render_includes_both_sections(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_compare.py -v`
+Run: `python -m pytest agent/v0/tests/test_compare.py -v`
 Expected: FAIL — no `compare` module.
 
 - [ ] **Step 3: Implement `compare.py`**
 
-Create `agent/v1/compare.py` with:
+Create `agent/v0/compare.py` with:
 - `load_run(run_dir) -> dict[qid -> {"verdict","points","earned","latency_s","cost"}]`:
   read `metrics.json` if it exists (verdict/points/earned/latency_s.total/sum(cost_by_role)); ELSE read `run_summary.json` and use its `results` array (`sb_correct`→verdict, `base_points`→points, `earned`) or its `index` if that's all that's present. Latency/cost default to 0 when unavailable (old runs).
 - `diff_runs(a, b) -> {"fixed": [...], "regressed": [...], "same": [...], "score_a", "score_b", "cost_a", "cost_b"}`: over the union of qids; `fixed` = a wrong/absent & b correct; `regressed` = a correct & b wrong; totals summed.
@@ -99,19 +99,19 @@ Keep it pure and defensive (missing files → empty run, never raise).
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_compare.py -v`
+Run: `python -m pytest agent/v0/tests/test_compare.py -v`
 Expected: 4 passed.
 
-- [ ] **Step 5: Real-data check against run_1.1**
+- [ ] **Step 5: Real-data check against run_0.1**
 
-Run: `python agent/v1/compare.py log/v1/run_1.0 log/v1/run_1.1`
-Expected: writes a comparison markdown; open it and confirm the fixed/regressed lists are populated (run_1.1's result doc lists 11 fixes and 4 regressions vs v1.0 — the tool should surface a consistent set). Report the counts it produced.
+Run: `python agent/v0/compare.py log/v0/run_0.0 log/v0/run_0.1`
+Expected: writes a comparison markdown; open it and confirm the fixed/regressed lists are populated (run_0.1's result doc lists 11 fixes and 4 regressions vs v0.0 — the tool should surface a consistent set). Report the counts it produced.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/compare.py agent/v1/tests/test_compare.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1): compare.py cross-run verdict/cost/latency diff"
+git add agent/v0/compare.py agent/v0/tests/test_compare.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0): compare.py cross-run verdict/cost/latency diff"
 ```
 
 ---
@@ -119,14 +119,14 @@ git commit -m "feat(v1): compare.py cross-run verdict/cost/latency diff"
 ## Task 2: make_report.py --watch (live tail)
 
 **Files:**
-- Modify: `agent/v1/make_report.py`
-- Create: `agent/v1/tests/test_make_report_watch.py`
+- Modify: `agent/v0/make_report.py`
+- Create: `agent/v0/tests/test_make_report_watch.py`
 
 **Context:** during a long full run, re-render `report.md` periodically so progress is visible without waiting for the run to end. Pure addition to the existing `make_report.py`.
 
 - [ ] **Step 1: Write failing test for the pure progress summary**
 
-Extract the per-tick summary into a pure function so it's testable without a real loop. Create `agent/v1/tests/test_make_report_watch.py`:
+Extract the per-tick summary into a pure function so it's testable without a real loop. Create `agent/v0/tests/test_make_report_watch.py`:
 
 ```python
 from make_report import progress_line, load_metrics
@@ -149,37 +149,37 @@ def test_progress_line_counts_and_cost(tmp_path):
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_make_report_watch.py -v`
+Run: `python -m pytest agent/v0/tests/test_make_report_watch.py -v`
 Expected: FAIL — no `progress_line`.
 
 - [ ] **Step 3: Implement `progress_line` + `--watch`**
 
-In `agent/v1/make_report.py`:
+In `agent/v0/make_report.py`:
 - Add pure `progress_line(metrics) -> str`: `"<correct>/<attempted> correct · <earned> pts · $<cost> · p50 <lat>s"`.
 - In `main()`, support `python make_report.py <run_dir> --watch [interval]`: loop every `interval` seconds (default 20), re-run `render_report` → `report.md`, and print `progress_line(...)`; stop on KeyboardInterrupt. Without `--watch`, behavior is unchanged (render once and exit). Use `argparse` or a minimal `sys.argv` check consistent with the current `main()`.
 
 - [ ] **Step 4: Run test + full suite**
 
-Run: `python -m pytest agent/v1/tests/test_make_report_watch.py agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/test_make_report_watch.py agent/v0/tests/ -v`
 Expected: all green.
 
 - [ ] **Step 5: Smoke the CLI (no live run needed)**
 
-Run: `python agent/v1/make_report.py <any existing run dir with metrics.json>` (once, no --watch)
+Run: `python agent/v0/make_report.py <any existing run dir with metrics.json>` (once, no --watch)
 Expected: still writes report.md as before (regression check). Then optionally `--watch 2` for a few seconds and Ctrl-C — confirm it prints progress lines and exits cleanly. Report what you saw.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/make_report.py agent/v1/tests/test_make_report_watch.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1): make_report --watch live tail + progress_line"
+git add agent/v0/make_report.py agent/v0/tests/test_make_report_watch.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0): make_report --watch live tail + progress_line"
 ```
 
 ---
 
 ## Done criteria
 
-- `python -m pytest agent/v1/tests/ -v` all green.
+- `python -m pytest agent/v0/tests/ -v` all green.
 - `compare.py` produces a fixed/regressed table across an old-schema and a new-schema run dir.
 - `make_report.py --watch` re-renders on an interval; default (no flag) behavior unchanged.
 - `docs/observability_plan.md` §P2 items are struck through / marked done.

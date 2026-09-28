@@ -38,7 +38,7 @@ must come from `stats`; `metadata` is trustworthy only for names and for
 
 **Status:** accepted gap, 2026-09-15.
 
-Every NIM model in `PRICES_PER_1M` (`agent/v1/usage_tracker.py`) is priced at **$0.00**:
+Every NIM model in `PRICES_PER_1M` (`agent/v0/usage_tracker.py`) is priced at **$0.00**:
 
 | model | role |
 |---|---|
@@ -72,16 +72,16 @@ populate the four rows above, and cross-check one run against the NVIDIA dashboa
 
 **Status:** open question, 2026-09-15.
 
-v1.3 cut the verifier, the adjudicator, and 3× self-consistency sampling on evidence (see
-`docs/version_architecture/v1/v1.3.0.md`). The **joiner** survived that cut, but its LLM half
+v0.3 cut the verifier, the adjudicator, and 3× self-consistency sampling on evidence (see
+`docs/version_architecture/v0/v0.3.0.md`). The **joiner** survived that cut, but its LLM half
 has never been isolated either.
 
-What has receipts is the *deterministic* guard wrapped around it: on run_1.2,
+What has receipts is the *deterministic* guard wrapped around it: on run_0.2,
 `grounded=True` → 26/45 correct, `grounded=False` → **0/11**. What has no receipts is the
 synthesis call itself — nobody has compared "joiner LLM picks from the ledger" against
 "take `best_candidate(ledger)` deterministically and skip the call entirely."
 
-**Trigger:** after v1.3's first run produces per-question data. The experiment is cheap:
+**Trigger:** after v0.3's first run produces per-question data. The experiment is cheap:
 `best_candidate` already exists and runs on the same ledger, so the second arm is a
 one-line substitution.
 
@@ -91,7 +91,7 @@ one-line substitution.
 
 **Status:** instrument shipped, control loop deferred, 2026-09-15.
 
-v1.3 has SH emit a `confidence` (0–100) per spawn, and `agent/v1/spawn_report.py` tallies
+v0.3 has SH emit a `confidence` (0–100) per spawn, and `agent/v0/spawn_report.py` tallies
 solved-rate by confidence decile. The originally proposed rule — *"decompose whenever
 confidence < 50"* — was **not** implemented.
 
@@ -129,7 +129,7 @@ Two traps follow from that, and both are general, not specific to this question:
    `fss="1534762025" fst="Mon Aug 20 10:47:05 2018" fes="1534762137" fet="Mon Aug 20
    10:48:57 2018"`. The epoch pair is `fss`/`fes`. `| eval duration=fet-fst` returns
    **null with no error** — Splunk drops the column silently, so a worker sees an empty
-   result and concludes the data is not there. Two v1.3 workers were on the correct feed
+   result and concludes the data is not there. Two v0.3 workers were on the correct feed
    and both returned empty values this way.
 
 2. **`1666` is not reachable from the local data.** Using `fes-fss` correctly, brute-forced
@@ -142,7 +142,7 @@ Two traps follow from that, and both are general, not specific to this question:
    | sum(dur), same host pair, all ports, `ppn=powershell.exe` | 1772 |
    | interval union, same | 1527 |
    | span `max(fes)-min(fss)` | 7065 |
-   | agent's v1.3 answer (`max(_time)-min(_time)`, Sysmon + stream) | 7071 |
+   | agent's v0.3 answer (`max(_time)-min(_time)`, Sysmon + stream) | 7071 |
 
    The closest is 1660, six seconds short. The only exact `1666` anywhere in the feed is
    `SearchUI.exe -> 204.79.197.254` — Bing, unrelated.
@@ -173,32 +173,32 @@ per-connection span sums to exactly the same 1660).
 sourcetype = cisco:nvm:flowdata
 ```
 
-`agent/v1/tests/test_nvm_addon.py` asserts both states and names the remediation in its
+`agent/v0/tests/test_nvm_addon.py` asserts both states and names the remediation in its
 failure messages; run it with `SIEM_INTEGRATION=1`. Even after re-typing, 1666 needs a
 separate explanation — the gap to 1660 is 6 seconds and no grouping tested closes it.
 Until then Q216 is not winnable on exact match and should not be read as an
 agent-reasoning failure. Consider dropping it from the default hard set.
 
 **Correction, 2026-09-18 — 1666 is reachable. Keep Q216 in the hard set.** A threat-hunter
-review of the v1.4.0 Q216 logs found the official answer on a different endpoint than every
+review of the v0.4.0 Q216 logs found the official answer on a different endpoint than every
 run had assumed. It is not the powershell flow to `45.77.53.176`. It is the browser-based
 Coinhive miner: the websocket sessions with `dh=*coinhive*` from `chrome.exe` on
 `192.168.247.131` (BSTOLL-L), whose `fes - fss` span is `1534773920 − 1534772254 = 1666`.
 The review worked this out by hand; the agent has not yet reproduced it. The 1660 table above
 is therefore the right arithmetic on the wrong entity. The agent's failure was a premise it
-never tested ("the mining endpoint is the powershell host"), and v1.4.1's R4 premise
+never tested ("the mining endpoint is the powershell host"), and v0.4.1's R4 premise
 verification is aimed at exactly that. The environment notes above (the syslog-typed feed,
 the `fst`/`fet` trap) still hold.
 
 ---
 
-## 6. Solve questions in parallel to recover the v1.4 latency
+## 6. Solve questions in parallel to recover the v0.4 latency
 
 **Status:** deferred, 2026-09-18.
 
 The conversational loop is sequential by construction. SH waits for a wave, and each senior
 waits for SH's routing. On the same `gpt-5.4-mini` senior, the five-question smoke test took
-37 min against v1.3.0's 18 (98 min with GLM-5.3). Cost went *down* about 7%, so the
+37 min against v0.3.0's 18 (98 min with GLM-5.3). Cost went *down* about 7%, so the
 latency is the price of the design, not waste.
 
 **What is missing:** the runner solves questions one after another. Questions share no
@@ -213,7 +213,7 @@ senior, so they could run concurrently: N questions at once, each with its own
   run in dependency-free batches.
 - **Provider rate limits** on Featherless and OpenAI.
 
-**Trigger:** before the first full v1.4 run. At 98 min per 5 hard questions, a 56-question
+**Trigger:** before the first full v0.4 run. At 98 min per 5 hard questions, a 56-question
 run would take hours.
 
 ---
@@ -223,7 +223,7 @@ run would take hours.
 **Status:** gap, 2026-09-18.
 
 A retiring senior writes `handoffs/<sid>_handoff.md`: what it ruled out, and why. The design
-(spec §7) says handoffs feed `agent/v1/case_file.py`, so that one question's dead ends reach
+(spec §7) says handoffs feed `agent/v0/case_file.py`, so that one question's dead ends reach
 the next. Nothing reads them back. Today only SH's `case_updates` on a grounded ANSWER reach
 the case file, so a question that ends without an answer teaches the next question nothing.
 
@@ -234,16 +234,16 @@ question's handoff had already recorded.
 
 ## 8. SH turn caps may bind before per-senior rounds
 
-**Status:** resolved 2026-09-18 in v1.4.1. The caps are now `seniors × (rounds + 1) + 1`:
+**Status:** resolved 2026-09-18 in v0.4.1. The caps are now `seniors × (rounds + 1) + 1`:
 28 / 13 / 5, up from 12 / 8 / 5. Kept here for the reasoning.
 
-v1.4.1 made rounds per senior: each of up to 3 seniors gets the full tier rounds. The SH
+v0.4.1 made rounds per senior: each of up to 3 seniors gets the full tier rounds. The SH
 turn caps stayed at 5 / 8 / 12, and every wave costs one SH turn. When seniors run one after
 another, 3 seniors × 8 rounds needs 24 waves, which the 12-turn cap on the 1000-pt tier cuts
-at 12. In the v1.4.0 smoke test no question ended on `turns`, but that was under the old
+at 12. In the v0.4.0 smoke test no question ended on `turns`, but that was under the old
 per-question round clock.
 
-**Trigger:** any v1.4.1 run where `end_reason = turns` while a senior still had rounds left.
+**Trigger:** any v0.4.1 run where `end_reason = turns` while a senior still had rounds left.
 Then raise the cap (for example to seniors × rounds) or make it per senior.
 
 ---
@@ -252,7 +252,7 @@ Then raise the cap (for example to seniors × rounds) or make it per senior.
 
 **Status:** deferred, 2026-09-17.
 
-Every v1.4 budget (seniors, rounds, SH turns) keys off `base_points`, which BOTSv3 provides.
+Every v0.4 budget (seniors, rounds, SH turns) keys off `base_points`, which BOTSv3 provides.
 Real questions have no such label, so the scheme does not transfer without something that
 classifies difficulty first. Candidates, cheapest first:
 - a feature heuristic: entity count, whether a feed is named, scalar vs list answer,

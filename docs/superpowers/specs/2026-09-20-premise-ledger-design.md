@@ -2,14 +2,14 @@
 
 **Date:** 2026-09-20
 **Status:** approved, not implemented
-**Target version:** v1.4.2 (phase 2 — v1.4.2 has not had its full run, so it is still in progress)
+**Target version:** v0.4.2 (phase 2 — v0.4.2 has not had its full run, so it is still in progress)
 **Successor spec:** `2026-09-20-validation-agent-design.md` (spec 2) — written, blocked on this one
 
 ---
 
 ## 1. The problem
 
-v1.4.2's Q216 run lost the question to a premise that was never settled and never
+v0.4.2's Q216 run lost the question to a premise that was never settled and never
 rejected — it was simply written out of the record.
 
 s1's round 1 Assumptions said:
@@ -27,7 +27,7 @@ round 3 came back all-VERIFIED with that line gone, replaced by:
 SH then quoted that sentence as the evidence for its own VERIFIED audit line. The
 chain was circular and the doubt had vanished, so no gate fired.
 
-Two v1.4.2 patches addressed the symptoms: `carry_doubts` (a doubt persists across
+Two v0.4.2 patches addressed the symptoms: `carry_doubts` (a doubt persists across
 rounds) and `_CIRCULAR` (a VERIFIED quote may not cite SH). Both are regexes over
 markdown, and both are working around the same root cause:
 
@@ -173,7 +173,7 @@ and (spec 2) routable to a validation agent.
 
 `AuditLine` is deleted. SH's ANSWER cites premise ids.
 
-Preserved from v1.4.2: SH's audit quote may come from **any** senior's report.
+Preserved from v0.4.2: SH's audit quote may come from **any** senior's report.
 That was a deliberate fix — Q216 was blocked for three turns for quoting s1's
 finding under s2 — and it must not regress.
 
@@ -211,7 +211,7 @@ PREMISE LEDGER — s1
  id  kind       status      LB  since  text
  p1  coverage   UNVERIFIED  Y   r1     Mining could surface as stratum, DNS to a pool...
  p2  selection  VERIFIED    Y   r1     chrome.exe is the only process...      [s1 r2]
- p5  other      REFUTED     Y   r3     The 3333 flow shows submission...      [v1]
+ p5  other      REFUTED     Y   r3     The 3333 flow shows submission...      [v0]
 ```
 
 A missing Coverage row is visible as absence, so the warning blocks stop earning
@@ -264,7 +264,7 @@ Behavioural tests that must exist:
 - a load-bearing UNVERIFIED premise blocks ANSWER while a remedy exists, and does not once spent
 - an unanswered open question names its id in the rejection
 - a sibling senior takes a premise UNVERIFIED → VERIFIED
-- SH's audit quote may come from a senior other than `source_senior` (v1.4.2 regression guard)
+- SH's audit quote may come from a senior other than `source_senior` (v0.4.2 regression guard)
 
 Acceptance: the existing suite (498 passed, 5 skipped) stays green, and a Q216
 smoke run under the cost-limited-runs policy shows the laundered premise either
@@ -318,10 +318,10 @@ measurable after the fact.
 
 | File | Change |
 |---|---|
-| `agent/v1/premise.py` | **new** — models, ledger, transitions, quote check, rendering, `premise_ledger.json` dump (§7) |
-| `agent/v1/finding.py` | `submit_finding` gains `new_premises`, `premise_updates`, `open_questions` |
-| `agent/v1/senior_report.py` | regex layer deleted; `open_questions` reads the schema |
-| `agent/v1/conversation.py` | `AuditLine` folded into `Premise`; gates rewired |
-| `agent/v1/sh_loop.py` | per-senior ledger, carry-forward block, `render_wave` table, prompt updates |
-| `agent/v1/senior_session.py` | ledger block passed into the round message |
-| `agent/v1/tests/` | as §6 |
+| `agent/v0/premise.py` | **new** — models, ledger, transitions, quote check, rendering, `premise_ledger.json` dump (§7) |
+| `agent/v0/finding.py` | `submit_finding` gains `new_premises`, `premise_updates`, `open_questions` |
+| `agent/v0/senior_report.py` | regex layer deleted; `open_questions` reads the schema |
+| `agent/v0/conversation.py` | `AuditLine` folded into `Premise`; gates rewired |
+| `agent/v0/sh_loop.py` | per-senior ledger, carry-forward block, `render_wave` table, prompt updates |
+| `agent/v0/senior_session.py` | ledger block passed into the round message |
+| `agent/v0/tests/` | as §6 |

@@ -2,33 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the joiner's fluency-driven candidate selection with a rule-based adjudicator over the Plan B candidate ledger, add dual-track planning + gpt-5.4 escalation for 1000-pt questions, and 3× self-consistency sampling for metrics questions — attacking run_1.2's 5,100-pt SELECTION losses and the 7,000-pt 1000-pt residue.
+**Goal:** Replace the joiner's fluency-driven candidate selection with a rule-based adjudicator over the Plan B candidate ledger, add dual-track planning + gpt-5.4 escalation for 1000-pt questions, and 3× self-consistency sampling for metrics questions — attacking run_0.2's 5,100-pt SELECTION losses and the 7,000-pt 1000-pt residue.
 
-**Architecture:** A new `adjudicator` LangGraph node sits between the joiner and the verifier in `build_sh_agent_compiler`. It ranks the candidate ledger (Plan B's verbatim per-delegation values) by explicit rules — constraint compliance, byte-exact fidelity, cardinality/shape, evidence strength — with a deterministic post-guard so it can never emit a value outside the ledger or question text. It may dispatch ONE bounded follow-up worker (a targeted tiebreak query; escalated to a gpt-5.4 Senior on ≥1000-pt questions) and re-adjudicate once. Dual-track is a planner-prompt instruction on ≥1000-pt questions (the executor already runs independent tasks in parallel). Self-consistency runs `[METRICS]` tasks 3× at temperature 0.3 on ≥500-pt questions and majority-votes the extracted value. The verifier is untouched — per the spec its only remaining job (confirm/refute the single chosen answer) is exactly what it already does since the v1.3 Task 1 dedicated-graph fix.
+**Architecture:** A new `adjudicator` LangGraph node sits between the joiner and the verifier in `build_sh_agent_compiler`. It ranks the candidate ledger (Plan B's verbatim per-delegation values) by explicit rules — constraint compliance, byte-exact fidelity, cardinality/shape, evidence strength — with a deterministic post-guard so it can never emit a value outside the ledger or question text. It may dispatch ONE bounded follow-up worker (a targeted tiebreak query; escalated to a gpt-5.4 Senior on ≥1000-pt questions) and re-adjudicate once. Dual-track is a planner-prompt instruction on ≥1000-pt questions (the executor already runs independent tasks in parallel). Self-consistency runs `[METRICS]` tasks 3× at temperature 0.3 on ≥500-pt questions and majority-votes the extracted value. The verifier is untouched — per the spec its only remaining job (confirm/refute the single chosen answer) is exactly what it already does since the v0.3 Task 1 dedicated-graph fix.
 
 **Tech Stack:** Python 3.12, LangGraph, LangChain `ChatOpenAI`, pytest. Models: SH + adjudicator + escalation = `gpt-5.4` (OpenAI), Senior = `gpt-5.4-mini` (OpenAI), Extractor = `meta/llama-3.3-70b-instruct` (NIM).
 
-**Spec:** `docs/version_architecture/v1/v1.2_improvement_plans.md` § "Plan C — Evidence-Ranked Adjudication + Dual-Track + Escalation" (lines 185–240).
+**Spec:** `docs/version_architecture/v0/v0.2_improvement_plans.md` § "Plan C — Evidence-Ranked Adjudication + Dual-Track + Escalation" (lines 185–240).
 
 ## Global Constraints
 
-- **Python invocation is `python3` / `python -m pytest` from the project root** (`/Users/june/Desktop/Project/SIEM-Automation`); test suite lives at `agent/v1/tests/` (its `conftest.py` handles sys.path).
-- **NO full 56-question runs.** Verification runs are smoke tests only: `python agent/v1/run_all_v1.py --ids <ids>` (≤5 questions, output to `log/temp/`, not versioned, not cost-tracked). Escalating to a full run requires explicit user go-ahead.
-- **Every code change gets a same-turn changelog entry** in `docs/version_architecture/v1/v1.3.md` under a `## Plan C Tasks` section (v1.3 is still the in-progress version — no full run has closed it; same precedent as the `## Plan B Tasks` section).
+- **Python invocation is `python3` / `python -m pytest` from the project root** (`/Users/june/Desktop/Project/SIEM-Automation`); test suite lives at `agent/v0/tests/` (its `conftest.py` handles sys.path).
+- **NO full 56-question runs.** Verification runs are smoke tests only: `python agent/v0/run_all_v0.py --ids <ids>` (≤5 questions, output to `log/temp/`, not versioned, not cost-tracked). Escalating to a full run requires explicit user go-ahead.
+- **Every code change gets a same-turn changelog entry** in `docs/version_architecture/v0/v0.3.md` under a `## Plan C Tasks` section (v0.3 is still the in-progress version — no full run has closed it; same precedent as the `## Plan B Tasks` section).
 - **Never add `Co-Authored-By: Claude` to commits.**
-- Commit scope prefix: `feat(v1.3-planC):` / `fix(v1.3-planC):` / `test(v1.3-planC):`.
+- Commit scope prefix: `feat(v0.3-planC):` / `fix(v0.3-planC):` / `test(v0.3-planC):`.
 - Model ids exactly as spelled: `gpt-5.4`, `gpt-5.4-mini` (both already priced in `usage_tracker.PRICES_PER_1M`).
-- Hard rule inherited from run_1.2's Q321 (spec item 1): the pipeline must **never submit a synthesized value** — every adjudicator output is deterministically validated against the ledger / question text before it can replace the answer.
-- Existing baseline: `python -m pytest agent/v1/tests/ -q` → **125 passed**. Every task ends with the full suite green.
+- Hard rule inherited from run_0.2's Q321 (spec item 1): the pipeline must **never submit a synthesized value** — every adjudicator output is deterministically validated against the ledger / question text before it can replace the answer.
+- Existing baseline: `python -m pytest agent/v0/tests/ -q` → **125 passed**. Every task ends with the full suite green.
 
 ---
 
 ### Task 1: Adjudicator module — prompt, parser, deterministic choice guard
 
 **Files:**
-- Create: `agent/v1/adjudicator.py`
-- Test: `agent/v1/tests/test_adjudicator.py`
-- Modify: `docs/version_architecture/v1/v1.3.md` (add `## Plan C Tasks` section + entry)
+- Create: `agent/v0/adjudicator.py`
+- Test: `agent/v0/tests/test_adjudicator.py`
+- Modify: `docs/version_architecture/v0/v0.3.md` (add `## Plan C Tasks` section + entry)
 
 **Interfaces:**
 - Consumes: `case_file.build_ledger(delegations) -> list[dict]` — each entry `{"value": str, "status": str, "worker": str, "spl": list, "evidence": str}` (already exists).
@@ -42,7 +42,7 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_adjudicator.py`:
+Create `agent/v0/tests/test_adjudicator.py`:
 
 ```python
 from adjudicator import (parse_adjudication, resolve_choice, fallback_choice,
@@ -124,19 +124,19 @@ def test_adjudicate_once_synthesized_choice_yields_none():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_adjudicator.py -q`
+Run: `python -m pytest agent/v0/tests/test_adjudicator.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'adjudicator'`
 
 - [ ] **Step 3: Write the module**
 
-Create `agent/v1/adjudicator.py`:
+Create `agent/v0/adjudicator.py`:
 
 ```python
 #!/usr/bin/env python3
 """
 Plan C adjudicator: evidence-ranked candidate selection over the Plan B ledger.
 
-run_1.2 lost 5,100 pts on questions where a correct candidate existed in some
+run_0.2 lost 5,100 pts on questions where a correct candidate existed in some
 delegation and the joiner picked a different grounded-but-wrong one by
 recency/fluency (Q318 Canada-over-Russia, Q331 manual-Tukey-over-SPL, Q324
 T-Mobile, Q323 superset). The adjudicator ranks candidates by explicit rules;
@@ -255,15 +255,15 @@ def adjudicate_once(invoke, question: str, guidance: str, ledger: list) -> dict:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_adjudicator.py -q`
+Run: `python -m pytest agent/v0/tests/test_adjudicator.py -q`
 Expected: 11 passed
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 136 passed (125 baseline + 11 new)
 
 - [ ] **Step 5: Changelog entry**
 
-In `docs/version_architecture/v1/v1.3.md`, after the `## Plan B Tasks` section's final bullet list (before `## Plan B combined smoke`), add:
+In `docs/version_architecture/v0/v0.3.md`, after the `## Plan B Tasks` section's final bullet list (before `## Plan B combined smoke`), add:
 
 ```markdown
 ## Plan C Tasks
@@ -277,8 +277,8 @@ In `docs/version_architecture/v1/v1.3.md`, after the `## Plan B Tasks` section's
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/adjudicator.py agent/v1/tests/test_adjudicator.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): adjudicator module — rule-ranked ledger selection with deterministic choice guard"
+git add agent/v0/adjudicator.py agent/v0/tests/test_adjudicator.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): adjudicator module — rule-ranked ledger selection with deterministic choice guard"
 ```
 
 ---
@@ -286,9 +286,9 @@ git commit -m "feat(v1.3-planC): adjudicator module — rule-ranked ledger selec
 ### Task 2: Majority vote for metrics self-consistency (C4)
 
 **Files:**
-- Modify: `agent/v1/adjudicator.py` (append function)
-- Test: `agent/v1/tests/test_majority.py`
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/adjudicator.py` (append function)
+- Test: `agent/v0/tests/test_majority.py`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
 - Consumes: `case_file.extract_candidate(delegation: dict) -> dict | None` (existing) — pulls the verbatim FINAL/PARTIAL ANSWER value from a delegation record.
@@ -296,7 +296,7 @@ git commit -m "feat(v1.3-planC): adjudicator module — rule-ranked ledger selec
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_majority.py`:
+Create `agent/v0/tests/test_majority.py`:
 
 ```python
 from adjudicator import majority_answer
@@ -339,12 +339,12 @@ def test_records_without_answer_tag_dont_vote():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_majority.py -q`
+Run: `python -m pytest agent/v0/tests/test_majority.py -q`
 Expected: FAIL with `ImportError: cannot import name 'majority_answer'`
 
 - [ ] **Step 3: Implement**
 
-Append to `agent/v1/adjudicator.py` (and add `from case_file import extract_candidate` to the imports, below `import re`):
+Append to `agent/v0/adjudicator.py` (and add `from case_file import extract_candidate` to the imports, below `import re`):
 
 ```python
 def majority_answer(records: list) -> dict | None:
@@ -370,12 +370,12 @@ def majority_answer(records: list) -> dict | None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_majority.py agent/v1/tests/test_adjudicator.py -q`
+Run: `python -m pytest agent/v0/tests/test_majority.py agent/v0/tests/test_adjudicator.py -q`
 Expected: 15 passed
 
 - [ ] **Step 5: Changelog entry**
 
-Append to the `## Plan C Tasks` list in `docs/version_architecture/v1/v1.3.md`:
+Append to the `## Plan C Tasks` list in `docs/version_architecture/v0/v0.3.md`:
 
 ```markdown
 - Plan C Task 2: `majority_answer` — strict-majority (>=2 of 3) vote over sampled
@@ -386,8 +386,8 @@ Append to the `## Plan C Tasks` list in `docs/version_architecture/v1/v1.3.md`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/adjudicator.py agent/v1/tests/test_majority.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): majority_answer — 3-sample self-consistency vote for metrics tasks"
+git add agent/v0/adjudicator.py agent/v0/tests/test_majority.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): majority_answer — 3-sample self-consistency vote for metrics tasks"
 ```
 
 ---
@@ -396,13 +396,13 @@ git commit -m "feat(v1.3-planC): majority_answer — 3-sample self-consistency v
 
 **Files:**
 - Modify: `agent/splunk_agent.py:392-395` (signature) and `agent/splunk_agent.py:431` (temperature)
-- Modify: `agent/v1/splunk_subagent.py` (pool init, `run_senior`, new `graph_key`)
-- Test: `agent/v1/tests/test_graph_key.py`
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/splunk_subagent.py` (pool init, `run_senior`, new `graph_key`)
+- Test: `agent/v0/tests/test_graph_key.py`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
 - Produces:
-  - `splunk_agent.create_agent(..., temperature: float = 0)` — new keyword, default preserves v0 behaviour exactly.
+  - `splunk_agent.create_agent(..., temperature: float = 0)` — new keyword, default preserves v0.0.0 behaviour exactly.
   - `splunk_subagent.SAMPLE_TEMPERATURE = 0.3`
   - `splunk_subagent.graph_key(role: str, high: bool, sample: bool) -> tuple` — pure graph-selection key; sampled graphs exist only for the metrics role.
   - `SplunkWorkerPool.__init__(..., escalation_api_key: str | None = None, escalation_model: str | None = None)` — when `escalation_model` is set, builds `self.escalation_graph` (high budget, plain ESCALATE instructions) on that model.
@@ -410,7 +410,7 @@ git commit -m "feat(v1.3-planC): majority_answer — 3-sample self-consistency v
 
 - [ ] **Step 1: Write the failing test**
 
-Create `agent/v1/tests/test_graph_key.py`:
+Create `agent/v0/tests/test_graph_key.py`:
 
 ```python
 from splunk_subagent import graph_key
@@ -433,7 +433,7 @@ def test_unsampled_is_identity():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_graph_key.py -q`
+Run: `python -m pytest agent/v0/tests/test_graph_key.py -q`
 Expected: FAIL with `ImportError: cannot import name 'graph_key'`
 
 - [ ] **Step 3: Add `temperature` to `create_agent`**
@@ -457,13 +457,13 @@ Add one line to the docstring's Args block:
 
 ```python
         temperature:        sampling temperature (default 0 — deterministic;
-                            the v1 pool passes 0.3 for self-consistency
+                            the v0 pool passes 0.3 for self-consistency
                             sampling of metrics tasks).
 ```
 
 - [ ] **Step 4: Add graphs + routing to the pool**
 
-In `agent/v1/splunk_subagent.py`:
+In `agent/v0/splunk_subagent.py`:
 
 Below `VERIFIER_MAX_ITER = 8` add:
 
@@ -547,13 +547,13 @@ Replace `run_senior` with:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_graph_key.py -q`
+Run: `python -m pytest agent/v0/tests/test_graph_key.py -q`
 Expected: 3 passed
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 143 passed — existing pool behaviour unchanged (defaults `sample=False, escalate=False, escalation_model=None`).
 
-Also verify v0 default is untouched:
+Also verify v0.0.0 default is untouched:
 
 ```bash
 python -c "import sys; sys.path.insert(0, 'agent'); import inspect, splunk_agent; assert inspect.signature(splunk_agent.create_agent).parameters['temperature'].default == 0; print('ok')"
@@ -562,11 +562,11 @@ Expected: `ok`
 
 - [ ] **Step 6: Changelog entry**
 
-Append to `## Plan C Tasks` in `docs/version_architecture/v1/v1.3.md`:
+Append to `## Plan C Tasks` in `docs/version_architecture/v0/v0.3.md`:
 
 ```markdown
 - Plan C Task 3: pool plumbing — `create_agent` gains a `temperature` param
-  (default 0, v0 behaviour unchanged); pool builds temperature-0.3 metrics
+  (default 0, v0.0.0 behaviour unchanged); pool builds temperature-0.3 metrics
   graphs (`graph_key` selects them when sampling) and an opt-in gpt-5.4
   escalation graph; `run_senior(..., sample=, escalate=)` routes to them.
 ```
@@ -574,8 +574,8 @@ Append to `## Plan C Tasks` in `docs/version_architecture/v1/v1.3.md`:
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/splunk_agent.py agent/v1/splunk_subagent.py agent/v1/tests/test_graph_key.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): sampled metrics graphs + gpt-5.4 escalation graph in worker pool"
+git add agent/splunk_agent.py agent/v0/splunk_subagent.py agent/v0/tests/test_graph_key.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): sampled metrics graphs + gpt-5.4 escalation graph in worker pool"
 ```
 
 ---
@@ -583,9 +583,9 @@ git commit -m "feat(v1.3-planC): sampled metrics graphs + gpt-5.4 escalation gra
 ### Task 4: Adjudicator node wired into the SH graph (C1 + C3 dispatch)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` — imports (line 34), constants (below line 41), `SHState` (lines 318–328), `DelegationContext` (lines 330–352), new `adjudicator_node` + routing (lines 724–760), `_run_senior` (lines 763–775), `run_sh` initial state (lines 797–810)
-- Test: `agent/v1/tests/test_adjudicator_wiring.py`
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/orchestrator.py` — imports (line 34), constants (below line 41), `SHState` (lines 318–328), `DelegationContext` (lines 330–352), new `adjudicator_node` + routing (lines 724–760), `_run_senior` (lines 763–775), `run_sh` initial state (lines 797–810)
+- Test: `agent/v0/tests/test_adjudicator_wiring.py`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
 - Consumes: `adjudicator.adjudicate_once / resolve_choice / fallback_choice / ADJUDICATOR_SYSTEM_PROMPT` (Task 1); `SplunkWorkerPool.run_senior(..., escalate=)` (Task 3); existing `case_file.build_ledger / render_ledger`.
@@ -598,7 +598,7 @@ git commit -m "feat(v1.3-planC): sampled metrics graphs + gpt-5.4 escalation gra
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_adjudicator_wiring.py`:
+Create `agent/v0/tests/test_adjudicator_wiring.py`:
 
 ```python
 from orchestrator import build_sh_agent_compiler, DelegationContext
@@ -622,7 +622,7 @@ def test_graph_contains_adjudicator_node():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_adjudicator_wiring.py -q`
+Run: `python -m pytest agent/v0/tests/test_adjudicator_wiring.py -q`
 Expected: 2 FAILED — `TypeError: reset_question() got an unexpected keyword argument 'guidance'` and `AssertionError` (no adjudicator node).
 
 - [ ] **Step 3: Implement in `orchestrator.py`**
@@ -817,10 +817,10 @@ Note: the planner's DIRECT ANSWER path still routes straight to END (`route_plan
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_adjudicator_wiring.py -q`
+Run: `python -m pytest agent/v0/tests/test_adjudicator_wiring.py -q`
 Expected: 2 passed
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 145 passed
 
 - [ ] **Step 5: Changelog entry**
@@ -838,8 +838,8 @@ Append to `## Plan C Tasks`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_adjudicator_wiring.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): adjudicator node between joiner and verifier with bounded tiebreak/escalation"
+git add agent/v0/orchestrator.py agent/v0/tests/test_adjudicator_wiring.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): adjudicator node between joiner and verifier with bounded tiebreak/escalation"
 ```
 
 ---
@@ -847,20 +847,20 @@ git commit -m "feat(v1.3-planC): adjudicator node between joiner and verifier wi
 ### Task 5: Dual-track planning for 1000-pt questions (C2)
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py:90-99` (`build_sh_message`)
-- Modify: `agent/v1/orchestrator.py:52-99` (`PLANNER_SYSTEM_PROMPT`)
-- Test: `agent/v1/tests/test_dual_track.py`
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/run_all_v0.py:90-99` (`build_sh_message`)
+- Modify: `agent/v0/orchestrator.py:52-99` (`PLANNER_SYSTEM_PROMPT`)
+- Test: `agent/v0/tests/test_dual_track.py`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
-- Produces: `run_all_v1.build_sh_message(qid, qtext, guidance, points=0) -> str` — new optional `points`; emits a `DUAL-TRACK:` instruction line when `points >= DUAL_TRACK_MIN_POINTS`. `run_all_v1.DUAL_TRACK_MIN_POINTS = 1000`.
+- Produces: `run_all_v0.build_sh_message(qid, qtext, guidance, points=0) -> str` — new optional `points`; emits a `DUAL-TRACK:` instruction line when `points >= DUAL_TRACK_MIN_POINTS`. `run_all_v0.DUAL_TRACK_MIN_POINTS = 1000`.
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_dual_track.py`:
+Create `agent/v0/tests/test_dual_track.py`:
 
 ```python
-from run_all_v1 import build_sh_message, DUAL_TRACK_MIN_POINTS
+from run_all_v0 import build_sh_message, DUAL_TRACK_MIN_POINTS
 
 
 def test_dual_track_line_for_1000pt():
@@ -884,12 +884,12 @@ def test_threshold_is_1000():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_dual_track.py -q`
+Run: `python -m pytest agent/v0/tests/test_dual_track.py -q`
 Expected: FAIL with `ImportError: cannot import name 'DUAL_TRACK_MIN_POINTS'`
 
 - [ ] **Step 3: Implement**
 
-In `agent/v1/run_all_v1.py`, below the `SENIOR_MODEL` constant add:
+In `agent/v0/run_all_v0.py`, below the `SENIOR_MODEL` constant add:
 
 ```python
 DUAL_TRACK_MIN_POINTS = 1000   # C2: 1000-pt questions get two orthogonal plan tracks
@@ -920,7 +920,7 @@ def build_sh_message(qid, qtext, guidance, points=0):
     return "\n".join(lines)
 ```
 
-In `agent/v1/orchestrator.py`, add one rule bullet to `PLANNER_SYSTEM_PROMPT`'s `RULES:` list (after the specialist-tag bullet, before the CASE FILE bullet):
+In `agent/v0/orchestrator.py`, add one rule bullet to `PLANNER_SYSTEM_PROMPT`'s `RULES:` list (after the specialist-tag bullet, before the CASE FILE bullet):
 
 ```
 - If the question message contains a DUAL-TRACK instruction: your TASKS must
@@ -931,7 +931,7 @@ In `agent/v1/orchestrator.py`, add one rule bullet to `PLANNER_SYSTEM_PROMPT`'s 
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_dual_track.py -q`
+Run: `python -m pytest agent/v0/tests/test_dual_track.py -q`
 Expected: 4 passed
 
 - [ ] **Step 5: Changelog entry**
@@ -947,8 +947,8 @@ Append to `## Plan C Tasks`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py agent/v1/orchestrator.py agent/v1/tests/test_dual_track.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): dual-track planner instruction for 1000-pt questions"
+git add agent/v0/run_all_v0.py agent/v0/orchestrator.py agent/v0/tests/test_dual_track.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): dual-track planner instruction for 1000-pt questions"
 ```
 
 ---
@@ -956,9 +956,9 @@ git commit -m "feat(v1.3-planC): dual-track planner instruction for 1000-pt ques
 ### Task 6: Executor 3× sampling of metrics tasks with majority vote (C4)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` — imports, constants, `executor_node` (lines 432–508)
-- Test: `agent/v1/tests/test_plan_samples.py`
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/orchestrator.py` — imports, constants, `executor_node` (lines 432–508)
+- Test: `agent/v0/tests/test_plan_samples.py`
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
 - Consumes: `adjudicator.majority_answer` (Task 2), `specialists.parse_specialist_tag` (existing), `_run_senior(..., sample=)` (Task 4).
@@ -966,7 +966,7 @@ git commit -m "feat(v1.3-planC): dual-track planner instruction for 1000-pt ques
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_plan_samples.py`:
+Create `agent/v0/tests/test_plan_samples.py`:
 
 ```python
 from orchestrator import plan_samples, METRICS_SAMPLES
@@ -989,12 +989,12 @@ def test_non_metrics_never_sampled():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_plan_samples.py -q`
+Run: `python -m pytest agent/v0/tests/test_plan_samples.py -q`
 Expected: FAIL with `ImportError: cannot import name 'plan_samples'`
 
 - [ ] **Step 3: Implement**
 
-In `agent/v1/orchestrator.py`:
+In `agent/v0/orchestrator.py`:
 
 Add import:
 
@@ -1114,10 +1114,10 @@ Rework the dispatch/collect section of `executor_node`. Replace from the `n_work
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_plan_samples.py -q`
+Run: `python -m pytest agent/v0/tests/test_plan_samples.py -q`
 Expected: 3 passed
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 152 passed (single-sample path is behaviour-identical: `per_task` has one entry per task, `completed[t.idx] = res_list[0]`)
 
 - [ ] **Step 5: Changelog entry**
@@ -1135,8 +1135,8 @@ Append to `## Plan C Tasks`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_plan_samples.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): 3x self-consistency sampling for high-value metrics tasks"
+git add agent/v0/orchestrator.py agent/v0/tests/test_plan_samples.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): 3x self-consistency sampling for high-value metrics tasks"
 ```
 
 ---
@@ -1144,16 +1144,16 @@ git commit -m "feat(v1.3-planC): 3x self-consistency sampling for high-value met
 ### Task 7: Runner wiring + live verification smoke
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py` — constants, pool construction (lines 275–278), banner (line 291), `reset_question` call (line 368), `build_sh_message` call (line 380)
-- Modify: `docs/version_architecture/v1/v1.3.md`
+- Modify: `agent/v0/run_all_v0.py` — constants, pool construction (lines 275–278), banner (line 291), `reset_question` call (line 368), `build_sh_message` call (line 380)
+- Modify: `docs/version_architecture/v0/v0.3.md`
 
 **Interfaces:**
 - Consumes: `SplunkWorkerPool(..., escalation_api_key=, escalation_model=)` (Task 3); `ctx.reset_question(..., guidance=)` (Task 4); `build_sh_message(..., points=)` (Task 5).
-- Produces: `run_all_v1.ESCALATION_MODEL = "gpt-5.4"`; a fully wired Plan C pipeline.
+- Produces: `run_all_v0.ESCALATION_MODEL = "gpt-5.4"`; a fully wired Plan C pipeline.
 
 - [ ] **Step 1: Wire the runner**
 
-In `agent/v1/run_all_v1.py`:
+In `agent/v0/run_all_v0.py`:
 
 Below `SENIOR_MODEL` add:
 
@@ -1193,10 +1193,10 @@ Update the runner banner (line 291) to show the escalation model:
 
 - [ ] **Step 2: Full test suite + syntax check**
 
-Run: `python -m pytest agent/v1/tests/ -q`
+Run: `python -m pytest agent/v0/tests/ -q`
 Expected: 152 passed
 
-Run: `python -c "import ast; ast.parse(open('agent/v1/run_all_v1.py').read()); print('ok')"`
+Run: `python -c "import ast; ast.parse(open('agent/v0/run_all_v0.py').read()); print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Changelog entry**
@@ -1212,8 +1212,8 @@ Append to `## Plan C Tasks`:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py docs/version_architecture/v1/v1.3.md
-git commit -m "feat(v1.3-planC): wire escalation model, guidance, and dual-track gate into the runner"
+git add agent/v0/run_all_v0.py docs/version_architecture/v0/v0.3.md
+git commit -m "feat(v0.3-planC): wire escalation model, guidance, and dual-track gate into the runner"
 ```
 
 - [ ] **Step 5: Live combined smoke (cost-policy compliant — NOT a full run)**
@@ -1221,7 +1221,7 @@ git commit -m "feat(v1.3-planC): wire escalation model, guidance, and dual-track
 Per the cost policy and the standing smoke shape (4 hard 1000-pt + 1 simple):
 
 ```bash
-python agent/v1/run_all_v1.py --ids Q216,Q329,Q330,Q331,Q303 --recon --hints
+python agent/v0/run_all_v0.py --ids Q216,Q329,Q330,Q331,Q303 --recon --hints
 ```
 
 Output lands in `log/temp/test_<ts>/`. Expected cost: **~$1.5–3** (Plan B smoke was $1.09; add gpt-5.4 escalation workers on up to 4 questions + 3× metrics sampling on Q216/Q331-class tasks). **Confirm with the user before launching.**
@@ -1236,24 +1236,24 @@ Verify in the run dir / console:
 
 - [ ] **Step 6: Record the smoke in the version doc**
 
-Add a `## Plan C combined smoke — test_<ts> (2026-MM-DD)` section to `docs/version_architecture/v1/v1.3.md` (same shape as the Plan B smoke section): command, score, tokens/cost estimate, which mechanisms fired, defects found. Commit:
+Add a `## Plan C combined smoke — test_<ts> (2026-MM-DD)` section to `docs/version_architecture/v0/v0.3.md` (same shape as the Plan B smoke section): command, score, tokens/cost estimate, which mechanisms fired, defects found. Commit:
 
 ```bash
-git add docs/version_architecture/v1/v1.3.md
-git commit -m "docs(v1.3-planC): record Plan C combined smoke result"
+git add docs/version_architecture/v0/v0.3.md
+git commit -m "docs(v0.3-planC): record Plan C combined smoke result"
 ```
 
 ---
 
 ## Spec coverage self-check
 
-| Spec item (v1.2_improvement_plans.md §Plan C) | Task |
+| Spec item (v0.2_improvement_plans.md §Plan C) | Task |
 |---|---|
 | 1. Adjudicator node, rules (a)–(d), tiebreak query, Q321 hard rule | Tasks 1, 4 |
 | 2. Dual-track solve for 1000-pt questions | Task 5 |
 | 3. Model escalation ladder (cheap track A, gpt-5.4 track B on low confidence) | Tasks 3, 4, 7 |
 | 4. Self-consistency arithmetic (3× @ temp 0.3, majority) | Tasks 2, 3, 6 |
-| 5. Prerequisite verifier plumbing fix | Already landed (v1.3 Task 1) — verifier untouched, now confirms/refutes the adjudicated answer |
+| 5. Prerequisite verifier plumbing fix | Already landed (v0.3 Task 1) — verifier untouched, now confirms/refutes the adjudicated answer |
 
 Known deliberate deviations (both flagged in changelog entries):
 - Metrics sampling gated at ≥500pt (cost guard; spec samples all metrics questions).

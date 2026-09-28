@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 **Status:** approved in design, **blocked on spec 1**
-**Target version:** v1.4.3
+**Target version:** v0.4.3
 **Depends on:** `2026-09-20-premise-ledger-design.md` (spec 1). Every trigger in this
 spec reads ledger fields that do not exist until spec 1 ships.
 
@@ -16,7 +16,7 @@ spec reads ledger fields that do not exist until spec 1 ships.
 
 ## 1. The problem
 
-Two failures survived v1.4.2, both visible in the Q216 trace.
+Two failures survived v0.4.2, both visible in the Q216 trace.
 
 **A premise nobody was assigned to test never gets tested.** s1 flagged the
 byte-profile premise UNVERIFIED in round 1 and again in round 2. It held the same
@@ -168,7 +168,7 @@ ledger — SH does not write it and cannot soften it:
 
 ```
 PREMISES ALREADY DISPROVEN — do not rebuild on these:
-[p5] REFUTED by v1 — "The 3333 flow's byte profile shows submission, not download"
+[p5] REFUTED by v0 — "The 3333 flow's byte profile shows submission, not download"
      disproven by: ibc=5782875 obc=177
 
 A line of reasoning that needs one of these to be true is already known wrong.
@@ -223,7 +223,7 @@ thing from judging whether reasoning was rebuilt.
 ## 5. Risks
 
 **Cost.** Worst case per question is `seniors × MAX_VALIDATORS_PER_SENIOR` = 3 × 3 =
-9 extra workers. At v1.4.2's Q216 cost of $0.86 that is a large multiple, and the
+9 extra workers. At v0.4.2's Q216 cost of $0.86 that is a large multiple, and the
 cost-limited-runs policy is active. The provisional caps in §7 are deliberately
 tight for this reason, and §8's first run is a single question.
 
@@ -286,9 +286,9 @@ measured, and these are reads of the same data.
 
 ### 8.2 What the two runs actually said (2026-09-21)
 
-Read off `log/temp/v1.4.2_ledger_Q216_r1/premise_ledger.json` and
-`.../v1.4.2_ledger_Q216_r2/premise_ledger.json`. Full analysis in
-`docs/version_architecture/v1/v1.4.2.md`.
+Read off `log/temp/v0.4.2_ledger_Q216_r1/premise_ledger.json` and
+`.../v0.4.2_ledger_Q216_r2/premise_ledger.json`. Full analysis in
+`docs/version_architecture/v0/v0.4.2.md`.
 
 r1 is **not usable for calibration**: its 28 premises include six re-filings of the
 same three claims, a runner defect fixed in `79f3823`. r2 is the realistic shape.
@@ -320,7 +320,7 @@ knowledge to return REFUTED.
 ### Where to read it
 
 Spec 1's Q216 run is a smoke run, so under the project's logging rules it lands in
-`log/temp/<run name>/` (not `log/v1/`, and not cost-tracked). The artifacts:
+`log/temp/<run name>/` (not `log/v0/`, and not cost-tracked). The artifacts:
 
 | Artifact | Holds |
 |---|---|
@@ -361,9 +361,9 @@ the provisional number and the reason it was wrong are the useful record.
 
 | File | Change |
 |---|---|
-| `agent/v1/validator.py` | **new** — the validation worker: prompt, one-round runner, ledger write-back |
-| `agent/v1/premise.py` | trigger predicate (`needs_validation`), validator accounting |
-| `agent/v1/question_state.py` | `validators_spent` per senior; validators consume no spawn slot |
-| `agent/v1/sh_loop.py` | automatic retire-and-spawn on the trigger; AA brief injection |
-| `agent/v1/conversation.py` | SPAWN gains `deviation` + `inherited_entities`; the `deviation` gate |
-| `agent/v1/tests/` | as §6 |
+| `agent/v0/validator.py` | **new** — the validation worker: prompt, one-round runner, ledger write-back |
+| `agent/v0/premise.py` | trigger predicate (`needs_validation`), validator accounting |
+| `agent/v0/question_state.py` | `validators_spent` per senior; validators consume no spawn slot |
+| `agent/v0/sh_loop.py` | automatic retire-and-spawn on the trigger; AA brief injection |
+| `agent/v0/conversation.py` | SPAWN gains `deviation` + `inherited_entities`; the `deviation` gate |
+| `agent/v0/tests/` | as §6 |

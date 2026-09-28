@@ -1,16 +1,16 @@
-# Premise Ledger Implementation Plan (spec 1, v1.5)
+# Premise Ledger Implementation Plan (spec 1, v0.5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the senior's prose `## Assumptions` section, and every regex that reads it, with one runner-owned structured premise ledger that a senior cannot drop a premise from.
 
-**Architecture:** A new `agent/v1/premise.py` owns the models, the ledger, the status transitions and the rendering. The senior emits only *new premises* and *id-keyed updates* through `submit_finding` — never the list — so omission cannot remove a premise. A status moving to VERIFIED or REFUTED requires a quote that the runner finds in a tool result the author actually received. SH's `premise_audit` folds into the same ledger as `author="sh"`. `AuditLine` and the whole regex layer in `senior_report.py` are deleted.
+**Architecture:** A new `agent/v0/premise.py` owns the models, the ledger, the status transitions and the rendering. The senior emits only *new premises* and *id-keyed updates* through `submit_finding` — never the list — so omission cannot remove a premise. A status moving to VERIFIED or REFUTED requires a quote that the runner finds in a tool result the author actually received. SH's `premise_audit` folds into the same ledger as `author="sh"`. `AuditLine` and the whole regex layer in `senior_report.py` are deleted.
 
-**Tech Stack:** Python 3, pydantic v2, pytest. No new dependencies. Tests live in `agent/v1/tests/` and import modules bare (`from premise import ...`) because `conftest.py` puts `agent/` and `agent/v1/` on `sys.path`.
+**Tech Stack:** Python 3, pydantic v2, pytest. No new dependencies. Tests live in `agent/v0/tests/` and import modules bare (`from premise import ...`) because `conftest.py` puts `agent/` and `agent/v0/` on `sys.path`.
 
 **Spec:** `docs/superpowers/specs/2026-09-20-premise-ledger-design.md`
 
-**Baseline before starting:** `pytest agent/v1/tests/ -q` → 498 passed, 5 skipped.
+**Baseline before starting:** `pytest agent/v0/tests/ -q` → 498 passed, 5 skipped.
 
 ---
 
@@ -18,12 +18,12 @@
 
 | File | Responsibility |
 |---|---|
-| `agent/v1/premise.py` | **new.** Models (`PremiseDraft`, `PremiseUpdate`, `Premise`, `OpenQuestion`), the `PremiseLedger`, transition rules, the tool-output quote check, all rendering, and the `premise_ledger.json` dump. Owns `_norm` and `MIN_QUOTE_CHARS`, which move here from `conversation.py` so `conversation.py` can import from `premise.py` without a cycle |
-| `agent/v1/finding.py` | `submit_finding` gains `new_premises`, `premise_updates`, `open_questions`; `parse_finding` extracts them. Accepts either a real list or a JSON string, so Task 0's outcome changes one type annotation and nothing else |
-| `agent/v1/senior_session.py` | Accumulates the per-senior tool-output corpus across rounds; applies the round's updates to the ledger; injects the carry-forward block into the next round's message |
-| `agent/v1/conversation.py` | `AuditLine` deleted. `SeniorDirective` gains `new_premises`, `premise_updates`, `answer_premise_ids`. Gates read the ledger |
-| `agent/v1/sh_loop.py` | Owns one `PremiseLedger` per question; wires it through the wave; `render_wave` prints the table; the `doubts` dict is deleted; prompt updated |
-| `agent/v1/senior_report.py` | Regex layer deleted; open questions leave the report entirely |
+| `agent/v0/premise.py` | **new.** Models (`PremiseDraft`, `PremiseUpdate`, `Premise`, `OpenQuestion`), the `PremiseLedger`, transition rules, the tool-output quote check, all rendering, and the `premise_ledger.json` dump. Owns `_norm` and `MIN_QUOTE_CHARS`, which move here from `conversation.py` so `conversation.py` can import from `premise.py` without a cycle |
+| `agent/v0/finding.py` | `submit_finding` gains `new_premises`, `premise_updates`, `open_questions`; `parse_finding` extracts them. Accepts either a real list or a JSON string, so Task 0's outcome changes one type annotation and nothing else |
+| `agent/v0/senior_session.py` | Accumulates the per-senior tool-output corpus across rounds; applies the round's updates to the ledger; injects the carry-forward block into the next round's message |
+| `agent/v0/conversation.py` | `AuditLine` deleted. `SeniorDirective` gains `new_premises`, `premise_updates`, `answer_premise_ids`. Gates read the ledger |
+| `agent/v0/sh_loop.py` | Owns one `PremiseLedger` per question; wires it through the wave; `render_wave` prints the table; the `doubts` dict is deleted; prompt updated |
+| `agent/v0/senior_report.py` | Regex layer deleted; open questions leave the report entirely |
 
 **Build order:** new code first (Tasks 1–7), swap the callers over (Tasks 8–9), delete the old layer last (Task 10). The suite stays green at every commit except where a task explicitly says otherwise.
 
@@ -90,7 +90,7 @@ Expected: one of the three VERDICT lines. Cost is a single short completion.
 
 - [ ] **Step 3: Record the outcome**
 
-Append to `docs/version_architecture/v1/v1.5.md` under `## Changelog` (create the file with that heading if absent):
+Append to `docs/version_architecture/v0/v0.5.md` under `## Changelog` (create the file with that heading if absent):
 
 ```markdown
 - Probed GLM-5.3 on AI& for nested tool arguments (2026-09-20): a `list[dict]` parameter
@@ -101,8 +101,8 @@ Append to `docs/version_architecture/v1/v1.5.md` under `## Changelog` (create th
 - [ ] **Step 4: Commit the record**
 
 ```bash
-git add docs/version_architecture/v1/v1.5.md
-git commit -m "docs(v1.5): record the GLM-5.3 nested-tool-argument probe
+git add docs/version_architecture/v0/v0.5.md
+git commit -m "docs(v0.5): record the GLM-5.3 nested-tool-argument probe
 
 Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ```
@@ -114,8 +114,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 1: `premise.py` — the models
 
 **Files:**
-- Create: `agent/v1/premise.py`
-- Test: `agent/v1/tests/test_premise.py`
+- Create: `agent/v0/premise.py`
+- Test: `agent/v0/tests/test_premise.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -157,7 +157,7 @@ def test_min_quote_chars_is_defined_here_now():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'premise'`
 
 - [ ] **Step 3: Write the module**
@@ -165,10 +165,10 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'premise'`
 ```python
 #!/usr/bin/env python3
 """
-The premise ledger (spec 1, v1.5).
+The premise ledger (spec 1, v0.5).
 
 A senior's premises used to live in its report's "## Assumptions" section as
-prose, read by five regexes. v1.4.2's Q216 was lost to that: s1 flagged the 3333
+prose, read by five regexes. v0.4.2's Q216 was lost to that: s1 flagged the 3333
 flow's byte profile as download-like and UNVERIFIED in rounds 1 and 2, SH
 commanded a restate-only round, and round 3 came back all-VERIFIED with the line
 simply gone. A regex cannot tell a premise that was settled from one that was
@@ -261,14 +261,14 @@ class OpenQuestion(BaseModel):
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: 6 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_premise.py
-git commit -m "feat(v1.5): premise ledger models
+git add agent/v0/premise.py agent/v0/tests/test_premise.py
+git commit -m "feat(v0.5): premise ledger models
 
 PremiseDraft (what an author files), PremiseUpdate (an id-keyed verdict),
 Premise (the ledger entry, text immutable) and OpenQuestion. _norm and
@@ -283,8 +283,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 2: `premise.py` — the ledger holds and carries premises
 
 **Files:**
-- Modify: `agent/v1/premise.py` (append `PremiseLedger`)
-- Test: `agent/v1/tests/test_premise.py` (append)
+- Modify: `agent/v0/premise.py` (append `PremiseLedger`)
+- Test: `agent/v0/tests/test_premise.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -343,10 +343,10 @@ def test_a_candidate_is_recorded_per_round_for_later_calibration():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: FAIL — `ImportError: cannot import name 'PremiseLedger'`
 
-- [ ] **Step 3: Append the ledger to `agent/v1/premise.py`**
+- [ ] **Step 3: Append the ledger to `agent/v0/premise.py`**
 
 ```python
 class PremiseLedger:
@@ -421,14 +421,14 @@ class PremiseLedger:
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: 12 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_premise.py
-git commit -m "feat(v1.5): PremiseLedger holds and carries premises
+git add agent/v0/premise.py agent/v0/tests/test_premise.py
+git commit -m "feat(v0.5): PremiseLedger holds and carries premises
 
 Ids are global to the question because cross-author verification is allowed.
 record_candidate() captures the per-round candidate, which spec 2's trigger
@@ -445,8 +445,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 3: `premise.py` — transitions and the tool-output quote check
 
 **Files:**
-- Modify: `agent/v1/premise.py`
-- Test: `agent/v1/tests/test_premise.py` (append)
+- Modify: `agent/v0/premise.py`
+- Test: `agent/v0/tests/test_premise.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -539,10 +539,10 @@ def test_every_transition_is_recorded_in_history():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: FAIL — `ImportError: cannot import name 'quote_supported'`
 
-- [ ] **Step 3: Append `quote_supported` to `agent/v1/premise.py`**
+- [ ] **Step 3: Append `quote_supported` to `agent/v0/premise.py`**
 
 Place it above `class PremiseLedger`:
 
@@ -607,14 +607,14 @@ def quote_supported(quote: str, corpus: list) -> bool:
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: 22 passed
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_premise.py
-git commit -m "feat(v1.5): premise transitions and the tool-output quote check
+git add agent/v0/premise.py agent/v0/tests/test_premise.py
+git commit -m "feat(v0.5): premise transitions and the tool-output quote check
 
 VERIFIED and REFUTED require a quote the runner finds in a result the author
 actually received. REFUTED is terminal. Withdrawing a verdict needs no quote -
@@ -631,8 +631,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 4: `premise.py` — rendering for the senior and for SH
 
 **Files:**
-- Modify: `agent/v1/premise.py`
-- Test: `agent/v1/tests/test_premise.py` (append)
+- Modify: `agent/v0/premise.py`
+- Test: `agent/v0/tests/test_premise.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -685,7 +685,7 @@ def test_the_refuted_block_carries_the_evidence_that_killed_it():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: FAIL — `AttributeError: 'PremiseLedger' object has no attribute 'render_for_senior'`
 
 - [ ] **Step 3: Append the renderers to `PremiseLedger`**
@@ -695,7 +695,7 @@ Expected: FAIL — `AttributeError: 'PremiseLedger' object has no attribute 'ren
     def render_for_senior(self, author: str) -> str:
         """The unresolved premises this author owns, verbatim, for its next round.
 
-        Carried by the runner unconditionally. The v1.4.2 equivalent fired only
+        Carried by the runner unconditionally. The v0.4.2 equivalent fired only
         when SH graded R4 WEAK or FAIL - and SH grades all-PASS when it wants to
         answer. The runner has no candidate and no preference.
         """
@@ -747,14 +747,14 @@ Expected: FAIL — `AttributeError: 'PremiseLedger' object has no attribute 'ren
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: 28 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_premise.py
-git commit -m "feat(v1.5): ledger rendering for the senior, for SH, and for a replacement
+git add agent/v0/premise.py agent/v0/tests/test_premise.py
+git commit -m "feat(v0.5): ledger rendering for the senior, for SH, and for a replacement
 
 render_for_senior() is the carry-forward block, emitted unconditionally rather
 than on SH's R4 grade. render_table() replaces the three '!!' warning blocks in
@@ -771,8 +771,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 Spec §7: the Q216 run must emit each premise's full status history plus the per-round candidate. Spec 2 §8 calibrates five parameters from this file and says to re-run rather than estimate if it is absent.
 
 **Files:**
-- Modify: `agent/v1/premise.py`
-- Test: `agent/v1/tests/test_premise.py` (append)
+- Modify: `agent/v0/premise.py`
+- Test: `agent/v0/tests/test_premise.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -801,7 +801,7 @@ def test_the_dump_is_empty_for_an_empty_ledger():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: FAIL — `AttributeError: 'PremiseLedger' object has no attribute 'to_records'`
 
 - [ ] **Step 3: Append `to_records` to `PremiseLedger`, and `dump_ledgers` at module level**
@@ -844,14 +844,14 @@ def dump_ledgers(path: str, ledgers: dict) -> None:
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pytest agent/v1/tests/test_premise.py -q`
+Run: `pytest agent/v0/tests/test_premise.py -q`
 Expected: 30 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_premise.py
-git commit -m "feat(v1.5): premise_ledger.json dump with history and per-round candidate
+git add agent/v0/premise.py agent/v0/tests/test_premise.py
+git commit -m "feat(v0.5): premise_ledger.json dump with history and per-round candidate
 
 Spec 1 S7. The history is what spec 2 S8 calibrates against: its trigger asks
 how long a premise sat UNVERIFIED while the candidate held still, which a
@@ -865,8 +865,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 6: `finding.py` — the senior emits drafts, updates and questions
 
 **Files:**
-- Modify: `agent/v1/finding.py` — imports (28-30), `submit_finding` (85-133), `_split` area (136-137), `empty_finding` (174-189), `parse_finding` return (259-274)
-- Test: `agent/v1/tests/test_finding_premises.py` (new)
+- Modify: `agent/v0/finding.py` — imports (28-30), `submit_finding` (85-133), `_split` area (136-137), `empty_finding` (174-189), `parse_finding` return (259-274)
+- Test: `agent/v0/tests/test_finding_premises.py` (new)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -943,7 +943,7 @@ def test_empty_finding_carries_the_new_keys():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_finding_premises.py -q`
+Run: `pytest agent/v0/tests/test_finding_premises.py -q`
 Expected: FAIL — `KeyError: 'new_premises'`
 
 - [ ] **Step 3: Update the imports**
@@ -1080,14 +1080,14 @@ In `parse_finding`'s return dict (lines 259-274), add:
 
 - [ ] **Step 7: Run the tests**
 
-Run: `pytest agent/v1/tests/test_finding_premises.py agent/v1/tests/test_finding.py agent/v1/tests/test_finding_value_shape.py agent/v1/tests/test_finding_report_fields.py -q`
+Run: `pytest agent/v0/tests/test_finding_premises.py agent/v0/tests/test_finding.py agent/v0/tests/test_finding_value_shape.py agent/v0/tests/test_finding_report_fields.py -q`
 Expected: all pass, 9 new
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/finding.py agent/v1/tests/test_finding_premises.py
-git commit -m "feat(v1.5): submit_finding files premise drafts, updates and questions
+git add agent/v0/finding.py agent/v0/tests/test_finding_premises.py
+git commit -m "feat(v0.5): submit_finding files premise drafts, updates and questions
 
 _coerce_objects accepts a real list or a JSON string, so Task 0's probe outcome
 changes one type annotation and no logic. A malformed draft is dropped rather
@@ -1103,8 +1103,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 7: `senior_session.py` — corpus, updates, carry-forward
 
 **Files:**
-- Modify: `agent/v1/senior_session.py` — after `unseen_rows_note` (line 43), `__init__` (57-99), `work` (101-159), `_message_for` (168-191)
-- Test: `agent/v1/tests/test_senior_session_premises.py` (new)
+- Modify: `agent/v0/senior_session.py` — after `unseen_rows_note` (line 43), `__init__` (57-99), `work` (101-159), `_message_for` (168-191)
+- Test: `agent/v0/tests/test_senior_session_premises.py` (new)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1200,7 +1200,7 @@ def test_open_questions_are_filed_with_ids():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_senior_session_premises.py -q`
+Run: `pytest agent/v0/tests/test_senior_session_premises.py -q`
 Expected: FAIL — `ImportError: cannot import name 'tool_outputs'`
 
 - [ ] **Step 3: Add `tool_outputs` after `unseen_rows_note` (line 43)**
@@ -1296,14 +1296,14 @@ Replace `_message_for` (168-191) with:
 
 - [ ] **Step 7: Run the tests**
 
-Run: `pytest agent/v1/tests/test_senior_session_premises.py agent/v1/tests/test_senior_session.py -q`
+Run: `pytest agent/v0/tests/test_senior_session_premises.py agent/v0/tests/test_senior_session.py -q`
 Expected: all pass, 7 new
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/senior_session.py agent/v1/tests/test_senior_session_premises.py
-git commit -m "feat(v1.5): the session carries the ledger through every round
+git add agent/v0/senior_session.py agent/v0/tests/test_senior_session_premises.py
+git commit -m "feat(v0.5): the session carries the ledger through every round
 
 tool_outputs() accumulates what this senior's tools actually returned across
 rounds - full_state is per-round, so the corpus has to be built up. That corpus
@@ -1321,12 +1321,12 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 8: `conversation.py` — gates read the ledger, `AuditLine` goes
 
 **Files:**
-- Modify: `agent/v1/conversation.py` — imports (26-28); delete `AuditLine` (58-77), `_norm` (80-82), `MIN_QUOTE_CHARS` (85), `_AUDIT_TEXT` (88), `_audit_from_text` (197-213); rewrite `open_question_answers` (114-119), `premise_audit` (175-182), `premise_audit_violations` (330-346), `unverified_audit` (349-351), `evidence_violations` (381-423), `open_question_violations` (426-439); edit `directive_violations` (513-518)
-- Test: `agent/v1/tests/test_conversation_routes.py` (modify)
+- Modify: `agent/v0/conversation.py` — imports (26-28); delete `AuditLine` (58-77), `_norm` (80-82), `MIN_QUOTE_CHARS` (85), `_AUDIT_TEXT` (88), `_audit_from_text` (197-213); rewrite `open_question_answers` (114-119), `premise_audit` (175-182), `premise_audit_violations` (330-346), `unverified_audit` (349-351), `evidence_violations` (381-423), `open_question_violations` (426-439); edit `directive_violations` (513-518)
+- Test: `agent/v0/tests/test_conversation_routes.py` (modify)
 
 - [ ] **Step 1: Write the failing test**
 
-Update `BLANK` at the top of `agent/v1/tests/test_conversation_routes.py`: replace the
+Update `BLANK` at the top of `agent/v0/tests/test_conversation_routes.py`: replace the
 `"open_question_answers": []` and `"premise_audit": []` entries with
 
 ```python
@@ -1432,7 +1432,7 @@ def test_answering_by_id_clears_it():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_conversation_routes.py -q`
+Run: `pytest agent/v0/tests/test_conversation_routes.py -q`
 Expected: FAIL — `ImportError: cannot import name 'ledger_violations'`
 
 - [ ] **Step 3: Update `conversation.py`'s imports and delete the dead pieces**
@@ -1573,7 +1573,7 @@ def ledger_violations(entries: list, ledger, state: QuestionState) -> list[str]:
 def sh_update_violations(entries: list, ledger, reports_of) -> list[str]:
     """SH settles a premise from a senior's REPORT, not from a tool result it never
     saw. The quote is checked against every senior's reports (a premise established
-    by a sibling is still evidence - v1.4.2 Q216 was blocked three turns for quoting
+    by a sibling is still evidence - v0.4.2 Q216 was blocked three turns for quoting
     s1 under s2), and may not cite SH itself."""
     out = []
     for e in entries:
@@ -1618,7 +1618,7 @@ replaces it. Leave the cut-off block (519-523) untouched.
 
 - [ ] **Step 6: Run the tests and fix the fallout**
 
-Run: `pytest agent/v1/tests/test_conversation_routes.py -q`
+Run: `pytest agent/v0/tests/test_conversation_routes.py -q`
 
 Roughly a dozen existing tests reference `premise_audit=[...]`, `AuditLine` or
 `evidence_violations`. Convert each: build a `PremiseLedger`, file the premise with
@@ -1631,8 +1631,8 @@ Expected when done: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/v1/conversation.py agent/v1/tests/test_conversation_routes.py
-git commit -m "feat(v1.5): SH's gates read the ledger; AuditLine deleted
+git add agent/v0/conversation.py agent/v0/tests/test_conversation_routes.py
+git commit -m "feat(v0.5): SH's gates read the ledger; AuditLine deleted
 
 SH now files premises into the same ledger (new_premises) and settles them from
 report quotes (premise_updates), instead of keeping a parallel audit list.
@@ -1653,12 +1653,12 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 9: `sh_loop.py` — wire the ledger, delete the doubts
 
 **Files:**
-- Modify: `agent/v1/sh_loop.py` — imports (28-48), `SH_SYSTEM_PROMPT` + `SENIOR_BRIEF` (69-205), `render_wave` (250-291), `_render_turn` (~318), `_answers_note` (~330), `_directive_text` (~375), `_route_directive` (~382), `run_question` (437-740)
-- Test: `agent/v1/tests/test_sh_loop.py`, `agent/v1/tests/test_sh_prompts.py` (modify)
+- Modify: `agent/v0/sh_loop.py` — imports (28-48), `SH_SYSTEM_PROMPT` + `SENIOR_BRIEF` (69-205), `render_wave` (250-291), `_render_turn` (~318), `_answers_note` (~330), `_directive_text` (~375), `_route_directive` (~382), `run_question` (437-740)
+- Test: `agent/v0/tests/test_sh_loop.py`, `agent/v0/tests/test_sh_prompts.py` (modify)
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `agent/v1/tests/test_sh_loop.py`:
+Append to `agent/v0/tests/test_sh_loop.py`:
 
 ```python
 from premise import PremiseDraft, PremiseLedger
@@ -1684,7 +1684,7 @@ def test_render_wave_still_works_with_an_empty_ledger():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest agent/v1/tests/test_sh_loop.py -q`
+Run: `pytest agent/v0/tests/test_sh_loop.py -q`
 Expected: FAIL — `TypeError: render_wave() got an unexpected keyword argument 'ledger'`
 
 - [ ] **Step 3: Update the imports**
@@ -1894,7 +1894,7 @@ Your questions for SH do not go in the report either - put them in `open_questio
 
 - [ ] **Step 9: Run the full suite**
 
-Run: `pytest agent/v1/tests/ -q`
+Run: `pytest agent/v0/tests/ -q`
 
 `test_sh_prompts.py` asserts on prompt text and `test_sh_loop.py` on `render_wave`'s
 arity and the old `open_question_answers` shape. Update each assertion to the new
@@ -1905,8 +1905,8 @@ Expected when done: green.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.5): sh_loop owns one ledger per question
+git add agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.5): sh_loop owns one ledger per question
 
 The doubts dict is gone - a premise that is not VERIFIED is the same thing, and
 the ledger already carries it. render_wave prints the table instead of the three
@@ -1925,8 +1925,8 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 10: `senior_report.py` — delete the regex layer
 
 **Files:**
-- Modify: `agent/v1/senior_report.py` — `REQUIRED_SECTIONS` (24-32), `_TRIM_ORDER` comment (52-53), delete 98-188
-- Test: `agent/v1/tests/test_senior_report.py`
+- Modify: `agent/v0/senior_report.py` — `REQUIRED_SECTIONS` (24-32), `_TRIM_ORDER` comment (52-53), delete 98-188
+- Test: `agent/v0/tests/test_senior_report.py`
 
 - [ ] **Step 1: Delete the dead functions**
 
@@ -1950,7 +1950,7 @@ Update the `_TRIM_ORDER` comment:
 
 ```python
 # Trimmed first when a report is over the cap: narrative SH can do without. Premises
-# and open questions left the report in v1.5 (they are schema fields on the ledger
+# and open questions left the report in v0.5 (they are schema fields on the ledger
 # now), so a tail cut can no longer eat the sections SH grades on.
 _TRIM_ORDER = ("### What I ran", "### What it means", "## Prior rounds")
 ```
@@ -1962,7 +1962,7 @@ Expected: no matches outside `docs/`.
 
 - [ ] **Step 3: Delete the obsolete tests**
 
-In `agent/v1/tests/test_senior_report.py`, delete every test for the removed functions
+In `agent/v0/tests/test_senior_report.py`, delete every test for the removed functions
 (`test_a_doubt_survives_a_report_that_simply_stops_mentioning_it`, the `open_questions`
 tests, the Coverage/Selection premise tests, the `unverified_premises` tests). Keep the
 `truncate_words`, `novel_spl`, `stamp_header` and `report_violations` tests, and update
@@ -1970,14 +1970,14 @@ tests, the Coverage/Selection premise tests, the `unverified_premises` tests). K
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `pytest agent/v1/tests/ -q`
+Run: `pytest agent/v0/tests/ -q`
 Expected: green
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/senior_report.py agent/v1/tests/test_senior_report.py
-git commit -m "refactor(v1.5): delete the regex layer over the report's prose
+git add agent/v0/senior_report.py agent/v0/tests/test_senior_report.py
+git commit -m "refactor(v0.5): delete the regex layer over the report's prose
 
 Gone: open_doubts, carry_doubts, _DOUBT, _label, unverified_premises,
 has_coverage_premise, has_selection_premise, _has_assumption, and the markdown
@@ -1994,12 +1994,12 @@ Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ## Task 11: One ledger file per run, and the version doc
 
 **Files:**
-- Modify: `agent/v1/run_all_v1.py`
-- Create/modify: `docs/version_architecture/v1/v1.5.md`
+- Modify: `agent/v0/run_all_v0.py`
+- Create/modify: `docs/version_architecture/v0/v0.5.md`
 
 - [ ] **Step 1: Collect and dump in the runner**
 
-In `agent/v1/run_all_v1.py`, add `from premise import dump_ledgers` to the imports and
+In `agent/v0/run_all_v0.py`, add `from premise import dump_ledgers` to the imports and
 a `ledgers: dict = {}` beside the other per-run accumulators. Where each question's
 result is collected, add:
 
@@ -2017,21 +2017,21 @@ After the question loop, before the scoreboard print:
 
 - [ ] **Step 2: Run the full suite**
 
-Run: `pytest agent/v1/tests/ -q`
+Run: `pytest agent/v0/tests/ -q`
 Expected: green
 
 - [ ] **Step 3: Write the version doc**
 
-Create `docs/version_architecture/v1/v1.5.md` following `v1.4.2.md`'s shape: a
+Create `docs/version_architecture/v0/v0.5.md` following `v0.4.2.md`'s shape: a
 `## Changelog` section with one entry per commit from Tasks 0–11 (the Task 0 probe
-result first), then a `## What changed vs v1.4.2` section naming the deleted regex
+result first), then a `## What changed vs v0.4.2` section naming the deleted regex
 layer, the runner-owned ledger, the REFUTED status and the per-round carry-forward.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agent/v1/run_all_v1.py docs/version_architecture/v1/v1.5.md
-git commit -m "feat(v1.5): one premise_ledger.json per run; v1.5 version doc
+git add agent/v0/run_all_v0.py docs/version_architecture/v0/v0.5.md
+git commit -m "feat(v0.5): one premise_ledger.json per run; v0.5 version doc
 
 Claude-Session: https://claude.ai/code/session_016qD8L48LFgQFzy1ZzNgZuE"
 ```
@@ -2047,14 +2047,14 @@ launch this without being asked.
 - [ ] **Step 1: Run Q216 alone**
 
 ```bash
-python agent/v1/run_all_v1.py --ids 216 --run-name v1.5_glm-5.3_Q216
+python agent/v0/run_all_v0.py --ids 216 --run-name v0.5_glm-5.3_Q216
 ```
 
-Output goes to `log/temp/v1.5_glm-5.3_Q216/`.
+Output goes to `log/temp/v0.5_glm-5.3_Q216/`.
 
 - [ ] **Step 2: Read the three things that decide whether spec 1 worked**
 
-1. `log/temp/v1.5_glm-5.3_Q216/premise_ledger.json` exists and holds premises whose
+1. `log/temp/v0.5_glm-5.3_Q216/premise_ledger.json` exists and holds premises whose
    `history` arrays have more than one entry.
 2. The byte-profile premise ("download-like", "inbound", or similar wording) is
    present, and its history shows it either settled with a real quote or still
@@ -2073,7 +2073,7 @@ From the same file, per spec 2 §8.1:
 
 - [ ] **Step 4: Record**
 
-Add a smoke-run section to `docs/version_architecture/v1/v1.5.md` with the score, cost
+Add a smoke-run section to `docs/version_architecture/v0/v0.5.md` with the score, cost
 by role (SH vs senior), latency and the three readings. Write the measured values into
 spec 2's §7 table **alongside** the provisional ones, per spec 2 §8.3 — do not replace
 them silently.
