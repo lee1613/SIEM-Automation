@@ -15,7 +15,6 @@ Cross-question memory is preserved: the MemorySaver thread accumulates every
 plan + task-results summary + final answer across all 58 questions.
 """
 
-import os
 import re
 import sqlite3
 import time
@@ -26,18 +25,17 @@ from typing import Annotated, Any, TypedDict
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from executor_graph import build_executor_graph
 from grounding import best_candidate, is_grounded
-from plan_schema import (Plan, load_manifest, render_briefing, render_plan_text,
-                         render_scope, to_tasks)
 from hitl import RunPaused, resolve_interrupt
-from llm_errors import describe_llm_error, resilient_http_client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 from langsmith.run_helpers import get_current_run_tree, tracing_context
+from llm_errors import describe_llm_error, resilient_http_client
+from plan_schema import Plan, load_manifest, render_briefing, render_plan_text, render_scope, to_tasks
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size

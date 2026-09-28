@@ -20,7 +20,6 @@ either one.
 import inspect
 
 import pytest
-
 from splunk_client import SplunkClient
 from splunk_pool import SplunkConnectionPool
 

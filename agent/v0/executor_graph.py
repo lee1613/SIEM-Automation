@@ -26,8 +26,7 @@ Two properties this buys, both verified against the installed langgraph:
    does the interrupting. Resuming replays that node alone.
 """
 
-import operator
-from typing import Annotated, Any, Callable, TypedDict
+from typing import Annotated, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt

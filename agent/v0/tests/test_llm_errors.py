@@ -1,6 +1,5 @@
 import httpx
 import openai
-import pytest
 from llm_errors import describe_llm_error, provider_of
 from orchestrator import run_sh
 

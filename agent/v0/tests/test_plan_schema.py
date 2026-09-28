@@ -1,10 +1,8 @@
 """SH's structured plan, the dataset briefing, and the task shape they produce."""
 
 import pytest
+from plan_schema import Plan, Spawn, render_briefing, render_plan_text, render_scope, to_tasks
 from pydantic import ValidationError
-
-from plan_schema import (Plan, Spawn, render_briefing, render_plan_text,
-                         render_scope, to_tasks)
 
 
 def _spawn(**kw):
