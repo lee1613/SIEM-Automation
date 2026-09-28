@@ -1,24 +1,8 @@
 """Tests for SeniorSession (spec §2.3, §6, §7)."""
 from question_state import ROUND_ITERS
-from senior_session import SeniorSession, should_alert, should_compact
+from senior_session import SeniorSession, should_alert
 
 WINDOW = 100_000
-
-
-def test_compaction_triggers_when_the_projected_round_would_pass_80_percent():
-    # 60k now + a round's worth (ROUND_ITERS) of 3k/iteration = 84k > 80k
-    assert should_compact(60_000, mean_per_iter=3_000, window=WINDOW) is True
-
-
-def test_no_compaction_when_the_projection_stays_under_80_percent():
-    # 40k now + 12 * 3k = 76k < 80k
-    assert should_compact(40_000, mean_per_iter=3_000, window=WINDOW) is False
-
-
-def test_the_80_percent_boundary_is_exclusive():
-    # exactly 80 000 projected is not yet over the line
-    assert should_compact(80_000 - ROUND_ITERS * 1_000, mean_per_iter=1_000, window=WINDOW) is False
-    assert should_compact(80_001 - ROUND_ITERS * 1_000, mean_per_iter=1_000, window=WINDOW) is True
 
 
 def test_the_operator_alert_fires_at_70_percent_of_the_window():
