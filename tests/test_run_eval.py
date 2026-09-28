@@ -242,8 +242,27 @@ def test_render_leaderboard_contains_both_tables_and_real_numbers():
     assert "| 1000 pt | 2 / 9 | 22.2% |" in markdown
     assert "| 100 pt | 15 / 24 | 62.5% |" in markdown
     assert "46.4%" in markdown
-    assert "$0.63" in markdown  # v1.1 row
-    assert "$31.36" in markdown  # v1.2 row
+    assert "$0.63" not in markdown and "$31.36" not in markdown  # untraced rows hide cost
+    assert "| v1.2 | full 56 | 26 / 56 | 8000 | n/a¹ | n/a¹ |" in markdown
+    assert "| $44.95 | 11.3 h |" in markdown  # v1.4.5 row
+
+
+def test_traced_versions_match_their_run_logs():
+    for version in run_eval.load_versions()["versions"]:
+        if not version.get("traced"):
+            continue
+        rows, usd, seconds = [], 0.0, 0.0
+        for log in version["logs"]:
+            run_dir = REPO / log
+            rows += run_eval.load_rows(run_dir)
+            usd += run_eval.load_cost(run_dir)["total_usd"]
+            metrics = json.loads((run_dir / "metrics.json").read_text())
+            seconds += sum(m["latency_s"]["total"] for m in metrics)
+        summary = run_eval.summarize(rows)
+        assert (summary["correct"], summary["total"], summary["points_earned"]) == (
+            version["correct"], version["questions"], version["points"]), version["version"]
+        assert round(usd, 2) == version["cost_usd"], version["version"]
+        assert round(seconds / 60) == version["latency_min"], version["version"]
 
 
 def test_readme_leaderboard_block_is_in_sync():

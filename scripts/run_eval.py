@@ -159,12 +159,28 @@ def render_leaderboard_markdown(summary: dict, versions: list[dict]) -> str:
         f"| **Overall** | **{correct} / {total}** | **{100 * correct / total:.1f}%** "
         f"— {summary['points_earned']} / {summary['points_possible']} pts |"
     )
-    lines += ["", "| Version | Correct | Points | Cost | Notes |", "|---|:---:|:---:|:---:|---|"]
+    lines += [
+        "",
+        "| Version | Scope | Correct | Points | Cost | Latency | Notes |",
+        "|---|---|:---:|:---:|:---:|:---:|---|",
+    ]
     for version in versions:
+        cost, latency = "n/a¹", "n/a¹"
+        if version.get("traced"):
+            minutes = version["latency_min"]
+            cost = f"${version['cost_usd']:.2f}"
+            latency = f"{minutes / 60:.1f} h" if minutes >= 60 else f"{minutes} min"
         lines.append(
-            f"| {version['version']} | {version['correct']} / {version['questions']} | "
-            f"{version['points']} | ${version['cost_usd']:.2f} | {version['label']} |"
+            f"| {version['version']} | {version['scope']} | {version['correct']} / "
+            f"{version['questions']} | {version['points']} | {cost} | {latency} | {version['label']} |"
         )
+    lines += [
+        "",
+        "¹ v1.2 and earlier are compared on correctness and points only: their cost and "
+        "latency traces predate the tested tracing added in v1.3 and were never verified "
+        "(senior spend was booked to SH, the extractor was priced at $0, and the totals "
+        "were not reconciled with provider billing). Latency is summed question time.",
+    ]
     return "\n".join(lines)
 
 

@@ -14,7 +14,7 @@ This repository is an agent-engineering benchmark built around 56 real forensic 
 
 ## Leaderboard
 
-Complete full runs, generated from `log/v1/run_1.N`:
+The tier table is the last complete full run (run_1.2). The version table covers every version with a scored run, generated from `datasets/evaluation/versions.json`, and each row is checked against its run logs. "5 hard" rows are smoke tests on the five 1000-point questions that no full run had solved (Q216, Q217, Q224, Q328, Q329), so they aren't comparable with full-run scores.
 
 <!-- LEADERBOARD:START -->
 | Tier | Solved / Total | Rate |
@@ -24,15 +24,73 @@ Complete full runs, generated from `log/v1/run_1.N`:
 | 1000 pt | 2 / 9 | 22.2% |
 | **Overall** | **26 / 56** | **46.4%** — 8000 / 22900 pts |
 
-| Version | Correct | Points | Cost | Notes |
-|---|:---:|:---:|:---:|---|
-| v0 | 20 / 56 | 5700 | $7.73 | single agent |
-| v1.0 | 20 / 58 | 5650 | $7.36 | SH + Senior pool |
-| v1.1 | 26 / 56 | 8300 | $0.63 | + Junior tier, cheaper Senior model |
-| v1.2 | 26 / 56 | 8000 | $31.36 | + grounding guard, structured findings |
+| Version | Scope | Correct | Points | Cost | Latency | Notes |
+|---|---|:---:|:---:|:---:|:---:|---|
+| v0 | full 56 | 20 / 56 | 5700 | n/a¹ | n/a¹ | One LangGraph ReAct agent (gpt-5.4) with an SPL verify gate, a sourcetype field manifest and a 15-step cap. The baseline. |
+| v1.0 | full 58 | 20 / 58 | 5650 | n/a¹ | n/a¹ | Split into an SH orchestrator that plans and fresh gpt-5.4 senior workers that search, plus an extractor that submits a bare value. Same 20 correct: the split alone added no accuracy. |
+| v1.1 | full 56 | 26 / 56 | 8300 | n/a¹ | n/a¹ | Plan-and-execute DAG: up to 6 seniors (GLM-5.2) chase competing hypotheses in parallel, and a junior tier takes single lookups. +6 correct, the biggest jump. |
+| v1.2 | full 56 | 26 / 56 | 8000 | n/a¹ | n/a¹ | Crash-safe persistence, a grounding guard and structured findings. Same 26: most misses were the right evidence transcribed wrong, and 28 wrong answers were submitted with confidence. |
+| v1.3.0 | 5 hard (smoke) | 0 / 5 | 0 | $1.36 | 18 min | Consensus voting removed (it never reached a majority); SH briefed with every sourcetype and the top 100 sources; seniors return a structured `submit_finding`. Found Q216's hidden Cisco feed, still 0/5. |
+| v1.4.0 mini | 5 hard (smoke) | 0 / 5 | 0 | $1.26 | 37 min | Conversational loop: seniors keep their thread across rounds, and SH grades every report and routes the senior. With gpt-5.4-mini seniors: 0/5, but 3 honest refusals instead of guesses. |
+| v1.4.0 GLM-5.3 | 5 hard (3 runs) | 2 / 5 | 2000 | $6.45 | 1.6 h | Same loop, with the senior swapped to the reasoning model GLM-5.3. 2/5: Q224 and Q328 solved for the first time in any version. |
+| v1.4.1 | 5 hard (smoke) | 2 / 5 | 2000 | $7.27 | 1.8 h | Only SH may answer: an exhausted budget becomes an explicit refusal instead of a senior's guess, and unverified premises are flagged and checked first. 2/5, 1 wrong, 2 refused. |
+| v1.4.4 | 5 hard (smoke) | 2 / 5 | 2000 | $6.31 | 2.5 h | Premise ledger (quotes must appear in real tool output), a blind validation agent (v1.4.2 to v1.4.3) and soundness checks. 2/5; Q216 moved from a stable 112 to within 1 of the answer. |
+| v1.4.5 | full, stopped at 50 | 24 / 50 | 6900 | $44.95 | 11.3 h | SH memory across questions and per-turn resume. 24/50 correct with only 4 wrong answers submitted; the other 22 were refusals. |
+
+¹ v1.2 and earlier are compared on correctness and points only: their cost and latency traces predate the tested tracing added in v1.3 and were never verified (senior spend was booked to SH, the extractor was priced at $0, and the totals were not reconciled with provider billing). Latency is summed question time.
 <!-- LEADERBOARD:END -->
 
-Regenerate with `python3 scripts/run_eval.py --write`. CI fails if this table drifts from `log/v1/`. The v1.4.5 run below is not in the table because it did not complete.
+Regenerate with `python3 scripts/run_eval.py --write`. CI fails if either table drifts from `log/v1/`.
+
+### What moved accuracy
+
+- **Parallel hypotheses (v1.1): +6 correct.** Up to six seniors chase competing explanations at once instead of one after another. This is still the largest single jump, 20 to 26.
+- **Structured returns (v1.3.0).** v1.2 lost about 5,100 points to transcription, not investigation: the right evidence was scraped from prose into the wrong value (`BSTOLL-L.froth.ly` became `BSTOLL-L`, `1367.875` became `1499.25`). Seniors now return a `submit_finding` tool call whose fields are the answer.
+- **Knowing where the data lives (v1.3.0).** SH is briefed with all 102 sourcetypes and the top 100 sources (99.6% of events), and seniors can search by `source` as well as `sourcetype`. That is how Q216's Cisco NVM feed was found: it is source rank 13, hidden under the generic `syslog` sourcetype.
+- **Removing what didn't measure (v1.3.0).** Self-consistency sampling reached a majority 0 times in 14, and the verifier scored within noise of no verifier. Both were deleted (−897 lines). The deterministic grounding check stayed: `grounded=False` was 0/11 correct, a perfect failure predictor.
+- **A reasoning senior model (v1.4.0).** In the same conversational loop, gpt-5.4-mini seniors scored 0/5 on the hard set and GLM-5.3 scored 2/5. Q224 and Q328 were solved for the first time in any version.
+- **Seniors that keep their thread (v1.4.0).** A senior now survives across rounds, and SH grades every report and steers it with a typed route, instead of throwing workers away and re-briefing new ones from zero.
+- **Evidence must be real (v1.4.2 to v1.4.4).** Every premise needs a quote that appears in tool output the senior really received, and a blind validation agent re-checks load-bearing premises without seeing the question or the candidate answer. Q216, run alone 15 times, shows what this bought and what it didn't: answers first scattered (7113, 3564, 1758, 7070), then settled, with 9 of the last 12 runs answering 112. It became consistent but wrong, because the checks confirmed citations, not soundness. v1.4.4's soundness changes moved it to 1667, within one of the answer.
+
+### From false confidence to honest refusal
+
+Accuracy barely moved between v1.2 and v1.4.5. What changed is what the system does when it is unsure:
+
+| Run | Questions | Correct | Wrong answer submitted | Refused | Correct ÷ submitted |
+|---|:---:|:---:|:---:|:---:|:---:|
+| v0 | 56 | 20 (36%) | 36 (64%) | 0 | 36% |
+| v1.0 | 58 | 20 (34%) | 38 (66%) | 0 | 34% |
+| v1.1 | 56 | 26 (46%) | 30 (54%) | 0 | 46% |
+| v1.2 | 56 | 26 (46%) | 28 (50%) | 2 (4%) | 48% |
+| v1.2, the same 50 questions as v1.4.5 | 50 | 24 (48%) | 25 (50%) | 1 (2%) | 49% |
+| **v1.4.5** | 50 | **24 (48%)** | **4 (8%)** | **22 (44%)** | **86%** |
+
+- **Same questions, same number correct.** On the 50 questions v1.4.5 reached, v1.2 also got 24 right (6,000 points against v1.4.5's 6,900).
+- **v1.2 was confidently wrong half the time.** It submitted 25 wrong values on those 50 questions, each stated as fact, and refused once (Q303).
+- **v1.4.5 submitted 4 wrong answers** (Q216, Q217, Q310, Q320). When it answers, it is right 86% of the time, against 49% for v1.2.
+- **Three design choices produced this.**
+  - Only SH may answer, so a senior's unchecked value can't slip through when the budget runs out (v1.4.1).
+  - The F2 gate blocks ANSWER while any load-bearing premise is unverified.
+  - The validator is an independent reader, so a senior can't certify its own claim.
+- **A refusal routes the case to a human.** When the checks aren't satisfied, SH refuses with `SH retired without answering` instead of guessing. It hands over its reasoning and investigation path so an analyst can pick up the case:
+  - SH's full conversation and every senior report (`questions/<QID>.json`, `timeline.md`);
+  - the SPL that ran;
+  - the premise ledger, showing which claims are verified and which are still open (`premise_ledgers/<QID>.json`).
+
+  The analyst starts from the lead, not from zero, and is never handed a confident wrong IOC to chase.
+
+### Most refusals had already found the answer
+
+The refusals are not a sign that the investigation failed. Of the 22 v1.4.5 refusals, 20 ended because the turn or round budget ran out, not because SH judged the answer absent from the data. Only Q213 and Q301 ended with an explicit `NOT_FOUND`. Sorted by how far each got:
+
+| Where the refused investigation stood | Questions | Points |
+|---|:---:|--:|
+| Held the exact official answer as a candidate, but ran out of turns while verifying premises | 8: Q221, Q300, Q309, Q312, Q315, Q316, Q317, Q326 | 2,800 |
+| Had the right lead with a slightly wrong value (an extra suffix, a first-seen ordering, a miscount of the right email) | 3: Q202, Q212, Q321 | 1,100 |
+| Built on another question's wrong conclusion | 3: Q308, Q311, Q322 | 1,100 |
+| Never found the right evidence, or the answer is only on the web | 8 | 2,000 |
+
+Half of the refusals (11 of 22) had reached the right evidence. The 8 that held the exact answer alone would have taken v1.4.5 from 24 to **32 of 50**, well past every earlier version on the same questions. The investigation is working; what loses points now is the budget spent proving premises after the answer is in hand. That is a problem in the gates, not the reasoning, and it is the target after v1.5.0: make verification cheaper without loosening it.
 
 ## Current performance: v1.4.5 (2026-09-24 to 2026-09-25)
 
