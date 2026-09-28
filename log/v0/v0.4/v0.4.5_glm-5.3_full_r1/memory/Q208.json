@@ -1,0 +1,73 @@
+{
+  "flow": [
+    "BSTOLL-L was identified as the only endpoint covered by the per-process CPU telemetry feed `PerfmonMk:Process`, which records `%_Processor_Time` and `process_name`/`instance` values. That made it the mined host candidate and the right place to look for the first 100% CPU event.",
+    "A search for `%_Processor_Time=100` on `PerfmonMk:Process` found four processes with 100% samples: `MicrosoftEdgeCP#2`, `chrome#5`, `chrome#4`, and `MsMpEng`. The report noted that `chrome#4` had a long sustained run, while `chrome#5` had an earlier first 100% sample.",
+    "The final round resolved the key process-instance ambiguity by stating that PID 3400 was recorded first as `chrome#5` when it first hit 100% at 17:37:50, and later as `chrome#4` during the sustained run.",
+    "Given that the question asks for the name of the first process to reach 100 percent CPU processor utilization time from this activity, the earliest qualifying recorded process name in the suspicious window is `chrome#5`.",
+    "No additional evidence in the transcript established a separate mining identifier beyond the CPU telemetry itself, so the answer was taken from the earliest recorded 100% event on BSTOLL-L."
+  ],
+  "derivation": "The question was scoped to endpoint CPU/process telemetry, so I stayed on `PerfmonMk:Process` for host `BSTOLL-L`. The first useful search was `%_Processor_Time=100`, which returned four process names and showed `chrome#5` had an earlier first 100% timestamp than `chrome#4`. The later round on PID 3400 confirmed that the same process record was seen as `chrome#5` at the first 100% hit and later as `chrome#4` during the sustained high-CPU run. That left the earliest recorded qualifying process name as `chrome#5`, which is the submitted answer.",
+  "entities": [
+    {
+      "key": "BSTOLL-L",
+      "fact": "The Frothly endpoint with the per-process CPU telemetry and the host on which the suspicious high-CPU activity was observed."
+    },
+    {
+      "key": "PerfmonMk:Process",
+      "fact": "The per-process Windows performance-counter feed that records `%_Processor_Time`, `process_cpu_used_percent`, `process_name`, `instance`, and `_time`."
+    },
+    {
+      "key": "chrome#5",
+      "fact": "The process name recorded first at the 100% CPU event at 17:37:50 on BSTOLL-L."
+    },
+    {
+      "key": "chrome#4",
+      "fact": "The process name recorded later during the sustained high-CPU run on the same PID."
+    },
+    {
+      "key": "MicrosoftEdgeCP#2",
+      "fact": "A process name that also had a single 100% CPU sample, but earlier than the mining window."
+    },
+    {
+      "key": "MsMpEng",
+      "fact": "A process name that had a single 100% CPU sample immediately after the sustained high-CPU run ended."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "fact": "Per-process CPU telemetry on BSTOLL-L includes `%_Processor_Time` and `process_name`/`instance`; it is the feed used to identify the first 100% CPU process."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "Used only as a corroborating source in the transcript; no decisive network evidence for chrome.exe was found in the searched rounds."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "purpose": "Find processes that reached 100% CPU on the mined endpoint and compare their first timestamps.",
+      "spl": "index=botsv3 sourcetype=\"PerfmonMk:Process\" \"%_Processor_Time\"=100 | stats count min(_time) max(_time) by process_name instance | sort first_time",
+      "returns": "Four processes with 100% samples: `MicrosoftEdgeCP#2` (first 13:36:26Z), `chrome#5` (first 17:37:50Z), `chrome#4` (first 17:38:30Z, last 18:04:11Z), and `MsMpEng` (first 18:04:31Z)."
+    },
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "purpose": "Confirm host coverage and identify the single endpoint in the CPU feed.",
+      "spl": "| stats min(_time) max(_time) dc(process_name) by host",
+      "returns": "The feed covers only `BSTOLL-L` from 13:04 to 18:37Z on Aug 20 2018."
+    },
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "purpose": "Resolve the PID/process-name ambiguity for the suspicious high-CPU run.",
+      "spl": "index=botsv3 sourcetype=\"PerfmonMk:Process\" ID_Process=3400 _time>=1534772230 _time<=1534772345 | stats count values(process_name) as instance values(eval(round('%_Processor_Time',2))) as pct_processor by _time | sort _time",
+      "returns": "The final report states that PID 3400 was recorded first as `chrome#5` at its first 100% hit, then as `chrome#4` during the sustained run."
+    }
+  ],
+  "ruled_out": "Ruled out as the final answer sources: `MicrosoftEdgeCP#2` (single 100% sample well before the mining window), `MsMpEng` (single 100% sample after the run ended), and `TiWorker`/other processes that never reached 100%; the transcript did not establish any separate mining identifier beyond the CPU telemetry, and earlier network/keyword hunts did not resolve the question.",
+  "qid": "Q208",
+  "question": "A Frothly endpoint exhibits signs of coin mining activity. What is the name of the first process to reach 100 percent CPU processor utilization time from this activity on this endpoint?",
+  "guidance": "Include any special characters/punctuation.",
+  "answer": "chrome#5",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

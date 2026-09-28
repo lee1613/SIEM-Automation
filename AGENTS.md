@@ -63,66 +63,66 @@ When the user asks the agent to attempt BOTSv3 questions (e.g. "run all question
 
 ## Cost-Limited Runs (active policy)
 
-**No full `run_all_v1.py` runs until the user lifts this.** v1.2's full run cost $31.36 (50x
-v1.1) with net-zero score gain — future runs must stay smoke-test scale.
+**No full `run_all_v0.py` runs until the user lifts this.** v0.2's full run cost $31.36 (50x
+v0.1) with net-zero score gain — future runs must stay smoke-test scale.
 
-- Every future agent run (v1 or later) is a **smoke test on ~5 hard questions**, not a full
+- Every future agent run (v0 or later) is a **smoke test on ~5 hard questions**, not a full
   56-question run. Purpose: exercise reasoning capability / verify a fix, not score.
-- Run via `python agent/v1/run_all_v1.py --ids <5 question ids>`. Output goes to `log/temp/`
+- Run via `python agent/v0/run_all_v0.py --ids <5 question ids>`. Output goes to `log/temp/`
   per the existing smoke-test rule below (unversioned, not cost-tracked, not compared in docs).
 - Default "hard" set (pick 5 from this list unless the user names specific IDs): the 1000-pt
-  residue that survived two full runs per `docs/version_architecture/v1/v1.2_improvement_plans.md`
+  residue that survived two full runs per `docs/version_architecture/v0/v0.2_improvement_plans.md`
   — **Q216, Q217, Q224, Q328, Q329, Q330, Q331**.
 - Escalating back to a full run against the scoreboard requires explicit user go-ahead.
 
-## Versioning & Logging (v1+ multi-agent)
+## Versioning & Logging (v0+ multi-agent)
 
 ### Every change must be recorded in the current in-progress version's doc
 
-A version `v1.x` is considered **in progress** from the moment any code change is made after
-its predecessor's full run, until `v1.x`'s own first full `run_all_v1.py` run completes. While
-`v1.x` is in progress:
+A version `v0.x` is considered **in progress** from the moment any code change is made after
+its predecessor's full run, until `v0.x`'s own first full `run_all_v0.py` run completes. While
+`v0.x` is in progress:
 
 - **Every code change**, no matter how small, must be accompanied by a one-line (or short
-  paragraph, if significant) entry in `docs/version_architecture/v1/v1.x.md`'s changelog —
+  paragraph, if significant) entry in `docs/version_architecture/v0/v0.x.md`'s changelog —
   written **in the same turn as the change**, not deferred. A simple sentence is enough for
   small/mechanical changes (e.g. "Remove extractor validation node"). Give a fuller description
   — what changed, why, and how it was verified — for anything that affects correctness,
   architecture, or the scoring pipeline (e.g. swapping the planning pattern, fixing a
   persistence bug).
-- If `docs/version_architecture/v1/v1.x.md` doesn't exist yet, create it with a `## Changelog`
-  section (see `v1.2.md` for the template) rather than waiting for the version to be "finished."
-- Once `v1.x`'s first full run completes, fold the changelog into a proper "What changed vs
-  v1.(x-1)" comparison section (see `v1.1.md` for the target shape) and start a fresh `v1.(x+1)`
+- If `docs/version_architecture/v0/v0.x.md` doesn't exist yet, create it with a `## Changelog`
+  section (see `v0.2.md` for the template) rather than waiting for the version to be "finished."
+- Once `v0.x`'s first full run completes, fold the changelog into a proper "What changed vs
+  v0.(x-1)" comparison section (see `v0.1.md` for the target shape) and start a fresh `v0.(x+1)`
   changelog for whatever comes next.
 
-When a new version (e.g. `v1.x`, `v2.x`) is run **against the full scoreboard**:
+When a new version (e.g. `v0.x`, `v2.x`) is run **against the full scoreboard**:
 
 1. **Update `docs/version_architecture/`** — finalize the version's architecture doc
-   (`docs/version_architecture/v1/v1.x.md`) and describe **how it compares to the previous
+   (`docs/version_architecture/v0/v0.x.md`) and describe **how it compares to the previous
    version** (what changed and why) — this supersedes the running changelog kept during
    development.
 2. **Update `docs/scoreboard_result/`** — write the version's result doc
-   (`docs/scoreboard_result/v1/v1.x.md`) including **which questions were not answered
+   (`docs/scoreboard_result/v0/v0.x.md`) including **which questions were not answered
    correctly**.
 3. **Prompt the user for the run's cost in dollars** — do not guess it; the user will
    provide the figure to record in the result doc.
 
 Logging rules:
-- **Only full runs are logged** under `log/v1/run_1.x/` (auto-incrementing). Run with
-  `python agent/v1/run_all_v1.py` (no `--ids`/`--limit`).
+- **Only full runs are logged** under `log/v0/run_0.x/` (auto-incrementing). Run with
+  `python agent/v0/run_all_v0.py` (no `--ids`/`--limit`).
 - **Test/smoke runs** (`--ids` or `--limit`) go to `log/temp/` and are NOT versioned, NOT
   compared in docs, and NOT cost-tracked.
 - Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
-  v1.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
+  v0.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
   carries `failed_delegations` and each worker's full state).
 
-### v1 Key Files
+### v0 Key Files
 
 | File | Purpose |
 |------|---------|
-| `agent/v1/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
-| `agent/v1/splunk_subagent.py` | Senior worker pool (reuses v0 graph); structured findings |
-| `agent/v1/extractor.py` | Prose-strip to bare answer; single scoreboard submit |
-| `agent/v1/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
-| `agent/v1/run_all_v1.py` | v1 runner (full run → `log/v1/run_1.x/`; test → `log/temp/`) |
+| `agent/v0/orchestrator.py` | SH mastermind: persistent-memory planning graph + `spawn_senior` |
+| `agent/v0/splunk_subagent.py` | Senior worker pool (reuses v0.0.0 graph); structured findings |
+| `agent/v0/extractor.py` | Prose-strip to bare answer; single scoreboard submit |
+| `agent/v0/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
+| `agent/v0/run_all_v0.py` | v0 runner (full run → `log/v0/run_0.x/`; test → `log/temp/`) |

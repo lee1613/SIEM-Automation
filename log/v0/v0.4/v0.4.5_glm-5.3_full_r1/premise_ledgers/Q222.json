@@ -1,0 +1,88 @@
+[
+  {
+    "qid": "Q222",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "An unauthorized account-description attempt with leaked key AKIAJOGCDXJ5NW5PXUPA can only appear in index=botsv3 sourcetype=aws:cloudtrail as a DescribeAccount* eventName carrying that accessKeyId in userIdentity with a denial errorCode. Searched: eventName=*DescribeAccount* with the key (1 hit), eventName=*Account* with the key (1 hit), and the complete 10-event listing of all leaked-key activity — no other account-description event exists.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Query 1 returned exactly 1 event (DescribeAccountAttributes, Client.UnauthorizedOperation, ElasticWolf/5.1.6); query 2 returned 2 groups, only one unauthorized; query 3 returned 1 event; query 4 returned all 10 leaked-key events with no other account-description call.",
+    "rival": "No rival coverage path: the only other DescribeAccountAttributes events in the whole feed are 8 successful bstoll signin.amazonaws.com calls, not unauthorized and not made with the leaked key.",
+    "stamp": "true",
+    "stamp_reason": "The reported searches show the leaked key with eventName matching DescribeAccount* yielded a single unauthorized DescribeAccountAttributes event, and the raw-event read was used to inspect that event directly.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another leaked-key account-description event exists elsewhere in CloudTrail or in a different service naming pattern. This report says the leaked key with *Account* returned only DescribeAccountAttributes and no other account-description call, so no rival is shown.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"eventName\": \"DescribeAccountAttributes\", \"userAgent\": \"ElasticWolf/5.1.6\", \"errorCode\": \"Client.UnauthorizedOperation\", \"count\": \"1\"}",
+        "evidence": "Query 1 returned exactly 1 event (DescribeAccountAttributes, Client.UnauthorizedOperation, ElasticWolf/5.1.6); query 2 returned 2 groups, only one unauthorized; query 3 returned 1 event; query 4 returned all 10 leaked-key events with no other account-description call."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported searches show the leaked key with eventName matching DescribeAccount* yielded a single unauthorized DescribeAccountAttributes event, and the raw-event read was used to inspect that event directly. | rival: The strongest rival is that another leaked-key account-description event exists elsewhere in CloudTrail or in a different service naming pattern. This report says the leaked key with *Account* returned only DescribeAccountAttributes and no other account-description call, so no rival is shown."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "ElasticWolf/5.1.6"
+    }
+  },
+  {
+    "qid": "Q222",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The event that answers the question is the single DescribeAccountAttributes denial at 2018-08-20T09:27:06Z from 82.102.18.111 (userAgent ElasticWolf/5.1.6), not any other leaked-key event.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Query 4 output shows the IAM burst events (CreateAccessKey, CreateUser, DeleteAccessKey, ListAccessKeys, GetCallerIdentity, GetSessionToken) all carry userAgent Boto3/1.7.44 Python/2.7.12 Linux/4.4.0-1063-aws Botocore/1.10.44 from 35.153.154.221, while the only DescribeAccountAttributes event carries ElasticWolf/5.1.6 from 82.102.18.111.",
+    "rival": "The separate IAM denial burst (CreateAccessKey/CreateUser/DeleteAccessKey/ListAccessKeys at 09:16:12Z from 35.153.154.221, userAgent Boto3/1.7.44 Python/2.7.12 Linux/4.4.0-1063-aws Botocore/1.10.44) — ruled out because none of those eventNames is a describe-account call; and iam:GetUser (also ElasticWolf, 09:27:07Z) — ruled out because it is a GetUser call, not a DescribeAccount* call.",
+    "stamp": "true",
+    "stamp_reason": "The quote offered identifies the single leaked-key DescribeAccountAttributes event and states its raw userAgent field value verbatim as ElasticWolf/5.1.6.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is the later iam:GetUser denial sharing the same tool or the earlier Boto3 IAM burst. The evidence rules those out because neither is a DescribeAccount* event, while the question asks specifically about the unauthorized attempt to describe an account.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"eventName\": \"DescribeAccountAttributes\", \"eventSource\": \"ec2.amazonaws.com\", \"errorCode\": \"Client.UnauthorizedOperation\", \"userAgent\": \"ElasticWolf/5.1.6\", \"count\": \"1\"}",
+        "evidence": "Query 4 output shows the IAM burst events (CreateAccessKey, CreateUser, DeleteAccessKey, ListAccessKeys, GetCallerIdentity, GetSessionToken) all carry userAgent Boto3/1.7.44 Python/2.7.12 Linux/4.4.0-1063-aws Botocore/1.10.44 from 35.153.154.221, while the only DescribeAccountAttributes event carries ElasticWolf/5.1.6 from 82.102.18.111."
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quote offered identifies the single leaked-key DescribeAccountAttributes event and states its raw userAgent field value verbatim as ElasticWolf/5.1.6. | rival: The strongest rival is the later iam:GetUser denial sharing the same tool or the earlier Boto3 IAM burst. The evidence rules those out because neither is a DescribeAccount* event, while the question asks specifically about the unauthorized attempt to describe an account."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "ElasticWolf/5.1.6"
+    }
+  }
+]

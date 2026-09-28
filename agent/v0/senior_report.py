@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+The senior's report (spec §3.1): template validation, the word cap, and the
+three header fields the RUNNER stamps rather than the senior.
+
+`round`, `rounds_remaining` and `novel_spl_count` are stamped here because a
+self-reported progress number is a progress number the senior can report
+favourably. `novel_spl_count == 0` is literal thrashing and hard-fails R2
+without an LLM in the loop (see conversation.effective_r2).
+
+The "Prior rounds" section is the compression mechanism: the senior REWRITES it
+each round rather than appending, so its own history stays six lines instead of
+growing linearly — which is also why the latest report doubles as the
+compaction artifact (§6).
+"""
+
+from __future__ import annotations
+
+import re
+
+REPORT_WORD_CAP = 600   # per-field Coverage pushed real reports past 400 (Q216 r5-r7)
+PRIOR_ROUNDS_MAX_LINES = 6
+
+REQUIRED_SECTIONS = (
+    "## Prior rounds",
+    "## This round",
+    "### What I ran",
+    "### What it means",
+    "## Ruled out",
+)
+
+
+def _norm_query(q: str) -> str:
+    """Whitespace- and case-insensitive form, so re-running a query with different
+    spacing still counts as a repeat."""
+    return re.sub(r"\s+", " ", (q or "").strip().lower())
+
+
+def novel_spl(prior: set, spl_used: list) -> tuple[int, set]:
+    """How many queries this round this senior had not already run, and the
+    updated seen-set. Diffed against ALL of its prior rounds, not just the last."""
+    seen = {_norm_query(q) for q in prior}
+    fresh = {_norm_query(q) for q in (spl_used or []) if _norm_query(q)}
+    new = fresh - seen
+    return len(new), seen | fresh
+
+
+# Trimmed first when a report is over the cap: narrative SH can do without. Premises
+# and open questions left the report in v0.5 (they are schema fields on the ledger
+# now), so a tail cut can no longer eat the sections SH grades on.
+_TRIM_ORDER = ("### What I ran", "### What it means", "## Prior rounds")
+_TRIM_MARK = "_[trimmed by the runner to fit the word cap]_"
+
+
+def _words(text: str) -> int:
+    return len(re.findall(r"\S+", text))
+
+
+def truncate_words(text: str, cap: int = REPORT_WORD_CAP) -> tuple[str, bool]:
+    """Fit a report to the word cap, trimming the narrative sections before the
+    ones SH needs; a tail cut only when that is not enough. `value`/`confidence`
+    are separate schema fields, so trimming the prose never touches the answer (§8)."""
+    text = text or ""
+    if _words(text) <= cap:
+        return text, False
+    for head in _TRIM_ORDER:
+        m = re.search(rf"^{re.escape(head)}[^\n]*\n(.*?)(?=^#{{1,3}} |\Z)", text,
+                      re.MULTILINE | re.DOTALL)
+        if not m:
+            continue
+        body = m.group(1)
+        words = list(re.finditer(r"\S+", body))
+        keep = max(len(words) - (_words(text) - cap) - _words(_TRIM_MARK), 0)
+        kept = body[:words[keep - 1].end()] + "\n" if keep else ""
+        text = text[:m.start(1)] + kept + _TRIM_MARK + "\n\n" + text[m.end(1):]
+        if _words(text) <= cap:
+            return text, True
+    m = list(re.finditer(r"\S+", text))
+    return text[:m[cap - 1].end()] + f"\n\n_[truncated at {cap} words]_", True
+
+
+def report_violations(md: str) -> list[str]:
+    """Template problems worth logging. Advisory: a malformed report is still
+    read by SH — the rubric is what judges it."""
+    out = [f"missing section {s!r}" for s in REQUIRED_SECTIONS if s not in (md or "")]
+    body = re.search(r"^## Prior rounds[^\n]*$(.*?)(?=^## |\Z)", md or "",
+                     re.MULTILINE | re.DOTALL)
+    if body:
+        lines = [ln for ln in body.group(1).splitlines() if ln.strip()]
+        if len(lines) > PRIOR_ROUNDS_MAX_LINES:
+            out.append(f"Prior rounds has {len(lines)} lines "
+                       f"(cap {PRIOR_ROUNDS_MAX_LINES})")
+    return out
+
+
+def stamp_header(md: str, *, senior_id: str, qid: str, round_n: int,
+                 rounds_remaining: int, novel_spl_count: int) -> str:
+    """Replace whatever title the senior wrote with the runner's own, and add the
+    three fields the senior is not allowed to self-report."""
+    body = (md or "").lstrip()
+    # Remove the FIRST line matching ^# (senior's title) and any prior _stamped by runner: line
+    lines = body.splitlines(keepends=True)
+    filtered = []
+    title_removed = False
+    for line in lines:
+        if not title_removed and re.match(r"^# ", line):
+            title_removed = True
+            continue
+        if re.match(r"^_stamped by runner:", line):
+            continue
+        filtered.append(line)
+    body = "".join(filtered).lstrip("\n")
+    head = (f"# {senior_id} - {qid} - Round {round_n}\n"
+            f"_stamped by runner: rounds_remaining={rounds_remaining} "
+            f"novel_spl={novel_spl_count}_\n")
+    return head + body

@@ -1,0 +1,59 @@
+{
+  "flow": [
+    "The question inherits the frothlywebcode bucket and public-access window from Q205, and the target is the successful in-window .tar.gz upload, so the size must come from the S3 access-log record for that object.",
+    "The first senior search in aws:s3:accesslogs found the in-window PUT of frothly_html_memcached.tar.gz at 13:04:17Z with object_size 3076532 bytes, and a later successful PUT of the same key at 14:19:19Z with object_size 3057116 bytes after the bucket had been closed to public access.",
+    "The follow-up raw-event checks verified that the 13:04:17Z row itself contains object_size 3076532 and that the complete successful-PUT set for frothly_html_memcached.tar.gz is those two rows, with the 13:04:17Z row inside the public window and the 14:19:19Z row outside it.",
+    "Using the required 1024-based conversion, 3076532 / 1024 / 1024 rounds to 2.93 megabytes.",
+    "The answer submitted was therefore 2.93."
+  ],
+  "derivation": "The working feed is aws:s3:accesslogs, because the object size is carried there in object_size for REST.PUT.OBJECT uploads. Q205 had already established the relevant bucket (frothlywebcode) and the public-access window, and identified frothly_html_memcached.tar.gz as the successful in-window .tar.gz upload. The senior then searched aws:s3:accesslogs for that key and found two successful PUTs: 13:04:17Z with object_size 3076532 and 14:19:19Z with object_size 3057116. A raw event view confirmed the 13:04:17Z record includes object_size 3076532 directly in the access-log line, and another search over the key showed the full successful set of two PUTs, letting the in-window 13:04:17Z row be distinguished from the later post-window upload. The megabyte value was computed with 1024-based conversion and rounded to two decimals, yielding 2.93.",
+  "entities": [
+    {
+      "key": "frothlywebcode",
+      "fact": "The S3 bucket whose ACL was made public and later closed."
+    },
+    {
+      "key": "frothly_html_memcached.tar.gz",
+      "fact": "The successful in-window .tar.gz upload whose size was measured."
+    },
+    {
+      "key": "OPEN_BUCKET_PLEASE_FIX.txt",
+      "fact": "A separate successful in-window upload, but not the requested .tar.gz file."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:s3:accesslogs",
+      "fact": "REST.PUT.OBJECT records object uploads to the bucket, and object_size carries the upload size in bytes."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:s3:accesslogs",
+      "purpose": "Find successful uploads of the target key and their sizes",
+      "spl": "index=botsv3 sourcetype=aws:s3:accesslogs bucket_name=frothlywebcode key=frothly_html_memcached.tar.gz http_method=PUT | stats count by _time, request_time, http_status, object_size, remote_ip, requester",
+      "returns": "Two successful PUTs: 13:04:17Z with object_size 3076532 (anonymous) and 14:19:19Z with object_size 3057116 (bstoll)."
+    },
+    {
+      "sourcetype": "aws:s3:accesslogs",
+      "purpose": "Verify the in-window row directly from the raw record",
+      "spl": "get_raw_events keyword=35.182.246.222 (aws:s3:accesslogs)",
+      "returns": "Included the raw PUT line for frothlywebcode at 20/Aug/2018:13:04:17 +0000 showing frothly_html_memcached.tar.gz with object_size 3076532 and HTTP 200."
+    },
+    {
+      "sourcetype": "aws:s3:accesslogs",
+      "purpose": "Confirm the complete successful PUT set for the key and separate the later row",
+      "spl": "key=frothly_html_memcached.tar.gz http_method=PUT http_status=200 | stats count by request_time, requester, http_status, object_size",
+      "returns": "Exactly two successful PUTs: 13:04:17Z (requester \"-\", 200, 3076532) and 14:19:19Z (bstoll, 200, 3057116)."
+    }
+  ],
+  "ruled_out": "14:19:19Z PUT of frothly_html_memcached.tar.gz (3057116 B, bstoll) — outside the public window; OPEN_BUCKET_PLEASE_FIX.txt — in window but not a .tar.gz; aws:cloudtrail as the size source — no PutObject/data event for this key.",
+  "qid": "Q206",
+  "question": "What is the size (in megabytes) of the .tar.gz file that was successfully uploaded into the S3 bucket while it was publicly accessible?",
+  "guidance": "Round to two decimal places without the unit of measure. Use 1024 for the byte conversion. Use a period (not a comma) as the radix character.",
+  "answer": "2.93",
+  "verified_premises": [
+    "p1 [coverage] The .tar.gz upload size is recorded in the aws:s3:accesslogs feed's object_size field for bucket frothlywebcode; CloudTrail holds no PutObject record for this key (queried eventName=PutObject and free-text frothly_html_memcached.tar.gz, both 0 events), so the S3 access log is the only and sufficient source for the size. — holds: The strongest rival is that size must be taken from another feed such as CloudTrail, but the report states CloudTrail has no PutObject for this key and the raw S3 access-log record itself carries the size field for the asked upload."
+  ],
+  "validator_verdicts": []
+}

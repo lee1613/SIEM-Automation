@@ -1,0 +1,83 @@
+{
+  "flow": [
+    "FYODOR-L Sysmon showed two dropped executables on the endpoint: C:\\Windows\\Temp\\hdoor.exe and C:\\Windows\\Temp\\unziped\\lsof-master\\iexeplorer.exe, both created by the same powershell.exe PID 6360.",
+    "The hdoor.exe process-create record showed a single run with command line `\"C:\\windows\\temp\\hdoor.exe\" -hbs 192.168.9.1-192.168.9.50 /b /m /n`, which is an IP-range sweep and therefore fits scanning Frothly's network.",
+    "The same hdoor.exe execution row carried `Hashes=MD5=586EF56F4D8963DD546163AC31C865D7`, making that the candidate hash tied to the scanner file.",
+    "iexeplorer.exe was the rival file, but its runs targeted only `192.168.9.30:8080` and behaved like post-exploitation, not network scanning.",
+    "With hdoor.exe matching the scan behavior and iexeplorer.exe ruled out for that role, the MD5 returned for the downloaded file used to scan Frothly's network is 586EF56F4D8963DD546163AC31C865D7."
+  ],
+  "derivation": "The chain starts in XmlWinEventLog:Microsoft-Windows-Sysmon/Operational on host FYODOR-L. File-create events showed both hdoor.exe and iexeplorer.exe were dropped by the same powershell.exe process, so provenance alone could not distinguish them. The deciding pivot was EventCode=1 process-create behavior: hdoor.exe executed once with a command line sweeping 192.168.9.1-192.168.9.50, while iexeplorer.exe ran repeatedly against only 192.168.9.30:8080. That made hdoor.exe the only held file that fits 'downloaded to Fyodor's endpoint system and used to scan Frothly's network.' Its execution record included the literal hash field `MD5=586EF56F4D8963DD546163AC31C865D7`, which is the answer.",
+  "entities": [
+    {
+      "key": "FYODOR-L",
+      "fact": "Fyodor's endpoint system"
+    },
+    {
+      "key": "hdoor.exe",
+      "fact": "File dropped on FYODOR-L and executed with an IP-range sweep over 192.168.9.1-192.168.9.50"
+    },
+    {
+      "key": "iexeplorer.exe",
+      "fact": "Rival dropped executable on FYODOR-L; ran against only 192.168.9.30:8080"
+    },
+    {
+      "key": "C:\\Windows\\Temp\\hdoor.exe",
+      "fact": "On-endpoint path of hdoor.exe"
+    },
+    {
+      "key": "C:\\Windows\\Temp\\unziped\\lsof-master\\iexeplorer.exe",
+      "fact": "On-endpoint path of iexeplorer.exe"
+    },
+    {
+      "key": "586EF56F4D8963DD546163AC31C865D7",
+      "fact": "MD5 of hdoor.exe"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "EventCode=11 records file creation on FYODOR-L; EventCode=1 records process creation and carries Hashes, CommandLine, ParentImage, and Image."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "Both hdoor.exe and iexeplorer.exe were created by the same powershell.exe PID 6360 on FYODOR-L."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "hdoor.exe's EventCode=1 row contains `Hashes=MD5=586EF56F4D8963DD546163AC31C865D7`."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "iexeplorer.exe's EventCode=1 activity targets only one host, 192.168.9.30:8080."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Find file creations on FYODOR-L",
+      "spl": "index=botsv3 sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" host=FYODOR-L EventCode=11 | stats values(Image), values(ProcessId) by TargetFilename",
+      "returns": "Two dropped executables were identified: hdoor.exe and iexeplorer.exe, both created by powershell.exe PID 6360."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Get the scanner file's execution and hash",
+      "spl": "index=botsv3 sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" host=FYODOR-L Image=hdoor.exe | stats by _time, Image, CommandLine, Hashes, ParentImage, ProcessId, User",
+      "returns": "One execution row: `\"C:\\windows\\temp\\hdoor.exe\" -hbs 192.168.9.1-192.168.9.50 /b /m /n`, with `Hashes=MD5=586EF56F4D8963DD546163AC31C865D7,SHA256=99925199059EE049F7AEDA8904C2F5BDFBA86671FD7A5989BD60B72F26EF737C`."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Check the rival file's behavior",
+      "spl": "index=botsv3 sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" host=FYODOR-L Image=iexeplorer.exe | rex target | stats by Image",
+      "returns": "iexeplorer.exe ran 34 times against one target only: 192.168.9.30:8080."
+    }
+  ],
+  "ruled_out": "iexeplorer.exe (MD5=655D76930C77B713864CD26E386F1DE7) as the scanner file; stream:http as download evidence; nmap/masscan/Angry IP/SoftPerfect process names; direct TargetFilename exact-match filtering on EventCode=11 (backslash-escaping quirk)",
+  "qid": "Q307",
+  "question": "What is the MD5 value of the file downloaded to Fyodor's endpoint system and used to scan Frothly's network?",
+  "guidance": "",
+  "answer": "586EF56F4D8963DD546163AC31C865D7",
+  "verified_premises": [
+    "p1 [coverage] A file downloaded to FYODOR-L and used to scan Frothly's network can appear as: (a) Sysmon EventCode=1 process-create with Hashes (searched host=FYODOR-L, 77 command lines — found hdoor.exe scan execution); (b) Sysmon EventCode=11 file-create (searched, 18 files — hdoor.exe among them); (c) stream:http download record (searched 'hdoor' — 0 events); (d) named scanner tools nmap/masscan/Angry IP/SoftPerfect (searched all hosts — only legitimate Windows components). — holds: The strongest rival is that the needed MD5 would have to come from network telemetry or another host feed instead. The report rules that out for this question by showing the decisive fields—file creation, execution behavior, and Hashes—are already present on FYODOR-L Sysmon records."
+  ],
+  "validator_verdicts": []
+}

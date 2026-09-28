@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Stop the v1 pipeline from dropping, mangling, or fabricating answers that a worker already found — the single biggest fixable point loss in v1.1 (JOINER fabrication 2,300 pts + EXTRACTOR 500 + REASONING 800) — and open the two structurally-blocked classes (raw content, external knowledge).
+**Goal:** Stop the v0 pipeline from dropping, mangling, or fabricating answers that a worker already found — the single biggest fixable point loss in v0.1 (JOINER fabrication 2,300 pts + EXTRACTOR 500 + REASONING 800) — and open the two structurally-blocked classes (raw content, external knowledge).
 
-**Architecture:** All changes sit in the existing LLMCompiler SH graph (`agent/v1/orchestrator.py`), the reused v0 worker graph (`agent/splunk_agent.py`), and the extractor. The load-bearing idea is a **deterministic grounding guard**: the SH's final answer must appear verbatim in some worker's evidence or the question text, or it is rejected and replanned — LLM prompt compliance is a helper, the Python guard is the enforcement. New capabilities (raw-content reads, web lookup) are added as tools; a Verifier node re-checks high-value answers.
+**Architecture:** All changes sit in the existing LLMCompiler SH graph (`agent/v0/orchestrator.py`), the reused v0.0.0 worker graph (`agent/splunk_agent.py`), and the extractor. The load-bearing idea is a **deterministic grounding guard**: the SH's final answer must appear verbatim in some worker's evidence or the question text, or it is rejected and replanned — LLM prompt compliance is a helper, the Python guard is the enforcement. New capabilities (raw-content reads, web lookup) are added as tools; a Verifier node re-checks high-value answers.
 
 **Tech Stack:** Python 3.11, pytest 9.1, LangGraph, LangChain tools, requests.
 
@@ -18,28 +18,28 @@
 
 | File | Responsibility | Change |
 |------|----------------|--------|
-| `agent/v1/grounding.py` | Pure grounding predicate + candidate fallback | **Create** |
-| `agent/v1/orchestrator.py` | Grounded joiner guard; answer-shape in planner; Verifier node; points-aware rounds | Modify |
+| `agent/v0/grounding.py` | Pure grounding predicate + candidate fallback | **Create** |
+| `agent/v0/orchestrator.py` | Grounded joiner guard; answer-shape in planner; Verifier node; points-aware rounds | Modify |
 | `agent/splunk_agent.py` | `get_raw_events` tool; noise-filter prompt patch; points-aware MAX_ITER; cap→PARTIAL discipline | Modify |
-| `agent/v1/web_tool.py` | `web_lookup` tool (DuckDuckGo HTML, no API key) | **Create** |
-| `agent/v1/splunk_subagent.py` | Give workers the web tool; pass points through | Modify |
-| `agent/v1/extractor.py` | Accept `expected_shape` hint | Modify |
-| `agent/v1/run_all_v1.py` | Thread question points + expected_shape through | Modify |
-| `agent/v1/tests/` | pytest for all of the above | add files |
+| `agent/v0/web_tool.py` | `web_lookup` tool (DuckDuckGo HTML, no API key) | **Create** |
+| `agent/v0/splunk_subagent.py` | Give workers the web tool; pass points through | Modify |
+| `agent/v0/extractor.py` | Accept `expected_shape` hint | Modify |
+| `agent/v0/run_all_v0.py` | Thread question points + expected_shape through | Modify |
+| `agent/v0/tests/` | pytest for all of the above | add files |
 
-Run all commands from project root. Tests rely on the existing `agent/v1/tests/conftest.py`.
+Run all commands from project root. Tests rely on the existing `agent/v0/tests/conftest.py`.
 
 ---
 
 ## Task 1: Grounding predicate (pure, the enforcement core)
 
 **Files:**
-- Create: `agent/v1/grounding.py`
-- Create: `agent/v1/tests/test_grounding.py`
+- Create: `agent/v0/grounding.py`
+- Create: `agent/v0/tests/test_grounding.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_grounding.py`:
+Create `agent/v0/tests/test_grounding.py`:
 
 ```python
 from grounding import is_grounded, best_candidate
@@ -84,12 +84,12 @@ def test_best_candidate_none_when_all_empty():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_grounding.py -v`
+Run: `python -m pytest agent/v0/tests/test_grounding.py -v`
 Expected: FAIL — no `grounding` module.
 
 - [ ] **Step 3: Implement `grounding.py`**
 
-Create `agent/v1/grounding.py`:
+Create `agent/v0/grounding.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -98,7 +98,7 @@ Deterministic grounding check for the SH's final answer.
 
 The joiner's FINAL ANSWER must appear verbatim (case-insensitive substring) in
 at least one worker's answer text or in the question itself. If it doesn't, the
-SH invented a value no delegate produced — the v1.1 fabrication failure mode
+SH invented a value no delegate produced — the v0.1 fabrication failure mode
 (Q221 'glacier', Q303 'tomcat7:Summer2018!', Q330 'james', Q333 'cve-2018-7600').
 This module is pure so the guard is unit-testable without a live run.
 """
@@ -136,14 +136,14 @@ def best_candidate(task_results: dict) -> str | None:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_grounding.py -v`
+Run: `python -m pytest agent/v0/tests/test_grounding.py -v`
 Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/grounding.py agent/v1/tests/test_grounding.py
-git commit -m "feat(v1.2): grounding predicate + best-candidate fallback"
+git add agent/v0/grounding.py agent/v0/tests/test_grounding.py
+git commit -m "feat(v0.2): grounding predicate + best-candidate fallback"
 ```
 
 ---
@@ -151,14 +151,14 @@ git commit -m "feat(v1.2): grounding predicate + best-candidate fallback"
 ## Task 2: Wire the grounding guard into the joiner
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`joiner_node`, `JOINER_SYSTEM_PROMPT`)
-- Create: `agent/v1/tests/test_joiner_guard.py`
+- Modify: `agent/v0/orchestrator.py` (`joiner_node`, `JOINER_SYSTEM_PROMPT`)
+- Create: `agent/v0/tests/test_joiner_guard.py`
 
 **Context:** `joiner_node` currently extracts `FINAL ANSWER:` and returns it done. Add: after extracting the answer, if it is NOT grounded and replan rounds remain, force a REPLAN with a pointed message; if ungrounded and no rounds remain, fall back to `best_candidate` (the highest-confidence worker answer) rather than submitting the fabrication. The joiner already has access to `state["tasks"]`, `state["task_results"]`, and the question (last HumanMessage in `state["messages"]`).
 
 - [ ] **Step 1: Write failing tests for the pure guard decision**
 
-Extract the decision into a pure helper so it is testable without the LLM. Create `agent/v1/tests/test_joiner_guard.py`:
+Extract the decision into a pure helper so it is testable without the LLM. Create `agent/v0/tests/test_joiner_guard.py`:
 
 ```python
 from orchestrator import decide_joiner_answer
@@ -196,12 +196,12 @@ def test_ungrounded_no_candidate_keeps_original():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_joiner_guard.py -v`
+Run: `python -m pytest agent/v0/tests/test_joiner_guard.py -v`
 Expected: FAIL — no `decide_joiner_answer`.
 
 - [ ] **Step 3: Implement `decide_joiner_answer` in orchestrator.py**
 
-Add this module-level function to `agent/v1/orchestrator.py` (near `parse_plan`), importing the grounding helpers at the top (`from grounding import is_grounded, best_candidate`):
+Add this module-level function to `agent/v0/orchestrator.py` (near `parse_plan`), importing the grounding helpers at the top (`from grounding import is_grounded, best_candidate`):
 
 ```python
 def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
@@ -226,7 +226,7 @@ def decide_joiner_answer(answer: str, task_results: dict, question_text: str,
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_joiner_guard.py -v`
+Run: `python -m pytest agent/v0/tests/test_joiner_guard.py -v`
 Expected: 4 passed.
 
 - [ ] **Step 5: Call the guard inside `joiner_node`**
@@ -298,41 +298,41 @@ GROUNDING RULE — CRITICAL:
 
 - [ ] **Step 7: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green (previous 27 + new).
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import orchestrator; print('ok')"`
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import orchestrator; print('ok')"`
 Expected: `ok`.
 
 - [ ] **Step 8: Cheap smoke run on two fabrication-class questions**
 
 Run (scratch log root off OneDrive):
-`SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q225,Q301`
+`SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q225,Q301`
 Expected: completes; inspect `metrics.json` — Q225's `grounded` should now be `true` if the guard forced the joiner onto the real `/images/index1.jpeg` candidate (or at least it did not submit `taedonggang.jpeg`). Report the actual submitted answers and grounded flags. (Q301 is a control — a normal grounded question must still work.)
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_joiner_guard.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): grounding guard in joiner (anti-fabrication) + replan routing"
+git add agent/v0/orchestrator.py agent/v0/tests/test_joiner_guard.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): grounding guard in joiner (anti-fabrication) + replan routing"
 ```
 
-(Add a changelog line to `docs/version_architecture/v1/v1.2.md` in this commit.)
+(Add a changelog line to `docs/version_architecture/v0/v0.2.md` in this commit.)
 
 ---
 
 ## Task 3: Answer-shape contract (planner → extractor)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (`PLANNER_SYSTEM_PROMPT`)
-- Modify: `agent/v1/extractor.py` (accept `expected_shape`)
-- Modify: `agent/v1/run_all_v1.py` (pass guidance as shape hint — already have `guidance`)
-- Create: `agent/v1/tests/test_extractor_shape.py`
+- Modify: `agent/v0/orchestrator.py` (`PLANNER_SYSTEM_PROMPT`)
+- Modify: `agent/v0/extractor.py` (accept `expected_shape`)
+- Modify: `agent/v0/run_all_v0.py` (pass guidance as shape hint — already have `guidance`)
+- Create: `agent/v0/tests/test_extractor_shape.py`
 
 **Context:** Q202 submitted `E5-2676 v3` for official `E5-2676`. The extractor already gets `guidance`; add an explicit shape hint so it strips vendor/version suffixes and normalizes list format. Keep it minimal — the scoreboard compares `lower().strip()`, so casing is already safe; ordering/spacing/suffix are the real risks.
 
 - [ ] **Step 1: Write failing test**
 
-Create `agent/v1/tests/test_extractor_shape.py`:
+Create `agent/v0/tests/test_extractor_shape.py`:
 
 ```python
 from extractor import build_extract_prompt
@@ -353,12 +353,12 @@ def test_prompt_without_shape_still_valid():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_extractor_shape.py -v`
+Run: `python -m pytest agent/v0/tests/test_extractor_shape.py -v`
 Expected: FAIL — no `build_extract_prompt`.
 
 - [ ] **Step 3: Extract the prompt builder + add shape**
 
-In `agent/v1/extractor.py`, refactor the inline prompt construction in `extract` into a module-level pure function and add the shape hint:
+In `agent/v0/extractor.py`, refactor the inline prompt construction in `extract` into a module-level pure function and add the shape hint:
 
 ```python
 def build_extract_prompt(question: str, guidance: str, verbose_answer: str,
@@ -389,18 +389,18 @@ Append to `PLANNER_SYSTEM_PROMPT` (after the PLAN block spec):
   list no spaces", "filename with extension". Derive it from the answer guidance.>
 ```
 
-Parse it in the runner and pass to the extractor. In `run_all_v1.py`, after `sh_answer` is produced, the shape is not in the answer — simplest reliable source is `guidance` itself. For now pass `expected_shape=guidance` (the guidance already carries format hints), i.e. `extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)`. (A later iteration can parse the planner's EXPECTED SHAPE line from the SH state; keep this task minimal.)
+Parse it in the runner and pass to the extractor. In `run_all_v0.py`, after `sh_answer` is produced, the shape is not in the answer — simplest reliable source is `guidance` itself. For now pass `expected_shape=guidance` (the guidance already carries format hints), i.e. `extractor.extract(qtext, guidance, sh_answer, qid=qid, expected_shape=guidance)`. (A later iteration can parse the planner's EXPECTED SHAPE line from the SH state; keep this task minimal.)
 
 - [ ] **Step 5: Run tests + full suite**
 
-Run: `python -m pytest agent/v1/tests/test_extractor_shape.py agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/test_extractor_shape.py agent/v0/tests/ -v`
 Expected: all green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/extractor.py agent/v1/orchestrator.py agent/v1/run_all_v1.py agent/v1/tests/test_extractor_shape.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): answer-shape hint through planner->extractor"
+git add agent/v0/extractor.py agent/v0/orchestrator.py agent/v0/run_all_v0.py agent/v0/tests/test_extractor_shape.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): answer-shape hint through planner->extractor"
 ```
 
 ---
@@ -409,13 +409,13 @@ git commit -m "feat(v1.2): answer-shape hint through planner->extractor"
 
 **Files:**
 - Modify: `agent/splunk_agent.py` (`make_tools`, `SYSTEM_PROMPT`)
-- Create: `agent/v1/tests/test_raw_events_tool.py`
+- Create: `agent/v0/tests/test_raw_events_tool.py`
 
 **Context:** Q306/Q310/Q315/Q321/Q322 need to READ raw event content (email bodies, bash history, HTTP payloads), but the verify gate rejects any `run_splunk_search` without `| stats/top/rare`. Add a separate `get_raw_events` tool that returns raw events with a hard `limit`. Because `_verify_call`'s aggregation rule only applies to `run_splunk_search`, a new tool name is automatically exempt — but bound the result size to avoid blowing context. Also patch the prompt so workers stop excluding suspicious files by benign-name blocklists (Q317 excluded `HxTsr.exe` by regex).
 
 - [ ] **Step 1: Write failing test (tool exists, is bounded, registered)**
 
-Create `agent/v1/tests/test_raw_events_tool.py`:
+Create `agent/v0/tests/test_raw_events_tool.py`:
 
 ```python
 from unittest.mock import MagicMock
@@ -448,7 +448,7 @@ def test_get_raw_events_clamps_limit(monkeypatch):
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_raw_events_tool.py -v`
+Run: `python -m pytest agent/v0/tests/test_raw_events_tool.py -v`
 Expected: FAIL — `get_raw_events` not in tools.
 
 - [ ] **Step 3: Add the tool**
@@ -488,19 +488,19 @@ candidate answers by name.
 
 - [ ] **Step 5: Run tests + full suite**
 
-Run: `python -m pytest agent/v1/tests/test_raw_events_tool.py agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/test_raw_events_tool.py agent/v0/tests/ -v`
 Expected: all green.
 
 - [ ] **Step 6: Cheap smoke run on a content question**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q315`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q315`
 Expected: completes; report whether any worker called `get_raw_events` (check the question's `questions/Q315.json` delegations `full_state` for the tool call) and the submitted answer. (Correctness not required for the smoke — tool usage + no crash is the bar.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/splunk_agent.py agent/v1/tests/test_raw_events_tool.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): get_raw_events content-read tool + noise-filter prompt patch"
+git add agent/splunk_agent.py agent/v0/tests/test_raw_events_tool.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): get_raw_events content-read tool + noise-filter prompt patch"
 ```
 
 ---
@@ -508,15 +508,15 @@ git commit -m "feat(v1.2): get_raw_events content-read tool + noise-filter promp
 ## Task 5: Web-knowledge tool
 
 **Files:**
-- Create: `agent/v1/web_tool.py`
-- Modify: `agent/v1/splunk_subagent.py` (add the tool to worker graphs)
-- Create: `agent/v1/tests/test_web_tool.py`
+- Create: `agent/v0/web_tool.py`
+- Modify: `agent/v0/splunk_subagent.py` (add the tool to worker graphs)
+- Create: `agent/v0/tests/test_web_tool.py`
 
 **Context:** Q213/Q302 (Symantec severity/date) and Q332/Q333 (CVE mapping) need external knowledge. Add a keyless `web_lookup` using DuckDuckGo's HTML endpoint; parse the top result snippets. Must degrade gracefully (return a clear "no network" string, never raise) so offline unit tests and Splunk-only runs don't break.
 
 - [ ] **Step 1: Write failing tests (mock the HTTP layer)**
 
-Create `agent/v1/tests/test_web_tool.py`:
+Create `agent/v0/tests/test_web_tool.py`:
 
 ```python
 from unittest.mock import patch
@@ -544,12 +544,12 @@ def test_web_lookup_network_failure_is_graceful():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_web_tool.py -v`
+Run: `python -m pytest agent/v0/tests/test_web_tool.py -v`
 Expected: FAIL — no `web_tool`.
 
 - [ ] **Step 3: Implement `web_tool.py`**
 
-Create `agent/v1/web_tool.py`:
+Create `agent/v0/web_tool.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -604,30 +604,30 @@ def web_lookup(query: str) -> str:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_web_tool.py -v`
+Run: `python -m pytest agent/v0/tests/test_web_tool.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Give workers the tool**
 
-In `agent/v1/splunk_subagent.py`, the worker graph is built by `agent_mod.create_agent(...)`. Rather than change v0's tool list globally, extend the worker after creation is awkward — instead pass the extra tool through. Simplest: in `create_agent` (`agent/splunk_agent.py`), accept an optional `extra_tools: list | None = None` param, and if provided, append to `tools` before `tool_map`/`bind_tools`. Then in `SplunkWorkerPool.__init__`, import `from web_tool import web_lookup` and pass `extra_tools=[web_lookup]` into `create_agent`. Add a one-line mention to the ESCALATE/worker instructions that a `web_lookup` tool exists for external facts.
+In `agent/v0/splunk_subagent.py`, the worker graph is built by `agent_mod.create_agent(...)`. Rather than change v0's tool list globally, extend the worker after creation is awkward — instead pass the extra tool through. Simplest: in `create_agent` (`agent/splunk_agent.py`), accept an optional `extra_tools: list | None = None` param, and if provided, append to `tools` before `tool_map`/`bind_tools`. Then in `SplunkWorkerPool.__init__`, import `from web_tool import web_lookup` and pass `extra_tools=[web_lookup]` into `create_agent`. Add a one-line mention to the ESCALATE/worker instructions that a `web_lookup` tool exists for external facts.
 
 - [ ] **Step 6: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import splunk_subagent; print('ok')"`
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import splunk_subagent; print('ok')"`
 Expected: `ok`.
 
 - [ ] **Step 7: Cheap smoke run on a knowledge question**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q213`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q213`
 Expected: completes; report whether `web_lookup` was called and the submitted answer.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/web_tool.py agent/splunk_agent.py agent/v1/splunk_subagent.py agent/v1/tests/test_web_tool.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): keyless web_lookup tool for external knowledge questions"
+git add agent/v0/web_tool.py agent/splunk_agent.py agent/v0/splunk_subagent.py agent/v0/tests/test_web_tool.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): keyless web_lookup tool for external knowledge questions"
 ```
 
 ---
@@ -636,16 +636,16 @@ git commit -m "feat(v1.2): keyless web_lookup tool for external knowledge questi
 
 **Files:**
 - Modify: `agent/splunk_agent.py` (`create_agent`/`agent_node` — dynamic MAX_ITER, forced-final message)
-- Modify: `agent/v1/splunk_subagent.py` (`run_senior` accepts points)
-- Modify: `agent/v1/orchestrator.py` (pass question points to workers)
-- Modify: `agent/v1/run_all_v1.py` (thread points in)
-- Create: `agent/v1/tests/test_budget.py`
+- Modify: `agent/v0/splunk_subagent.py` (`run_senior` accepts points)
+- Modify: `agent/v0/orchestrator.py` (pass question points to workers)
+- Modify: `agent/v0/run_all_v0.py` (thread points in)
+- Create: `agent/v0/tests/test_budget.py`
 
-**Context:** 46/56 questions got identical effort in v1.1; five of eight 1000-pt questions were wrong. Give ≥500-pt questions a larger iteration budget. And when the cap IS hit, force the worker's final message to be a PARTIAL-with-evidence, never a bare guess (Q328/Q332/Q333 guessed at the cap).
+**Context:** 46/56 questions got identical effort in v0.1; five of eight 1000-pt questions were wrong. Give ≥500-pt questions a larger iteration budget. And when the cap IS hit, force the worker's final message to be a PARTIAL-with-evidence, never a bare guess (Q328/Q332/Q333 guessed at the cap).
 
 - [ ] **Step 1: Write failing test for the budget function**
 
-Create `agent/v1/tests/test_budget.py`:
+Create `agent/v0/tests/test_budget.py`:
 
 ```python
 from splunk_agent import iter_budget
@@ -663,7 +663,7 @@ def test_low_value_gets_base():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_budget.py -v`
+Run: `python -m pytest agent/v0/tests/test_budget.py -v`
 Expected: FAIL — no `iter_budget`.
 
 - [ ] **Step 3: Implement `iter_budget` + use it**
@@ -688,7 +688,7 @@ Thread an optional `max_iter` through: `create_agent(..., max_iter: int = MAX_IT
 
 - [ ] **Step 4: Thread points from runner → orchestrator → worker**
 
-- `run_all_v1.py`: the SH message already knows `points`; pass it into `run_sh(... , points=points)` and store on `ctx` (`ctx.current_points = points` in `reset_question`).
+- `run_all_v0.py`: the SH message already knows `points`; pass it into `run_sh(... , points=points)` and store on `ctx` (`ctx.current_points = points` in `reset_question`).
 - `orchestrator.py`: `DelegationContext.reset_question(qid, points=0)` stores `self.current_points`. In `_run_senior`/`ctx.pool.run_senior`, pass `ctx.current_points`.
 - `splunk_subagent.py`: `run_senior(self, subquestion, parent_qid, idx, points=0)`; build/select a graph with `max_iter=iter_budget(points)`. Since the graph is built once in `__init__`, instead build the LLM per-call is expensive — simplest: build TWO graphs at init, `self.senior_graph` (base) and `self.senior_graph_hi` (max_iter=25), and pick by `points>=500`. Document this.
 
@@ -696,19 +696,19 @@ Add `iter_budget` import in `splunk_subagent.py`.
 
 - [ ] **Step 5: Run tests + full suite**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green.
 
 - [ ] **Step 6: Cheap smoke run on a 1000-pt question**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q330`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q330`
 Expected: completes; report the max `iterations` seen across Q330's delegations in `questions/Q330.json` (should be allowed up to 25) and whether any delegation hit the cap with a PARTIAL (not a bare guess).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/splunk_agent.py agent/v1/splunk_subagent.py agent/v1/orchestrator.py agent/v1/run_all_v1.py agent/v1/tests/test_budget.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): points-aware iteration budget + cap->PARTIAL discipline"
+git add agent/splunk_agent.py agent/v0/splunk_subagent.py agent/v0/orchestrator.py agent/v0/run_all_v0.py agent/v0/tests/test_budget.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): points-aware iteration budget + cap->PARTIAL discipline"
 ```
 
 ---
@@ -716,14 +716,14 @@ git commit -m "feat(v1.2): points-aware iteration budget + cap->PARTIAL discipli
 ## Task 7: Verifier node (highest-value, needs full-run tuning)
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (new `verifier_node`, routing, prompt)
-- Create: `agent/v1/tests/test_verifier.py`
+- Modify: `agent/v0/orchestrator.py` (new `verifier_node`, routing, prompt)
+- Create: `agent/v0/tests/test_verifier.py`
 
 **Context:** For ≥500-pt questions, after the joiner produces a grounded FINAL ANSWER, run one Verifier pass: a Senior worker in "prove-or-refute" mode runs ≤3 confirmation queries. Refuted → one targeted replan. This catches SENIOR-REASONING errors (Q212 wrong-timestamp "first", Q210 connection≠mining). This is the piece most needing full-run tuning, so keep the node behind a points gate and make its decision logic pure+tested; the human tunes the prompt against a full run.
 
 - [ ] **Step 1: Write failing test for the pure verifier decision**
 
-Create `agent/v1/tests/test_verifier.py`:
+Create `agent/v0/tests/test_verifier.py`:
 
 ```python
 from orchestrator import parse_verifier_verdict
@@ -749,12 +749,12 @@ def test_unknown_defaults_to_confirmed():
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_verifier.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier.py -v`
 Expected: FAIL — no `parse_verifier_verdict`.
 
 - [ ] **Step 3: Implement `parse_verifier_verdict`**
 
-Add to `agent/v1/orchestrator.py`:
+Add to `agent/v0/orchestrator.py`:
 
 ```python
 def parse_verifier_verdict(text: str) -> dict:
@@ -771,7 +771,7 @@ def parse_verifier_verdict(text: str) -> dict:
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_verifier.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 5: Add the verifier node (gated on points)**
@@ -797,29 +797,29 @@ with `_should_verify(ctx)` returning `ctx.current_points >= 500`. Add the node, 
 
 - [ ] **Step 6: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -v`
+Run: `python -m pytest agent/v0/tests/ -v`
 Expected: all green.
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import orchestrator; print('ok')"`
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import orchestrator; print('ok')"`
 Expected: `ok`.
 
 - [ ] **Step 7: Cheap smoke run on a reasoning-error question**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q212`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q212`
 Expected: completes; report whether a `Verifier-Q212` worker ran (it's a 100-pt question — actually Q212 is 100pt so it WON'T verify; pick a ≥500 reasoning question instead: use Q210 (500pt)). Run `--ids Q210` and report whether the verifier ran and the final answer.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_verifier.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2): verifier node (prove-or-refute) for >=500pt questions"
+git add agent/v0/orchestrator.py agent/v0/tests/test_verifier.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2): verifier node (prove-or-refute) for >=500pt questions"
 ```
 
 ---
 
 ## Done criteria
 
-- `python -m pytest agent/v1/tests/ -v` all green.
+- `python -m pytest agent/v0/tests/ -v` all green.
 - Each behavior change has a cheap `--ids` smoke run recorded (submitted answer + grounded flag from `metrics.json`), NOT a full run.
 - No change to the scoring/submit path.
-- `docs/version_architecture/v1/v1.2.md` changelog updated per task.
+- `docs/version_architecture/v0/v0.2.md` changelog updated per task.
 - Whole-implementation review after Task 7 focuses on the joiner-routing seams (grounding replan vs verifier vs normal replan must not deadlock or skip END) and the points-threading path.

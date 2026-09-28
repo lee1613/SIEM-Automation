@@ -1,0 +1,128 @@
+[
+  {
+    "qid": "Q314",
+    "senior": "sh",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Coverage: On FYODOR-L, the port used to download the adversary's attack tools can be established by correlating external PowerShell network connections in Sysmon EventCode 3 with the subsequent tool file creations in Sysmon EventCode 11 and any matching HTTP retrieval record in stream:http.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The exact correlation p1 describes is now shown: Sysmon EC3 on FYODOR-L records one connection to 45.77.53.176:3333 at epoch 1534762026 from SourceIp 192.168.70.186 under ProcessGuid {EBF7A186-C442-5B58-0000-00109914D901}; the same ProcessGuid's EC11 events create the tool files at 1534761769 and 1534762061; and the matching stream:http record is the GET /images/logos.png to 45.77.53.176:3333 with PowerShell UA and 5,542,140 bytes out.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The reported complete stream:http and Sysmon rows support the claim that FYODOR-L's tool-download port can be observed through the external HTTP retrieval record and the tied EC3/EC11 host evidence.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that another feed or another port on FYODOR-L better captures the tool-download act. The same held results show the only retrieval-bearing external HTTP event is on 3333 and the tool-drop ProcessGuid is on FYODOR-L, so this coverage claim fits the question.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"ProcessGuid\": \"{EBF7A186-C442-5B58-0000-00109914D901}\", \"files\": [\"C:\\\\Windows\\\\Temp\\\\hdoor.exe\", \"C:\\\\Windows\\\\Temp\\\\unziped\\\\lsof-master\\\\iexeplorer.exe\", \"C:\\\\Windows\\\\Temp\\\\unziped\\\\lsof-master\\\\powershell.exe\"], \"times\": [\"1534761769\", \"1534762061\"]}",
+        "evidence": "The exact correlation p1 describes is now shown: Sysmon EC3 on FYODOR-L records one connection to 45.77.53.176:3333 at epoch 1534762026 from SourceIp 192.168.70.186 under ProcessGuid {EBF7A186-C442-5B58-0000-00109914D901}; the same ProcessGuid's EC11 events create the tool files at 1534761769 and 1534762061; and the matching stream:http record is the GET /images/logos.png to 45.77.53.176:3333 with PowerShell UA and 5,542,140 bytes out."
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported complete stream:http and Sysmon rows support the claim that FYODOR-L's tool-download port can be observed through the external HTTP retrieval record and the tied EC3/EC11 host evidence. | rival: The strongest rival is that another feed or another port on FYODOR-L better captures the tool-download act. The same held results show the only retrieval-bearing external HTTP event is on 3333 and the tool-drop ProcessGuid is on FYODOR-L, so this coverage claim fits the question."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q314",
+    "senior": "sh",
+    "id": "p2",
+    "kind": "selection",
+    "text": "Selection: The adversary used port 3333 to download the attack tools, not 443, because the same ProcessGuid and socket details tie the single 45.77.53.176:3333 HTTP GET directly to the later tool-file creations, while 443 has no retrieval record and only recurring beacon-like traffic.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The rival 443 is eliminated as the retrieval port: the complete stream:http record set for site 45.77.53.176* contains only dest_port 3333 (no 443 retrieval record exists), and Sysmon shows 443 carrying only 693 recurring connections over ~67 minutes from the same ProcessGuid — beacon-like traffic, not a download — while the single 3333 connection at 1534762026 precedes the tool-file creations at 1534762061 by the same ProcessGuid.",
+    "rival": "Port 443 on 45.77.53.176 is the strongest rival because the same PowerShell process also connected there repeatedly. The evidence rules it out by showing the only HTTP retrieval record is the 5,782,482-byte GET on port 3333 and that the tool-file creations are linked to that same socket/ProcessGuid sequence, whereas 443 has no HTTP retrieval record and shows steady repeated cadence instead.",
+    "stamp": "true",
+    "stamp_reason": "The reported rows support the selection as written: stream:http shows the only retrieval event on 3333, and Sysmon ties that socket's ProcessGuid to later tool creation while 443 is described as repeated recurring traffic.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is port 443 to the same IP. The evidence rules it out by showing no HTTP retrieval record on 443 and by contrasting it with the single large 3333 GET tied to the tool-drop ProcessGuid, so 3333 is the better fit for 'used to download their attack tools'.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 1,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"dest_port\": \"3333\", \"count\": \"1\", \"total_out\": \"5542140\", \"methods\": \"GET\", \"uris\": \"/images/logos.png\", \"uas\": \"Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.17134.112\"}",
+        "evidence": "The rival 443 is eliminated as the retrieval port: the complete stream:http record set for site 45.77.53.176* contains only dest_port 3333 (no 443 retrieval record exists), and Sysmon shows 443 carrying only 693 recurring connections over ~67 minutes from the same ProcessGuid — beacon-like traffic, not a download — while the single 3333 connection at 1534762026 precedes the tool-file creations at 1534762061 by the same ProcessGuid."
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The reported rows support the selection as written: stream:http shows the only retrieval event on 3333, and Sysmon ties that socket's ProcessGuid to later tool creation while 443 is described as repeated recurring traffic. | rival: The strongest rival is port 443 to the same IP. The evidence rules it out by showing no HTTP retrieval record on 443 and by contrasting it with the single large 3333 GET tied to the tool-drop ProcessGuid, so 3333 is the better fit for 'used to download their attack tools'."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q314",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "other",
+    "text": "In stream:http, the 45.77.53.176:3333 GET /images/logos.png record's bytes_out=5,542,140 (http_content_length 5,782,482, content_type image/png, status 200) is the server-to-client bulk payload of the retrieval — the download itself, not an upload.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The literal fields of the single stream:http retrieval event to 45.77.53.176 show a download: http_method=GET is a client-initiated request; status=200 with http_comment \"HTTP/1.1 200 OK\" is a successful full response; http_content_length=5782482 with http_content_type=image/png is the response body's declared size; bytes_in=177 (request) versus bytes_out=5542140 (response) shows the bulk moved server-to-client from 45.77.53.176:3333 to src_ip 192.168.70.186 (FYODOR-L) — the download itself, not an upload. The PowerShell user-agent ties it to the adversary's process, and the same ProcessGuid created the tool files ~35s later.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted stream:http row directly shows the 45.77.53.176:3333 event as a successful GET with response size fields and byte direction, which supports the claim that this record is a download act.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the 3333 record is some other HTTP act such as an upload, but GET plus status 200 plus bytes_out greatly exceeding bytes_in rules that out. No rival in the same held evidence fits 'used to download their attack tools' as well as this row does.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"count\": \"1\", \"http_method\": \"GET\", \"status\": \"200\", \"http_comment\": \"HTTP/1.1 200 OK\", \"http_content_length\": \"5782482\", \"http_content_type\": \"image/png\", \"bytes_in\": \"177\", \"bytes_out\": \"5542140\", \"src_ip\": \"192.168.70.186\", \"src_port\": \"64104\", \"dest_ip\": \"45.77.53.176\", \"dest_port\": \"3333\", \"uri_path\": \"/images/logos.png\", \"http_user_agent\": \"Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.17134.112\", \"site\": \"45.77.53.176:3333\", \"event_time\": \"1534762036.891\"}",
+        "evidence": "The literal fields of the single stream:http retrieval event to 45.77.53.176 show a download: http_method=GET is a client-initiated request; status=200 with http_comment \"HTTP/1.1 200 OK\" is a successful full response; http_content_length=5782482 with http_content_type=image/png is the response body's declared size; bytes_in=177 (request) versus bytes_out=5542140 (response) shows the bulk moved server-to-client from 45.77.53.176:3333 to src_ip 192.168.70.186 (FYODOR-L) — the download itself, not an upload. The PowerShell user-agent ties it to the adversary's process, and the same ProcessGuid created the tool files ~35s later."
+      },
+      {
+        "round": 11,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted stream:http row directly shows the 45.77.53.176:3333 event as a successful GET with response size fields and byte direction, which supports the claim that this record is a download act. | rival: The strongest rival is that the 3333 record is some other HTTP act such as an upload, but GET plus status 200 plus bytes_out greatly exceeding bytes_in rules that out. No rival in the same held evidence fits 'used to download their attack tools' as well as this row does."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "3333",
+      "2": "3333"
+    }
+  }
+]

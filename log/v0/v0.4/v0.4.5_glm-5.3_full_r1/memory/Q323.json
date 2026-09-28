@@ -1,0 +1,80 @@
+{
+  "flow": [
+    "Sysmon EventCode=3 telemetry to DestinationIp 45.77.53.176 was the direct host-attributed evidence for contacts with the adversary C2.",
+    "That complete aggregation returned exactly two hosts and no others: ABUNGST-L and FYODOR-L.",
+    "Stream:tcp and stream:ip counts were only corroboration, with internal IPs 192.168.70.186 and 192.168.24.128 lining up with those two hosts.",
+    "192.168.9.30 was treated as a non-endpoint/server-role candidate and did not alter the host list.",
+    "Therefore the submit-ready short hostnames were ABUNGST-L,FYODOR-L in alphabetical order."
+  ],
+  "derivation": "The investigation started from the established adversary C2 IP 45.77.53.176. A Sysmon search for that destination IP on XmlWinEventLog:Microsoft-Windows-Sysmon/Operational returned a complete 2-of-2 host aggregation with EventCode=3, naming ABUNGST-L and FYODOR-L and no other hosts. Stream:tcp and stream:ip searches for the same IP were used only as corroboration, showing the matching internal source IPs 192.168.70.186 and 192.168.24.128, while a separate partial listing around 192.168.9.30 suggested server behavior and was ruled out as the endpoint set. The final answer was the alphabetical hostname list ABUNGST-L,FYODOR-L.",
+  "entities": [
+    {
+      "key": "45.77.53.176",
+      "fact": "the adversary's command-and-control IP"
+    },
+    {
+      "key": "ABUNGST-L",
+      "fact": "a Frothly endpoint host that contacted the adversary C2"
+    },
+    {
+      "key": "FYODOR-L",
+      "fact": "a Frothly endpoint host that contacted the adversary C2"
+    },
+    {
+      "key": "192.168.70.186",
+      "fact": "internal source IP corroborated with ABUNGST-L in stream telemetry"
+    },
+    {
+      "key": "192.168.24.128",
+      "fact": "internal source IP corroborated with FYODOR-L in stream telemetry"
+    },
+    {
+      "key": "192.168.9.30",
+      "fact": "a non-selected candidate treated as server-role / not the endpoint hostname answer"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "EventCode=3 records host-attributed network connections; filtering on DestinationIp=45.77.53.176 returned exactly two hosts and no others."
+    },
+    {
+      "sourcetype": "stream:tcp",
+      "fact": "Used as corroboration for contacts to 45.77.53.176; counts aligned with the two Sysmon hosts."
+    },
+    {
+      "sourcetype": "stream:ip",
+      "fact": "Used as corroboration for contacts to 45.77.53.176; counts aligned with the two Sysmon hosts."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "stream:tcp",
+      "purpose": "Corroborate which internal IPs talked to the C2 IP",
+      "spl": "index=botsv3 sourcetype=stream:tcp \"45.77.53.176\" | stats count by src_ip, dest_ip",
+      "returns": "Internal IPs 192.168.24.128, 192.168.70.186, and 192.168.9.30 appeared; 192.168.9.30 had only a small count and was later ruled out."
+    },
+    {
+      "sourcetype": "stream:ip",
+      "purpose": "Corroborate which internal IPs talked to the C2 IP",
+      "spl": "index=botsv3 sourcetype=stream:ip \"45.77.53.176\" | stats count by src_ip, dest_ip",
+      "returns": "Same three internal IPs as stream:tcp, supporting the mapping to the two endpoint hosts."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Identify hosts whose own telemetry shows contact with the C2 IP",
+      "spl": "index=botsv3 sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" \"45.77.53.176\" | stats count by host, DestinationIp, EventCode",
+      "returns": "Exactly two hosts: ABUNGST-L and FYODOR-L; all were EventCode=3 network connections to DestinationIp 45.77.53.176."
+    }
+  ],
+  "ruled_out": "192.168.9.30 and 192.168.8.103 were not part of the answer: 192.168.9.30 behaved like a server / was not host-attributed as a C2-contacting endpoint in the complete Sysmon set, and 192.168.8.103 only contacted 192.168.9.30 rather than the C2 IP.",
+  "qid": "Q323",
+  "question": "At least two Frothly endpoints contact the adversary's command and control infrastructure. What are their short hostnames?",
+  "guidance": "Comma separated without spaces, in alphabetical order.",
+  "answer": "ABUNGST-L,FYODOR-L",
+  "verified_premises": [
+    "p1 [coverage] Coverage: Contact with the adversary's command-and-control infrastructure is directly recorded in Sysmon EventCode=3 network-connection telemetry for DestinationIp 45.77.53.176, and the complete result set for that IP in the searched host-attributed telemetry names every monitored endpoint host that performed that act. — holds: The strongest rival is that another endpoint contacted the same C2 infrastructure in the searched host-attributed scope but is missing from the set. The complete 2-of-2 Sysmon result rules that out for this scope; 192.168.9.30 is not a named host in that result and therefore does not displace the two named endpoints.",
+    "p2 [selection] Selection: ABUNGST-L and FYODOR-L are the Frothly endpoints to submit because the complete Sysmon EventCode=3 result set for DestinationIp 45.77.53.176 names exactly those two hosts and no others; any unresolved non-endpoint or unmonitored asset such as 192.168.9.30 does not displace them for the question's 'at least two endpoints' wording. — holds: The strongest rival is that a third candidate, especially 192.168.9.30, also fits the question as an endpoint contacting the C2. The evidence rules that out well enough for this answer because the complete host-attributed result names only ABUNGST-L and FYODOR-L, and the question asks for at least two endpoints rather than an exhaustive inventory of every internal IP touching the C2."
+  ],
+  "validator_verdicts": []
+}

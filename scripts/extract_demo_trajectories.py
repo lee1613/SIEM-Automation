@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extracts 6 curated question trajectories from log/v1/run_1.2 into a tier-tagged
+"""Extracts 6 curated question trajectories from log/v0/run_0.2 into a tier-tagged
 static JSON file for the Streamlit replay demo. Dev-time only, not deployed.
 Run manually; re-run only if source logs change.
 
@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-TIMELINE = REPO / "log" / "v1" / "run_1.2" / "timeline.md"
-SUBMISSIONS = REPO / "log" / "v1" / "run_1.2" / "scoreboard_submissions.json"
+TIMELINE = REPO / "log" / "v0" / "run_0.2" / "timeline.md"
+SUBMISSIONS = REPO / "log" / "v0" / "run_0.2" / "scoreboard_submissions.json"
 OUTPUT = REPO / "datasets" / "evaluation" / "demo_trajectories.json"
 
 # question id (without "Q") -> narrative kind for the demo UI. Fixed by design

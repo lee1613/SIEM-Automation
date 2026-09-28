@@ -4,10 +4,10 @@
 
 **Goal:** Build a self-serve, replay-only Streamlit app that guides a visitor through a linear
 story (Problem → Architecture → Trajectory → Score) proving why the SH → Senior → Extractor
-multi-agent architecture matters, using real curated data from `log/v1/run_1.2`.
+multi-agent architecture matters, using real curated data from `log/v0/run_0.2`.
 
 **Architecture:** A dev-time extraction script (`scripts/extract_demo_trajectories.py`) parses
-`log/v1/run_1.2/timeline.md` + `scoreboard_submissions.json` once, producing a committed static
+`log/v0/run_0.2/timeline.md` + `scoreboard_submissions.json` once, producing a committed static
 JSON file with tier-tagged trajectory records. The deployed `streamlit_app/app.py` only ever
 does `json.load()` on that file plus the existing `datasets/evaluation/leaderboard.json` — zero
 runtime log parsing, zero LLM/network calls per visitor. A single shared render function draws
@@ -28,7 +28,7 @@ no CSS injection), pandas for table rendering. No new dependency beyond `streaml
 - Curated question set is exactly these 6, with these fixed `kind` labels — do not add, remove,
   or relabel: `Q332` (correct, 1000pt), `Q333` (correct, 1000pt), `Q303` (refusal, 100pt),
   `Q328` (refusal, 1000pt), `Q330` (wrong, 1000pt), `Q224` (wrong, 1000pt).
-- Never display a dollar cost figure or a v1.1-vs-v1.2 cost multiplier claim anywhere in the
+- Never display a dollar cost figure or a v0.1-vs-v0.2 cost multiplier claim anywhere in the
   app. The Score step's cost narrative is the data-integrity-fix story only (commit `8aa9fa1`),
   with no `$` amount attached to it. (`datasets/evaluation/leaderboard.json`'s own `cost` field,
   already public via the Phase 1 README table, may still be rendered as-is in the version
@@ -36,7 +36,7 @@ no CSS injection), pandas for table rendering. No new dependency beyond `streaml
   public artifact.)
 - No test framework, no Streamlit UI tests (locked testing decision in the spec). The one
   automated test is the `assert`-based `demo()` self-check in the extraction script.
-- Source path is `log/v1/run_1.2/timeline.md` and `log/v1/run_1.2/scoreboard_submissions.json`
+- Source path is `log/v0/run_0.2/timeline.md` and `log/v0/run_0.2/scoreboard_submissions.json`
   — read-only inputs, never modified.
 - Output path is `datasets/evaluation/demo_trajectories.json` (not `data/evaluation/` — that
   directory doesn't exist in this repo; the real sibling artifact `leaderboard.json` lives under
@@ -48,7 +48,7 @@ no CSS injection), pandas for table rendering. No new dependency beyond `streaml
 
 **Files:**
 - Create: `scripts/extract_demo_trajectories.py`
-- Reads: `log/v1/run_1.2/timeline.md`, `log/v1/run_1.2/scoreboard_submissions.json`
+- Reads: `log/v0/run_0.2/timeline.md`, `log/v0/run_0.2/scoreboard_submissions.json`
 - Produces: `datasets/evaluation/demo_trajectories.json`
 
 **Interfaces:**
@@ -79,7 +79,7 @@ no CSS injection), pandas for table rendering. No new dependency beyond `streaml
 
 ```python
 #!/usr/bin/env python3
-"""Extracts 6 curated question trajectories from log/v1/run_1.2 into a tier-tagged
+"""Extracts 6 curated question trajectories from log/v0/run_0.2 into a tier-tagged
 static JSON file for the Streamlit replay demo. Dev-time only, not deployed.
 Run manually; re-run only if source logs change.
 
@@ -93,8 +93,8 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-TIMELINE = REPO / "log" / "v1" / "run_1.2" / "timeline.md"
-SUBMISSIONS = REPO / "log" / "v1" / "run_1.2" / "scoreboard_submissions.json"
+TIMELINE = REPO / "log" / "v0" / "run_0.2" / "timeline.md"
+SUBMISSIONS = REPO / "log" / "v0" / "run_0.2" / "scoreboard_submissions.json"
 OUTPUT = REPO / "datasets" / "evaluation" / "demo_trajectories.json"
 
 # question id (without "Q") -> narrative kind for the demo UI. Fixed by design
@@ -296,8 +296,8 @@ Wrote /Users/june/Desktop/Project/SIEM-Automation/datasets/evaluation/demo_traje
 demo() OK: 6 questions, all tier-tagged and non-empty.
 ```
 If it raises an `AssertionError` or `KeyError` on a question number, re-check that
-`log/v1/run_1.2/timeline.md` still contains `## Q<num>` headings for all of
-`332, 333, 303, 328, 330, 224` (`grep -n "^## Q332\|^## Q333\|^## Q303\|^## Q328\|^## Q330\|^## Q224" log/v1/run_1.2/timeline.md`).
+`log/v0/run_0.2/timeline.md` still contains `## Q<num>` headings for all of
+`332, 333, 303, 328, 330, 224` (`grep -n "^## Q332\|^## Q333\|^## Q303\|^## Q328\|^## Q330\|^## Q224" log/v0/run_0.2/timeline.md`).
 
 - [ ] **Step 3: Spot-check the output for the two refusal questions**
 
@@ -691,7 +691,7 @@ def render_step() -> None:
 Run: `cd streamlit_app && streamlit run app.py`
 Expected: on step 4, a metric shows "26 / 56 correct" with "8000 / 22900 pts" beneath it, a
 tier table shows rows for 100/500/1000pt with the correct/total counts from
-`datasets/evaluation/leaderboard.json`, a version-history table lists v0 through v1.2, and an
+`datasets/evaluation/leaderboard.json`, a version-history table lists v0.0.0 through v0.2, and an
 info box shows the cost-tracking-integrity text with no dollar figure or multiplier claim
 anywhere on the page. Confirm by reading the rendered page text — no `$` character should
 appear outside the version-history table (which mirrors the already-public README figures).

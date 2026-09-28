@@ -1,0 +1,75 @@
+{
+  "flow": [
+    "The held CloudTrail evidence narrowed the question to aws:cloudtrail, where userIdentity.accessKeyId identifies the IAM user access key and errorCode/errorMessage distinguish failures.",
+    "The literal IAM service scope, eventSource=iam.amazonaws.com with userIdentity.type=IAMUser, produced three erroring keys but all tied at exactly 1 distinct errorCode, so errorCode alone could not answer the question.",
+    "A fuller strict-scope comparison showed AKIAJOGCDXJ5NW5PXUPA (web_admin) had 6 error events, 1 distinct errorCode, but 5 distinct errorMessage rows / denied operations, while AKIAIGKL572SFDPOKLHA had 9 events but only 1 distinct error/message and ASIAZB6TMXZ7MJUJJK6X had 2 events and 1 distinct error/message.",
+    "Clarification confirmed those five web_admin rows were five distinct denied IAM API attempts against IAM user resources, not variants of one failure, and that no alternative CloudTrail reading produced a unique winner.",
+    "The submitted answer was AKIAJOGCDXJ5NW5PXUPA."
+  ],
+  "derivation": "Start from aws:cloudtrail because the question is about IAM user access keys and IAM-resource access attempts. The key field is userIdentity.accessKeyId, and the strict IAM-service scope is eventSource=iam.amazonaws.com with userIdentity.type=IAMUser. A first pass using distinct errorCode values on that scope returned three erroring keys tied at 1 each, so that measure cannot distinguish a winner. A deeper strict-scope comparison over errorMessage and denied operations showed AKIAJOGCDXJ5NW5PXUPA (web_admin) with 6 error events, 1 distinct errorCode, but 5 distinct IAM access failures, while AKIAIGKL572SFDPOKLHA had 9 events but only 1 distinct failure and ASIAZB6TMXZ7MJUJJK6X had 2 events and 1 distinct failure. Clarification established those five web_admin failures were distinct denied IAM API calls against IAM user resources. Alternative readings in CloudTrail were checked and ruled out: STS/signin had zero error events, AWS::IAM::Role events had no access key and were AWSService, and the broader non-IAM S3-based candidate was refuted. The unique-answer path left in the held evidence is the strict iam.amazonaws.com IAMUser scope measured by distinct IAM access failures/messages, yielding AKIAJOGCDXJ5NW5PXUPA.",
+  "entities": [
+    {
+      "key": "AKIAJOGCDXJ5NW5PXUPA",
+      "fact": "IAM user access key for web_admin; the submitted answer and winning strict-scope key."
+    },
+    {
+      "key": "AKIAIGKL572SFDPOKLHA",
+      "fact": "IAM user access key for splunk_access; erroring IAMUser key with 9 IAM-service error events and 1 distinct failure."
+    },
+    {
+      "key": "ASIAZB6TMXZ7MJUJJK6X",
+      "fact": "IAM user access key for bstoll; erroring IAMUser key with 2 IAM-service error events and 1 distinct failure."
+    },
+    {
+      "key": "ASIAZB6TMXZ7FWTIS4NJ",
+      "fact": "Broad-scope IAMUser key that led on distinct errorCode in non-IAM S3 enumeration, but was ruled out as the answer."
+    },
+    {
+      "key": "eventSource=iam.amazonaws.com",
+      "fact": "Strict CloudTrail IAM-service scope used to evaluate IAM user access attempts against IAM resources."
+    },
+    {
+      "key": "userIdentity.accessKeyId",
+      "fact": "CloudTrail field used to identify the IAM user access key."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "errorCode is populated on events and userIdentity.type identifies IAMUser versus AWSService; userIdentity.accessKeyId carries the access key."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "Within eventSource=iam.amazonaws.com and IAMUser events, distinct errorCode alone ties at 1 for the three erroring keys; errorMessage/denied-operation counts separate them."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Confirm the strict IAM-service scope and see distinct errorCode counts for IAMUser keys",
+      "spl": "eventSource=iam.amazonaws.com | stats count by userIdentity.accessKeyId, userIdentity.type, errorCode",
+      "returns": "8 rows / 118 events; 3 keys carry errors; all are IAMUser."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Compare distinct errorCode values for erroring IAMUser keys on the strict scope",
+      "spl": "eventSource=iam.amazonaws.com userIdentity.type=IAMUser errorCode!=\"success\" | stats dc(errorCode) as distinct_errorCodes dc(errorMessage) as distinct_errorMessages dc(eventName) as distinct_denied_ops by userIdentity.accessKeyId, userName | sort - distinct_errorMessages",
+      "returns": "3 complete rows: AKIAJOGCDXJ5NW5PXUPA = 6 events / 1 distinct errorCode / 5 distinct errorMessages / 5 distinct denied ops; AKIAIGKL572SFDPOKLHA = 9 / 1 / 1 / 1; ASIAZB6TMXZ7MJUJJK6X = 2 / 1 / 1 / 1."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Show the distinct denied IAM operations behind the winning key",
+      "spl": "eventSource=iam.amazonaws.com userIdentity.accessKeyId=AKIAJOGCDXJ5NW5PXUPA errorCode!=\"success\" | stats count values(eventName) by errorMessage",
+      "returns": "5 rows, one per distinct message: CreateAccessKey, CreateUser, DeleteAccessKey, GetUser, ListAccessKeys; these are distinct denied IAM API attempts against IAM user resources."
+    }
+  ],
+  "ruled_out": "eventSource=iam.amazonaws.com measured by distinct errorCode alone (three-way tie at 1); broad S3-based IAMUser enumeration candidate ASIAZB6TMXZ7FWTIS4NJ; resources{}.type=AWS::IAM::Role as the IAM-resource scope (AWSService only, no access key); STS/signin error events (zero); AKIAIGKL572SFDPOKLHA and ASIAZB6TMXZ7MJUJJK6X as winners (they each had only 1 distinct failure).",
+  "qid": "Q218",
+  "question": "What IAM user access key generates the most distinct errors when attempting to access IAM resources?",
+  "guidance": "",
+  "answer": "AKIAJOGCDXJ5NW5PXUPA",
+  "verified_premises": [
+    "p1 [coverage] The question's concept can surface three ways in aws:cloudtrail: (a) events targeting the IAM service (eventSource=iam.amazonaws.com) — searched, 118 events, 3 keys with errors, all tied at 1 distinct errorCode; (b) error events by IAMUser-identity access keys across all eventSources — searched, 28 keys, unique max 6 distinct; (c) events whose resources{}.type is AWS::IAM::Role — searched, 332 events all AWSService identity, zero IAMUser. — holds: The strongest rival reading is that IAM resource access should include non-IAM-service events such as STS or IAM-role resource records. This round rules that out within the tested feed because STS/signin had zero errors and AWS::IAM::Role events carried AWSService rather than IAMUser identities, leaving strict IAM service access as the sound route."
+  ],
+  "validator_verdicts": []
+}

@@ -1,0 +1,100 @@
+{
+  "flow": [
+    "CloudTrail was the relevant AWS feed for API activity and identity context, so the search stayed in sourcetype=aws:cloudtrail and focused on MFA-related fields.",
+    "The first evidence found the field userIdentity.sessionContext.attributes.mfaAuthenticated in CloudTrail, with raw JSON confirming the nested path and a value of \"false\" on AwsApiCall events.",
+    "Other MFA-related fields, additionalEventData.MFAUsed and authentication_method, showed up only on AwsConsoleSignIn/ConsoleLogin events, not on AWS API calls.",
+    "A later cross-tab separated AwsApiCall from AwsConsoleSignIn and showed that AwsApiCall records carried only userIdentity.sessionContext.attributes.mfaAuthenticated, while the console-sign-in-only fields stayed off API events.",
+    "That left userIdentity.sessionContext.attributes.mfaAuthenticated as the field path to alert on for AWS API activity without MFA."
+  ],
+  "derivation": "The question asked for the full JSON path of the field used to alert when AWS API activity occurred without MFA. In Frothly's aws:cloudtrail data, the relevant field was identified as userIdentity.sessionContext.attributes.mfaAuthenticated. A raw event confirmed the nested path and showed it set to \"false\". The other MFA-related candidates, additionalEventData.MFAUsed and authentication_method, were found only on AwsConsoleSignIn/ConsoleLogin events, so they did not satisfy the API-activity requirement. A later cross-tab by eventType reinforced that AwsApiCall events carried only userIdentity.sessionContext.attributes.mfaAuthenticated, while the console-login MFA fields remained limited to console sign-ins. The answer therefore remained the same JSON path: userIdentity.sessionContext.attributes.mfaAuthenticated.",
+  "entities": [
+    {
+      "key": "aws:cloudtrail",
+      "fact": "Frothly AWS CloudTrail sourcetype used for AWS API activity and identity context."
+    },
+    {
+      "key": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+      "fact": "CloudTrail JSON field path indicating MFA state for AWS API activity."
+    },
+    {
+      "key": "additionalEventData.MFAUsed",
+      "fact": "CloudTrail field found only on AwsConsoleSignIn/ConsoleLogin events, not on AwsApiCall events."
+    },
+    {
+      "key": "authentication_method",
+      "fact": "CloudTrail field found only on AwsConsoleSignIn/ConsoleLogin events, value \"SFA\"."
+    },
+    {
+      "key": "AwsApiCall",
+      "fact": "CloudTrail eventType for AWS API activity."
+    },
+    {
+      "key": "AwsConsoleSignIn",
+      "fact": "CloudTrail eventType tied to console sign-in MFA fields."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "Contains userIdentity.sessionContext.attributes.mfaAuthenticated on AwsApiCall events, with value \"false\" for non-MFA sessions."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "Contains additionalEventData.MFAUsed and authentication_method only on AwsConsoleSignIn/ConsoleLogin events."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Locate MFA-related fields and distinguish API calls from console sign-ins.",
+      "spl": "search_keyword \"mfa\"",
+      "returns": "Manifest showed aws:cloudtrail carries userIdentity.sessionContext.attributes.mfaAuthenticated; ms:aad:signin carries Azure MFA fields out of scope."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Confirm the candidate field exists and its value on CloudTrail events.",
+      "spl": "get_field_values userIdentity.sessionContext.attributes.mfaAuthenticated on aws:cloudtrail",
+      "returns": "1 distinct value \"false\", 2155 events, 100%."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Inspect raw JSON for the exact nested field path.",
+      "spl": "get_raw_events keyword=mfaAuthenticated",
+      "returns": "Raw JSON confirmed userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\" with sibling creationDate."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Compare MFA-bearing fields across event types.",
+      "spl": "fieldsummary | search *sessionContext* OR *mfa*",
+      "returns": "Only MFA-bearing fields were mfaAuthenticated and additionalEventData.MFAUsed."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Show the candidate field is on API calls and the rivals are not.",
+      "spl": "mfaAuthenticated=* | stats count by eventType userIdentity.type",
+      "returns": "AwsApiCall/AssumedRole=789 and AwsApiCall/IAMUser=1366, all 2155 API calls."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Show rivals are console-login only.",
+      "spl": "additionalEventData.MFAUsed=* | stats",
+      "returns": "4 events, all ConsoleLogin / AwsConsoleSignIn, MFAUsed=No, user bstoll."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Cross-tab the relevant fields by event type.",
+      "spl": "index=botsv3 sourcetype=aws:cloudtrail (mfaAuthenticated=* OR MFAUsed=* OR authentication_method=*) | stats count dc(eventName) values(...) by eventType",
+      "returns": "AwsApiCall carried userIdentity.sessionContext.attributes.mfaAuthenticated=\"false\"; AwsConsoleSignIn carried additionalEventData.MFAUsed=\"No\" and authentication_method=\"SFA\"."
+    }
+  ],
+  "ruled_out": "additionalEventData.MFAUsed and authentication_method were console-sign-in-only MFA fields on AwsConsoleSignIn/ConsoleLogin events, not AWS API activity; Azure ms:aad:signin mfa* fields were out of scope.",
+  "qid": "Q201",
+  "question": "What field would you use to alert that AWS API activity have occurred without MFA (multi-factor authentication)?",
+  "guidance": "Provide the full JSON path. (Example: iceCream.flavors.traditional)",
+  "answer": "userIdentity.sessionContext.attributes.mfaAuthenticated",
+  "verified_premises": [
+    "p1 [coverage] Coverage: 'AWS API activity without MFA' in Frothly's scope can only appear as an MFA/auth-named field in the aws:cloudtrail feed (account 622676721278). Searched its full fieldsummary for *mfa*/*Mfa*/*sessionContext*/*Auth*/*MultiFactor*/*credential*: exactly three MFA-bearing fields exist — userIdentity.sessionContext.attributes.mfaAuthenticated (2155 events), additionalEventData.MFAUsed (4 events), authentication_method (4 events). Azure AD (ms:aad:signin) mfa* fields are out of scope for AWS API activity. — holds: The strongest rival is that a different MFA-related field in the same CloudTrail feed could also represent API activity without MFA. The report says the only rivals, additionalEventData.MFAUsed and authentication_method, appear only on ConsoleLogin/AwsConsoleSignIn, ruling that out for this question's AWS API activity wording.",
+    "p2 [selection] Selection: the alert field for AWS API activity without MFA is userIdentity.sessionContext.attributes.mfaAuthenticated, because it is carried by all 2155 AwsApiCall events (AssumedRole 789 + IAMUser 1366) with value \"false\" — i.e. it is present on API activity records and directly states MFA was not used. — holds: The strongest rival is additionalEventData.MFAUsed because it also expresses MFA state, but the evidence places it only on AwsConsoleSignIn/ConsoleLogin events, not API calls. That leaves userIdentity.sessionContext.attributes.mfaAuthenticated as the field that fits the question's AWS API activity qualifier."
+  ],
+  "validator_verdicts": []
+}

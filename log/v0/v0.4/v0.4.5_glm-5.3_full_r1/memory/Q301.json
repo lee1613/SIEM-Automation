@@ -1,0 +1,113 @@
+{
+  "flow": [
+    "Unix:UserAccounts and osquery:results were checked first for account-expiration state, but they exposed no expiration field or expired-account evidence, so they could not identify the expired user account.",
+    "linux_secure was then searched because it can carry both successful SSH logins and expiration-related auth messages; it returned only successful publickey logins for ec2-user and no expired-account messages at all.",
+    "Because linux_secure did not contain the expired-account clue, the investigation pivoted to ms:aad:signin as the remaining feed likely to hold both sign-in outcome and client IP for an expired account.",
+    "The ms:aad:signin round was started with searches for expired sign-ins and signinErrorCode=50055, but it ended without returning any results, so no successful login event or client IP was established.",
+    "With no report providing a literal client IP tied to a successful login by an expired user account, the question remained unanswered in the held evidence."
+  ],
+  "derivation": "The search chain began by eliminating account-inventory sources: Unix:UserAccounts was only /etc/passwd-like data with user/home/shell fields and no expiration field, and osquery:results had no account table and no expired-account hits. linux_secure was then tested because it could hold explicit account-expired messages and successful SSH logins; it showed only four Accepted publickey logins for ec2-user from 166.170.40.8, 91.207.175.249, and 157.97.121.132, but no expiration messages. That ruled out SSH auth as the source of the expired-account evidence and pushed the hunt to ms:aad:signin, which was searched for expired sign-in indicators and error code 50055, but the final round produced no results. Since no held report literally ties an external client IP to a successful login by an expired account, no answer value was established.",
+  "entities": [
+    {
+      "key": "Unix:UserAccounts",
+      "fact": "Sourcetype containing /etc/passwd-like account data with user/home/shell/user_id fields, but no expiration field."
+    },
+    {
+      "key": "osquery:results",
+      "fact": "Sourcetype searched for account inventory and expired events; it had no account table and no expired matches."
+    },
+    {
+      "key": "linux_secure",
+      "fact": "/var/log/secure authentication feed; it contained successful Accepted publickey logins for ec2-user but no expired-account messages."
+    },
+    {
+      "key": "ec2-user",
+      "fact": "The only account with successful logins found in linux_secure."
+    },
+    {
+      "key": "166.170.40.8",
+      "fact": "One external IP that successfully authenticated to ec2-user in linux_secure."
+    },
+    {
+      "key": "91.207.175.249",
+      "fact": "One external IP that successfully authenticated to ec2-user in linux_secure."
+    },
+    {
+      "key": "157.97.121.132",
+      "fact": "One external IP that successfully authenticated to ec2-user in linux_secure."
+    },
+    {
+      "key": "ms:aad:signin",
+      "fact": "Azure AD sign-in feed chosen as the remaining candidate source for expired-account sign-in evidence and client IP, but the final search returned no results."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "Unix:UserAccounts",
+      "fact": "This feed is /etc/passwd only and does not expose an account-expiration field."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "The searched osquery sources included no user/account inventory table and returned zero 'expired' events."
+    },
+    {
+      "sourcetype": "linux_secure",
+      "fact": "This feed contains successful SSH logins with src_ip, but in this hunt it had no expiration-related messages at all."
+    },
+    {
+      "sourcetype": "ms:aad:signin",
+      "fact": "This feed was treated as the remaining source that could pair client IP with sign-in outcome and account-status details, but the search did not return evidence here."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "Unix:UserAccounts",
+      "purpose": "Check whether Unix account inventory exposes expiration state",
+      "spl": "get_sourcetype_fields Unix:UserAccounts",
+      "returns": "571 events, /etc/passwd only; fields user/home/shell/user_id; NO expiration field"
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "Look for an account table or expired-account artifacts",
+      "spl": "osquery:results \"expired\" | stats count by name,action,host",
+      "returns": "0 events"
+    },
+    {
+      "sourcetype": "linux_secure",
+      "purpose": "Find explicit expiration messages and successful SSH logins",
+      "spl": "linux_secure \"expired\" | stats count by user,src_ip,host",
+      "returns": "0 events"
+    },
+    {
+      "sourcetype": "linux_secure",
+      "purpose": "List successful SSH logins and their source IPs",
+      "spl": "linux_secure | rex msgtype | stats count by msgtype",
+      "returns": "38 distinct patterns over all 350 events; no expiration message of any kind"
+    },
+    {
+      "sourcetype": "linux_secure",
+      "purpose": "Inspect successful publickey authentication events",
+      "spl": "get_raw_events \"Accepted publickey\"",
+      "returns": "4 events, all ec2-user on ip-172-31-12-76 (mars.i-08e52f8b5a034012d): 166.170.40.8 (x2), 91.207.175.249, 157.97.121.132, same RSA key"
+    },
+    {
+      "sourcetype": "ms:aad:signin",
+      "purpose": "Search for expired-account sign-ins and error 50055",
+      "spl": "index=botsv3 sourcetype=\"ms:aad:signin\" expired | stats count by userPrincipalName, ipAddress, status.failureReason, resultDescription",
+      "returns": "No results returned in the final round"
+    },
+    {
+      "sourcetype": "ms:aad:signin",
+      "purpose": "Check sign-in failure reasons and error codes for expired credentials",
+      "spl": "index=botsv3 sourcetype=\"ms:aad:signin\" signinErrorCode=50055 | stats count by userPrincipalName, ipAddress, loginStatus, appDisplayName",
+      "returns": "No results returned in the final round"
+    }
+  ],
+  "ruled_out": "Unix:UserAccounts as the expiration source; osquery:results as an account-expiration source; aws:cloudwatch:guardduty; AWS *expir* credential-expiry fields; linux_secure as carrying any expired-account message; ec2-user SSH logins (166.170.40.8, 91.207.175.249, 157.97.121.132) as the answer; Accepted password logins in linux_secure; ms:aad:signin as yielding a returned result in the held transcript",
+  "qid": "Q301",
+  "question": "What external client IP address is able to initiate successful logins to Frothly using an expired user account?",
+  "guidance": "",
+  "answer": "NOT_FOUND",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

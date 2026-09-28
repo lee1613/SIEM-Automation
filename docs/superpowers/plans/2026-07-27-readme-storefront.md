@@ -10,8 +10,8 @@
 
 ## Global Constraints
 
-- **Only real numbers.** Every figure in every document must be traceable to a file in `log/v1/` or `docs/scoreboard_result/`. No estimates, no rounding up, no aspirational claims.
-- **Never trust `run_summary["score"]`.** `log/v1/run_1.1/run_summary.json` has stale `attempted: 4 / score: 0 / results: [4 rows]` keys from a later partial re-run. Verdicts come from `scoreboard_submissions.json`; cost comes from `run_summary["token_usage"]`. Both of those keys in run_1.1 are intact and match `docs/scoreboard_result/v1/v1.1.md`.
+- **Only real numbers.** Every figure in every document must be traceable to a file in `log/v0/` or `docs/scoreboard_result/`. No estimates, no rounding up, no aspirational claims.
+- **Never trust `run_summary["score"]`.** `log/v0/run_0.1/run_summary.json` has stale `attempted: 4 / score: 0 / results: [4 rows]` keys from a later partial re-run. Verdicts come from `scoreboard_submissions.json`; cost comes from `run_summary["token_usage"]`. Both of those keys in run_0.1 are intact and match `docs/scoreboard_result/v0/v0.1.md`.
 - **Scoring rule is exact-match, copied not reinvented:** `submitted.lower().strip() == official.lower().strip()` (per `agent/scoreboard_client.py:9`).
 - **No `datasets/` → `data/` rename.** The directory stays `datasets/`. Only `datasets/evaluation/` is added.
 - **Audience is an AI/agent-engineering hiring manager.** Lead with orchestration, evals, grounding, cost-per-run. SIEM is the domain that makes the benchmark hard, not the pitch.
@@ -21,7 +21,7 @@
 
 ### Canonical figures (verified against the data — use these verbatim)
 
-Tier table, v1.2, 56 questions:
+Tier table, v0.2, 56 questions:
 
 | Tier | Solved / Total | Rate |
 |------|:---:|:---:|
@@ -34,16 +34,16 @@ Version series:
 
 | Version | Correct | Questions | Points | Cost | Source |
 |---|---|---|---|---|---|
-| v0 (single agent) | 20 | 56 (rescored) | 5700 | $7.73 | `log/baseline/v0_full_run.json`, `docs/scoreboard_result/v1/v1.1.md:19` |
-| v1.0 | 20 | 58 | 5650 | $7.36 | `log/v1/run_1.0/run_summary.json`, `docs/scoreboard_result/v1/v1.1.md:17` |
-| v1.1 | 26 | 56 | 8000 | $0.63 | `log/v1/run_1.1/scoreboard_submissions.json` + `token_usage` |
-| v1.2 | 26 | 56 | 8000 | $31.36 | `log/v1/run_1.2/scoreboard_submissions.json` + `token_usage` |
+| v0.0.0 (single agent) | 20 | 56 (rescored) | 5700 | $7.73 | `log/baseline/v0.0.0_full_run.json`, `docs/scoreboard_result/v0/v0.1.md:19` |
+| v0.0 | 20 | 58 | 5650 | $7.36 | `log/v0/run_0.0/run_summary.json`, `docs/scoreboard_result/v0/v0.1.md:17` |
+| v0.1 | 26 | 56 | 8000 | $0.63 | `log/v0/run_0.1/scoreboard_submissions.json` + `token_usage` |
+| v0.2 | 26 | 56 | 8000 | $31.36 | `log/v0/run_0.2/scoreboard_submissions.json` + `token_usage` |
 
-Other verified facts: 11 of 56 v1.2 answers were ungrounded refusals; failed delegations went 1 (v1.1) → 62 (v1.2), which is the cost-blowup cause; Q332 = `cve-2017-16995` and Q333 = `cve-2017-9791`, both correct 1000-pointers; the two questions dropped from 58 → 56 are **Q1** (warmup, "what company makes this software") and **Q220** (answer is an AWS secret key not derivable from the dataset).
+Other verified facts: 11 of 56 v0.2 answers were ungrounded refusals; failed delegations went 1 (v0.1) → 62 (v0.2), which is the cost-blowup cause; Q332 = `cve-2017-16995` and Q333 = `cve-2017-9791`, both correct 1000-pointers; the two questions dropped from 58 → 56 are **Q1** (warmup, "what company makes this software") and **Q220** (answer is an AWS secret key not derivable from the dataset).
 
-> ⚠️ **Known doc bug to fix in Task 7:** `docs/scoreboard_result/v1/v1.1.md:17` says the removed questions were "Q1 and Q207". The data says **Q1 and Q220**. Computed by diffing `log/baseline/v0_full_run.json` ids against `datasets/botsv3_questions.json` ids.
+> ⚠️ **Known doc bug to fix in Task 7:** `docs/scoreboard_result/v0/v0.1.md:17` says the removed questions were "Q1 and Q207". The data says **Q1 and Q220**. Computed by diffing `log/baseline/v0.0.0_full_run.json` ids against `datasets/botsv3_questions.json` ids.
 
-> ⚠️ **Scope note on deleting `log/baseline/`:** the decision to delete the broken baseline applies to **`log/baseline/gpt5.4mini_native_base_result.{json,log}`** only — that run scored 0 because the extractor hit an API 400 (`max_tokens` unsupported), so it is not a result. **`log/baseline/v0_full_run.{json,log}` must be kept**: it is the sole evidence for the v0 = 20/56 number in the headline progression.
+> ⚠️ **Scope note on deleting `log/baseline/`:** the decision to delete the broken baseline applies to **`log/baseline/gpt5.4mini_native_base_result.{json,log}`** only — that run scored 0 because the extractor hit an API 400 (`max_tokens` unsupported), so it is not a result. **`log/baseline/v0.0.0_full_run.{json,log}` must be kept**: it is the sole evidence for the v0.0.0 = 20/56 number in the headline progression.
 
 ---
 
@@ -53,19 +53,19 @@ Other verified facts: 11 of 56 v1.2 answers were ungrounded refusals; failed del
 - `pyproject.toml` — ruff config (`E,F,I`) + pytest `testpaths`. Nothing else; this is not a packaging change.
 - `scripts/run_eval.py` — offline scorer. Single file, ~180 lines: load → score → summarize → render → write/check.
 - `tests/test_run_eval.py` — pytest tests for the scorer's pure functions.
-- `datasets/evaluation/versions.json` — hand-written historical series (v0…v1.2). Curated once; history does not change.
+- `datasets/evaluation/versions.json` — hand-written historical series (v0.0.0…v0.2). Curated once; history does not change.
 - `datasets/evaluation/leaderboard.json` — **generated** by `run_eval --write`. Never hand-edited.
 - `.github/workflows/ci.yml` — ruff + pytest + leaderboard staleness check.
 - `LICENSE` — MIT.
 - `datasets/README.md` — BOTSv3 provenance and attribution.
-- `docs/ARCHITECTURE.md` — v1.3 / Plan C system description.
+- `docs/ARCHITECTURE.md` — v0.3 / Plan C system description.
 - `docs/RUNBOOK.md` — clone → install → offline eval, plus the live-run path.
 
 **Modified:**
 - `README.md` — full rewrite.
 - `.gitignore` — add SQLite checkpoint patterns.
 - Various `agent/**/*.py` — ruff autofixes only (import order, unused imports). No behavior change.
-- `docs/scoreboard_result/v1/v1.1.md:17` — Q207 → Q220 correction.
+- `docs/scoreboard_result/v0/v0.1.md:17` — Q207 → Q220 correction.
 
 **Deleted:**
 - `log/baseline/gpt5.4mini_native_base_result.json`, `log/baseline/gpt5.4mini_native_base_result.log`
@@ -83,7 +83,7 @@ Other verified facts: 11 of 56 v1.2 answers were ungrounded refusals; failed del
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a green `ruff check .` and a green `pytest`, plus `testpaths = ["agent/v1/tests", "tests"]` so Task 2's tests are collected by a bare `pytest`. CI (Task 5) depends on both commands being green with no arguments.
+- Produces: a green `ruff check .` and a green `pytest`, plus `testpaths = ["agent/v0/tests", "tests"]` so Task 2's tests are collected by a bare `pytest`. CI (Task 5) depends on both commands being green with no arguments.
 
 - [ ] **Step 1: Confirm the baseline is currently green for tests and red for lint**
 
@@ -109,7 +109,7 @@ exclude = ["datasets", "log", ".superpowers"]
 select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
-testpaths = ["agent/v1/tests", "tests"]
+testpaths = ["agent/v0/tests", "tests"]
 ```
 
 - [ ] **Step 3: Autofix, then inspect the remainder**
@@ -130,7 +130,7 @@ Expected: `154 passed`. If the count dropped or anything fails, an autofix remov
 
 Append to `.gitignore`:
 ```gitignore
-# LangGraph checkpoint databases (regenerated per run; 114 MB in run_1.2)
+# LangGraph checkpoint databases (regenerated per run; 114 MB in run_0.2)
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
@@ -141,7 +141,7 @@ Run:
 git rm --cached $(git ls-files '*.sqlite' '*.sqlite-wal' '*.sqlite-shm')
 git rm log/baseline/gpt5.4mini_native_base_result.json log/baseline/gpt5.4mini_native_base_result.log
 ```
-Expected: roughly 8 SQLite files untracked, 2 baseline files deleted. **Confirm `log/baseline/v0_full_run.json` is still tracked** — `git ls-files log/baseline` must still list it.
+Expected: roughly 8 SQLite files untracked, 2 baseline files deleted. **Confirm `log/baseline/v0.0.0_full_run.json` is still tracked** — `git ls-files log/baseline` must still list it.
 
 - [ ] **Step 6: Commit**
 
@@ -181,7 +181,7 @@ Create `tests/test_run_eval.py`:
 ```python
 """Tests for the offline scorer.
 
-The v1.2 run is the fixture: its numbers are published in the README, so if
+The v0.2 run is the fixture: its numbers are published in the README, so if
 these tests drift from the run artifacts, the storefront is lying.
 """
 import sys
@@ -200,7 +200,7 @@ def test_is_correct_ignores_case_and_surrounding_whitespace():
 
 
 def test_is_correct_rejects_substring_match():
-    # "E5-2676 v3" vs "E5-2676" was a real v1.1 miss (Q202). Exact match only.
+    # "E5-2676 v3" vs "E5-2676" was a real v0.1 miss (Q202). Exact match only.
     assert not run_eval.is_correct("E5-2676 v3", "E5-2676")
 
 
@@ -210,14 +210,14 @@ def test_is_correct_handles_missing_values():
 
 
 def test_recomputed_verdicts_match_the_recorded_ones():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     assert len(rows) == 56
     for row in rows:
         assert run_eval.is_correct(row["submitted"], row["official"]) is bool(row["correct"]), row["number"]
 
 
 def test_summarize_reproduces_the_published_v12_leaderboard():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(rows)
     assert summary["correct"] == 26
     assert summary["total"] == 56
@@ -229,19 +229,19 @@ def test_summarize_reproduces_the_published_v12_leaderboard():
 
 
 def test_filter_by_tier_selects_only_that_tier():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=1000, ids=None))
     assert (summary["correct"], summary["total"]) == (2, 9)
 
 
 def test_filter_by_ids_is_case_insensitive_and_order_independent():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=None, ids=["q333", "Q332"]))
     assert (summary["correct"], summary["total"]) == (2, 2)
 
 
 def test_filter_by_unknown_id_raises():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["Q999"])
 ```
@@ -265,7 +265,7 @@ the same exact-match rule as the live scoreboard, so this is a real
 re-scoring, not a replay of a cached boolean.
 
 Source-of-truth note: `run_summary.json`'s `score`/`correct`/`results` keys are
-NOT trustworthy — run_1.1's were overwritten by a later partial re-run. Only
+NOT trustworthy — run_0.1's were overwritten by a later partial re-run. Only
 `scoreboard_submissions.json` (verdicts) and `run_summary["token_usage"]`
 (cost) are used.
 """
@@ -276,7 +276,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_ROOT = REPO / "log" / "v1"
+LOG_ROOT = REPO / "log" / "v0"
 TIERS = (100, 500, 1000)
 
 
@@ -292,7 +292,7 @@ def load_rows(run_dir: Path) -> list[dict]:
     if not path.exists():
         sys.exit(
             f"{path} not found. Only runs with a submissions file can be scored "
-            f"(run_1.0 predates it)."
+            f"(run_0.0 predates it)."
         )
     return json.loads(path.read_text())
 
@@ -347,7 +347,7 @@ git add scripts/run_eval.py tests/test_run_eval.py
 git commit -m "feat(eval): offline scorer core with exact-match rescoring
 
 Recomputes verdicts from submitted/official pairs rather than trusting the
-cached boolean, and reproduces the published v1.2 tier table under test."
+cached boolean, and reproduces the published v0.2 tier table under test."
 ```
 
 ---
@@ -372,7 +372,7 @@ Append to `tests/test_run_eval.py`:
 
 ```python
 def test_load_cost_matches_the_published_v12_total():
-    cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.2")
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.2")
     assert round(cost["total_usd"], 2) == 31.36
     assert "gpt-5.4-2026-03-05" in cost["models"]
     # Bookkeeping keys must not be reported as if they were models.
@@ -381,18 +381,18 @@ def test_load_cost_matches_the_published_v12_total():
 
 
 def test_load_cost_tolerates_a_run_without_token_usage():
-    # run_1.0 predates cost tracking; the scorer must degrade, not crash.
-    cost = run_eval.load_cost(REPO / "log" / "v1" / "run_1.0")
+    # run_0.0 predates cost tracking; the scorer must degrade, not crash.
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.0")
     assert cost["total_usd"] == 0.0
     assert cost["models"] == {}
 
 
 def test_latest_run_picks_the_highest_version_not_the_alphabetical_last():
-    assert run_eval.latest_run().name == "run_1.2"
+    assert run_eval.latest_run().name == "run_0.2"
 
 
 def test_render_report_states_accuracy_points_and_cost():
-    run_dir = REPO / "log" / "v1" / "run_1.2"
+    run_dir = REPO / "log" / "v0" / "run_0.2"
     text = run_eval.render_report(
         run_dir,
         run_eval.summarize(run_eval.load_rows(run_dir)),
@@ -418,7 +418,7 @@ def load_cost(run_dir: Path) -> dict:
     """Per-model USD from run_summary['token_usage'].
 
     Keys wrapped in double underscores are bookkeeping aggregates, not models.
-    Runs predating cost tracking (run_1.0) simply report zero.
+    Runs predating cost tracking (run_0.0) simply report zero.
     """
     path = run_dir / "run_summary.json"
     if not path.exists():
@@ -438,8 +438,8 @@ def load_cost(run_dir: Path) -> dict:
 
 
 def latest_run() -> Path:
-    """Highest-numbered scorable run_1.N directory, compared numerically."""
-    runs = [p for p in LOG_ROOT.glob("run_1.*") if (p / "scoreboard_submissions.json").exists()]
+    """Highest-numbered scorable run_0.N directory, compared numerically."""
+    runs = [p for p in LOG_ROOT.glob("run_0.*") if (p / "scoreboard_submissions.json").exists()]
     if not runs:
         sys.exit(f"No scorable runs under {LOG_ROOT}")
     return max(runs, key=lambda p: [int(n) for n in p.name.split("_")[1].split(".")])
@@ -469,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score a BOTSv3 agent run offline. No API key, no Splunk, no LLM calls."
     )
-    parser.add_argument("--run", help="Run directory name, e.g. run_1.1 (default: latest scorable run)")
+    parser.add_argument("--run", help="Run directory name, e.g. run_0.1 (default: latest scorable run)")
     parser.add_argument("--tier", type=int, choices=TIERS, help="Score only this point tier")
     parser.add_argument("--ids", help="Comma-separated question ids, e.g. Q332,Q333")
     args = parser.parse_args(argv)
@@ -497,7 +497,7 @@ Run:
 ```bash
 python3 scripts/run_eval.py --tier 1000
 python3 scripts/run_eval.py --ids Q332,Q333
-python3 scripts/run_eval.py --run run_1.1
+python3 scripts/run_eval.py --run run_0.1
 ```
 Expected: the first prints `2/9 = 22.2%` and `$31.36`; the second prints `2/2 = 100.0%`; the third prints `26/56 = 46.4%` and `$0.63`.
 
@@ -529,11 +529,11 @@ git commit -m "feat(eval): per-model cost reporting, run selection, and CLI"
 
 - [ ] **Step 1: Create the historical series**
 
-Create `datasets/evaluation/versions.json`. Hand-written once and then frozen — it is history, and v0/v1.0 predate the artifacts `run_eval` can parse.
+Create `datasets/evaluation/versions.json`. Hand-written once and then frozen — it is history, and v0/v0.0 predate the artifacts `run_eval` can parse.
 
 ```json
 {
-  "_comment": "Hand-curated historical series. Sources are named per row. v1.1+ rows are verifiable with: python3 scripts/run_eval.py --run run_1.N",
+  "_comment": "Hand-curated historical series. Sources are named per row. v0.1+ rows are verifiable with: python3 scripts/run_eval.py --run run_0.N",
   "versions": [
     {
       "version": "v0",
@@ -542,34 +542,34 @@ Create `datasets/evaluation/versions.json`. Hand-written once and then frozen �
       "questions": 56,
       "points": 5700,
       "cost_usd": 7.73,
-      "source": "log/baseline/v0_full_run.json (rescored on the 56-question set)"
+      "source": "log/baseline/v0.0.0_full_run.json (rescored on the 56-question set)"
     },
     {
-      "version": "v1.0",
+      "version": "v0.0",
       "label": "SH + Senior pool",
       "correct": 20,
       "questions": 58,
       "points": 5650,
       "cost_usd": 7.36,
-      "source": "log/v1/run_1.0/run_summary.json"
+      "source": "log/v0/run_0.0/run_summary.json"
     },
     {
-      "version": "v1.1",
+      "version": "v0.1",
       "label": "+ Junior tier, cheaper Senior model",
       "correct": 26,
       "questions": 56,
       "points": 8000,
       "cost_usd": 0.63,
-      "source": "log/v1/run_1.1/scoreboard_submissions.json + token_usage"
+      "source": "log/v0/run_0.1/scoreboard_submissions.json + token_usage"
     },
     {
-      "version": "v1.2",
+      "version": "v0.2",
       "label": "+ grounding guard, structured findings",
       "correct": 26,
       "questions": 56,
       "points": 8000,
       "cost_usd": 31.36,
-      "source": "log/v1/run_1.2/scoreboard_submissions.json + token_usage"
+      "source": "log/v0/run_0.2/scoreboard_submissions.json + token_usage"
     }
   ]
 }
@@ -581,21 +581,21 @@ Append to `tests/test_run_eval.py`:
 
 ```python
 def test_render_leaderboard_contains_both_tables_and_real_numbers():
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     markdown = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
     assert "| 1000 pt | 2 / 9 | 22.2% |" in markdown
     assert "| 100 pt | 15 / 24 | 62.5% |" in markdown
     assert "46.4%" in markdown
-    assert "$0.63" in markdown   # v1.1 row
-    assert "$31.36" in markdown  # v1.2 row
+    assert "$0.63" in markdown   # v0.1 row
+    assert "$31.36" in markdown  # v0.2 row
 
 
 @pytest.mark.xfail(reason="README markers land in Task 9", strict=True)
 def test_readme_leaderboard_block_is_in_sync():
     # Guards the exact invariant CI enforces with --check.
-    rows = run_eval.load_rows(REPO / "log" / "v1" / "run_1.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     expected = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
@@ -866,9 +866,9 @@ Run:
 ```bash
 python3 -c "
 import json
-v0 = {x['id'] for x in json.load(open('log/baseline/v0_full_run.json'))['results']}
+v0.0.0 = {x['id'] for x in json.load(open('log/baseline/v0.0.0_full_run.json'))['results']}
 cur = {q['id'] for q in json.load(open('datasets/botsv3_questions.json'))}
-print(sorted(v0 - cur))"
+print(sorted(v0.0.0 - cur))"
 ```
 Expected: `['Q1', 'Q220']`. If this prints anything else, correct `datasets/README.md` to match the data.
 
@@ -885,23 +885,23 @@ git commit -m "docs: MIT license and BOTSv3 provenance/attribution"
 
 **Files:**
 - Create: `docs/ARCHITECTURE.md`
-- Modify: `docs/scoreboard_result/v1/v1.1.md:17`
+- Modify: `docs/scoreboard_result/v0/v0.1.md:17`
 
 **Interfaces:**
-- Consumes: `docs/version_architecture/v1/v1.3.md` as source material.
+- Consumes: `docs/version_architecture/v0/v0.3.md` as source material.
 - Produces: the Mermaid diagram block that Task 9 reuses in condensed form.
 
 - [ ] **Step 1: Read the source material**
 
-Read `docs/version_architecture/v1/v1.3.md` in full, plus the "what changed" section of `docs/version_architecture/v1/v1.2.md`. The architecture doc describes **v1.3 / Plan C** — the code as it exists now.
+Read `docs/version_architecture/v0/v0.3.md` in full, plus the "what changed" section of `docs/version_architecture/v0/v0.2.md`. The architecture doc describes **v0.3 / Plan C** — the code as it exists now.
 
 - [ ] **Step 2: Write `docs/ARCHITECTURE.md`**
 
 Required sections, in order:
 
 1. **Status banner**, verbatim:
-   > **v1.3 (Plan C) is the current architecture. The published metrics are from the v1.2 full run** — v1.3's adjudication, escalation, dual-track planning, and self-consistency sampling are shipped and unit-tested but not yet benchmarked end to end. Numbers here are never extrapolated to unrun versions.
-2. **Three-tier layout** — SH orchestrator (`agent/v1/orchestrator.py`), Senior/Junior worker pool (`agent/v1/splunk_subagent.py`), Extractor (`agent/v1/extractor.py`). One paragraph each: responsibility, model, and why the tier exists. Cite file paths.
+   > **v0.3 (Plan C) is the current architecture. The published metrics are from the v0.2 full run** — v0.3's adjudication, escalation, dual-track planning, and self-consistency sampling are shipped and unit-tested but not yet benchmarked end to end. Numbers here are never extrapolated to unrun versions.
+2. **Three-tier layout** — SH orchestrator (`agent/v0/orchestrator.py`), Senior/Junior worker pool (`agent/v0/splunk_subagent.py`), Extractor (`agent/v0/extractor.py`). One paragraph each: responsibility, model, and why the tier exists. Cite file paths.
 3. **The Mermaid diagram** (this exact block — Task 9 reuses it):
 
 ````markdown
@@ -924,13 +924,13 @@ flowchart TD
 ```
 ````
 
-4. **Control mechanisms** — one subsection each for the grounding guard, adjudication + 3× sampling, escalation, and dual-track planning. Each states what it does, which file implements it, and its observed cost/benefit from `docs/version_architecture/v1/v1.2.md` and `v1.3.md`.
-5. **Run artifacts** — what a run writes under `log/v1/run_1.N/` (`SH/`, `Senior Splunk/`, `Junior Splunk/`, `Extractor/`, `timeline.md`, `run_summary.json`, `scoreboard_submissions.json`) and which of those `scripts/run_eval.py` consumes. Include the warning that `run_summary["score"]` can be stale (run_1.1 was overwritten by a partial re-run) and that verdicts therefore come from `scoreboard_submissions.json`.
-6. **Known limitations** — the 1000 pt tier at 2/9; the v1.2 failed-delegation blowup (1 → 62 failed delegations, $0.63 → $31.36); extractor over-trimming.
+4. **Control mechanisms** — one subsection each for the grounding guard, adjudication + 3× sampling, escalation, and dual-track planning. Each states what it does, which file implements it, and its observed cost/benefit from `docs/version_architecture/v0/v0.2.md` and `v0.3.md`.
+5. **Run artifacts** — what a run writes under `log/v0/run_0.N/` (`SH/`, `Senior Splunk/`, `Junior Splunk/`, `Extractor/`, `timeline.md`, `run_summary.json`, `scoreboard_submissions.json`) and which of those `scripts/run_eval.py` consumes. Include the warning that `run_summary["score"]` can be stale (run_0.1 was overwritten by a partial re-run) and that verdicts therefore come from `scoreboard_submissions.json`.
+6. **Known limitations** — the 1000 pt tier at 2/9; the v0.2 failed-delegation blowup (1 → 62 failed delegations, $0.63 → $31.36); extractor over-trimming.
 
-- [ ] **Step 3: Fix the Q207 error in the v1.1 result doc**
+- [ ] **Step 3: Fix the Q207 error in the v0.1 result doc**
 
-In `docs/scoreboard_result/v1/v1.1.md:17`, change `(Q1 and Q207 removed from runner before this run)` to `(Q1 and Q220 removed from runner before this run)`. Verified in Task 6 Step 3.
+In `docs/scoreboard_result/v0/v0.1.md:17`, change `(Q1 and Q207 removed from runner before this run)` to `(Q1 and Q220 removed from runner before this run)`. Verified in Task 6 Step 3.
 
 - [ ] **Step 4: Verify every file path cited in the doc exists**
 
@@ -943,8 +943,8 @@ Expected: no output.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/ARCHITECTURE.md docs/scoreboard_result/v1/v1.1.md
-git commit -m "docs: ARCHITECTURE.md for v1.3/Plan C; fix Q207->Q220 in v1.1 result doc"
+git add docs/ARCHITECTURE.md docs/scoreboard_result/v0/v0.1.md
+git commit -m "docs: ARCHITECTURE.md for v0.3/Plan C; fix Q207->Q220 in v0.1 result doc"
 ```
 
 ---
@@ -969,11 +969,11 @@ Required sections:
    python3 scripts/run_eval.py                 # full latest run
    python3 scripts/run_eval.py --tier 1000     # the hard tier: 2/9
    python3 scripts/run_eval.py --ids Q332,Q333 # the two CVE hits
-   python3 scripts/run_eval.py --run run_1.1   # 26/56 for $0.63
+   python3 scripts/run_eval.py --run run_0.1   # 26/56 for $0.63
    ```
    State the requirement (Python 3.10+, stdlib only) and paste the real output of `--tier 1000` so a reader knows what success looks like.
 2. **Running the tests** — `pip install pytest ruff && pytest -q && ruff check .`
-3. **Live runs (requires Splunk + API keys)** — prerequisites, pointer to `docs/BOTS_V3_SETUP.md` for the Splunk install and `agent/.env.example` for keys, and the smoke-test invocation `python agent/v1/run_all_v1.py --ids Q216,Q217,Q224,Q328,Q329`. Include the cost warning: a full 56-question run cost **$31.36** on v1.2; smoke tests are 5 questions and write to `log/temp/`.
+3. **Live runs (requires Splunk + API keys)** — prerequisites, pointer to `docs/BOTS_V3_SETUP.md` for the Splunk install and `agent/.env.example` for keys, and the smoke-test invocation `python agent/v0/run_all_v0.py --ids Q216,Q217,Q224,Q328,Q329`. Include the cost warning: a full 56-question run cost **$31.36** on v0.2; smoke tests are 5 questions and write to `log/temp/`.
 4. **Regenerating the leaderboard after a run** — `python3 scripts/run_eval.py --write`, and that CI enforces it with `--check`.
 
 - [ ] **Step 2: Execute every command in the runbook**
@@ -1015,11 +1015,11 @@ git commit -m "docs: RUNBOOK with verified offline-eval and live-run paths"
 <!-- LEADERBOARD:START -->
 <!-- LEADERBOARD:END -->
 ```
-Below the block, one line: *Regenerate with `python3 scripts/run_eval.py --write`; CI fails if this table drifts from `log/v1/`.*
+Below the block, one line: *Regenerate with `python3 scripts/run_eval.py --write`; CI fails if this table drifts from `log/v0/`.*
 
 **4. Architecture** — the Mermaid diagram from Task 7 Step 2, plus 4–5 bullets on the control mechanisms (grounding guard, adjudication, escalation, dual-track). Link to `docs/ARCHITECTURE.md`.
 
-**5. Agent trajectory logs** — two examples, each ≤10 lines, each linking to `log/v1/run_1.2/timeline.md` and `docs/scoreboard_result/v1/v1.2.md`:
+**5. Agent trajectory logs** — two examples, each ≤10 lines, each linking to `log/v0/run_0.2/timeline.md` and `docs/scoreboard_result/v0/v0.2.md`:
    - **A 1000-point hit:** Q332 → `cve-2017-16995` and Q333 → `cve-2017-9791`. Show the reasoning path (sourcetype identification → SPL → CVE), quoted from `timeline.md`.
    - **An honest refusal:** Q303, where the agent returned *"The password is not provided in the context"* and was scored **wrong**. Frame it exactly: in a SOC, a confident wrong IOC costs an analyst hours of chasing; the grounding guard makes the agent decline instead of guessing. **11 of 56 answers were refusals rather than guesses** (`grounded: false` in `run_summary.json`). State plainly that this costs points on the benchmark and is a deliberate trade.
 
@@ -1030,11 +1030,11 @@ python3 scripts/run_eval.py --tier 1000
 No API key, no Splunk, Python 3.10+. Link to `docs/RUNBOOK.md`.
 
 **7. Lessons learned** — 5 entries, 1–3 lines each, all traceable:
-   - *Cost is an architecture bug, not a billing line.* v1.1 and v1.2 both scored 26/56; v1.1 cost $0.63, v1.2 cost $31.36. The delta is failed delegations: 1 → 62. A retry path with no cap turned a held score into a 50× bill.
+   - *Cost is an architecture bug, not a billing line.* v0.1 and v0.2 both scored 26/56; v0.1 cost $0.63, v0.2 cost $31.36. The delta is failed delegations: 1 → 62. A retry path with no cap turned a held score into a 50× bill.
    - *Refusal is a feature.* The grounding guard trades benchmark points for trustworthy output; 11 of 56 answers declined rather than fabricate.
    - *The frontier is multi-hop.* 100 pt: 62.5%. 1000 pt: 22.2%. The failures are chained-inference questions, not lookup questions.
    - *The scoring path needs the same rigor as the agent.* `run_summary.json`'s score keys were silently overwritten by a partial re-run; the scorer now derives verdicts from submission records instead.
-   - *Extractor over-trimming.* Correct investigations lost points on answer formatting — cite a specific case from `docs/scoreboard_result/v1/v1.2.md`.
+   - *Extractor over-trimming.* Correct investigations lost points on answer formatting — cite a specific case from `docs/scoreboard_result/v0/v0.2.md`.
 
 **8. Repo layout** — a short table: `agent/` (the pipeline), `datasets/` (BOTSv3 + evaluation artifacts), `docs/` (architecture and per-version results), `log/` (full trajectory evidence for every scored run), `scripts/` (offline scorer), `CLAUDE.md` / `AGENTS.md` (the agent-assisted development workflow used to build this).
 
@@ -1126,11 +1126,11 @@ Expected: filter-repo reports the rewrite and completes. It removes the `origin`
 ```bash
 git log --oneline | head -5
 git ls-files log/baseline
-test -f log/v1/run_1.2/scoreboard_submissions.json && echo "submissions OK"
-test -f log/v1/run_1.2/timeline.md && echo "timeline OK"
+test -f log/v0/run_0.2/scoreboard_submissions.json && echo "submissions OK"
+test -f log/v0/run_0.2/timeline.md && echo "timeline OK"
 git ls-files '*.sqlite' | wc -l
 ```
-Expected: history intact; `log/baseline/v0_full_run.json` and `.log` still listed while the gpt5.4mini pair is gone; both `OK` lines print; `0` sqlite files.
+Expected: history intact; `log/baseline/v0.0.0_full_run.json` and `.log` still listed while the gpt5.4mini pair is gone; both `OK` lines print; `0` sqlite files.
 
 - [ ] **Step 5: Verify the size drop and that everything still works**
 
@@ -1184,10 +1184,10 @@ Report to the human:
 
 ## Self-Review
 
-**Spec coverage.** All 13 locked decisions map to tasks: purge → 1 + 10; public/branch rename → 10; no `datasets/`→`data/` rename → honored throughout (Task 4 writes to `datasets/evaluation/`); generated leaderboard + CI drift check → 4 + 5; ruff narrow rule set → 1; v0→v1 progression with no fabricated baseline → 4 (`versions.json`) + 9; v1.3 architecture with v1.2 metrics → 7; both trajectories → 9; MIT + attribution → 6; Mermaid + badges → 7 + 9; agent-engineering voice → 9; `run_eval` flag set with no `--live` → 3 + 4; undated Next section → 9; stop before publishing → 10 Step 9. The three loose ends: `main`/`judge` deleted (10 Step 6), broken baseline deleted (1 Step 5, 10 Step 3), 58→56 explained (6 Step 2).
+**Spec coverage.** All 13 locked decisions map to tasks: purge → 1 + 10; public/branch rename → 10; no `datasets/`→`data/` rename → honored throughout (Task 4 writes to `datasets/evaluation/`); generated leaderboard + CI drift check → 4 + 5; ruff narrow rule set → 1; v0.0.0→v0 progression with no fabricated baseline → 4 (`versions.json`) + 9; v0.3 architecture with v0.2 metrics → 7; both trajectories → 9; MIT + attribution → 6; Mermaid + badges → 7 + 9; agent-engineering voice → 9; `run_eval` flag set with no `--live` → 3 + 4; undated Next section → 9; stop before publishing → 10 Step 9. The three loose ends: `main`/`judge` deleted (10 Step 6), broken baseline deleted (1 Step 5, 10 Step 3), 58→56 explained (6 Step 2).
 
 **Placeholder scan.** No TBDs. Every code step carries complete code; every doc step names required sections and exact content; every verification step gives a command and its expected output. Tasks 7–9 specify structure and required content rather than full prose — the source files must be read at execution time, and the verification steps are mechanical.
 
 **Type consistency.** `summarize` returns the same dict shape wherever consumed (Tasks 2, 3, 4). `load_cost` returns `{"models", "total_usd"}` consistently. `render_leaderboard_markdown(summary, versions)` takes the `versions` **list**, and every caller passes `load_versions()["versions"]`. `render_report(run_dir, summary, cost)` keeps that argument order in its test and in `main`. The marker strings match across `run_eval.py`, the tests, and the README.
 
-**Deviation flagged for the human:** the "delete `log/baseline/` entirely" instruction is implemented as deleting only the two `gpt5.4mini_native_base_result.*` files. `v0_full_run.json` is the sole source of the v0 = 20/56 figure the locked headline depends on, so deleting it would break that decision. Say the word and it goes — but the progression claim goes with it.
+**Deviation flagged for the human:** the "delete `log/baseline/` entirely" instruction is implemented as deleting only the two `gpt5.4mini_native_base_result.*` files. `v0.0.0_full_run.json` is the sole source of the v0.0.0 = 20/56 figure the locked headline depends on, so deleting it would break that decision. Say the word and it goes — but the progression claim goes with it.

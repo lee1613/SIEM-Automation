@@ -1,0 +1,167 @@
+[
+  {
+    "qid": "Q320",
+    "senior": "sh",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Coverage: For the created user on the compromised endpoint, the decisive evidence is the host-side hoth user-creation chain already established earlier: Q304 identifies the created user as tomcat7 on hoth, and Q303 identifies the password from the successful root-run useradd command for that same user on that same host.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "hoth's /var/log/auth.log confirms the created user is tomcat7 on hoth, and the password-bearing useradd command was found in stream:http form_data: (#cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com'). One correction to p1's wording: the command was run through the Struts2 web-shell RCE (creating a UID=0 account), not from a root shell, but the substance — tomcat7 created on hoth, password from the successful useradd command — is verified.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The report's quoted results support the coverage claim as written: it searched multiple host-side sources on hoth and found the decisive user-creation act in stream:http, while bash_history, linux_secure, and osquery shell_history did not hold it.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival reading is that the password evidence should come from osquery or Unix:UserAccounts instead. This round rules that out for this question by showing the actual user-creation command with `-p` on hoth in the HTTP RCE stream and confirming account creation in auth.log.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "Aug 20 11:24:44 hoth useradd[12815]: new user: name=tomcat7, UID=0, GID=0, home=/home/tomcat7, shell=/bin/bash",
+        "evidence": "hoth's /var/log/auth.log confirms the created user is tomcat7 on hoth, and the password-bearing useradd command was found in stream:http form_data: (#cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com'). One correction to p1's wording: the command was run through the Struts2 web-shell RCE (creating a UID=0 account), not from a root shell, but the substance — tomcat7 created on hoth, password from the successful useradd command — is verified."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's quoted results support the coverage claim as written: it searched multiple host-side sources on hoth and found the decisive user-creation act in stream:http, while bash_history, linux_secure, and osquery shell_history did not hold it. | rival: The strongest rival reading is that the password evidence should come from osquery or Unix:UserAccounts instead. This round rules that out for this question by showing the actual user-creation command with `-p` on hoth in the HTTP RCE stream and confirming account creation in auth.log."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q320",
+    "senior": "sh",
+    "id": "p2",
+    "kind": "selection",
+    "text": "Selection: The password asked for is ilovedavidverve because tomcat7 is the created user on the compromised endpoint hoth and the successful root-run useradd command for tomcat7 literally carries `-p ilovedavidverve`; rivals such as tomcat8 or any cloud bootstrap account are excluded by the earlier hoth-only selection.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "REFUTED",
+    "verified_by": "s1",
+    "evidence": "The actual useradd command on hoth carries -p davidverve.com, not -p ilovedavidverve. The password is davidverve.com. The tomcat7-on-hoth selection half of p2 holds (auth.log: new user: name=tomcat7 on hoth), but the password value ilovedavidverve is contradicted by the literal command text in the only useradd event in stream:http.",
+    "rival": "tomcat8 and cloud-bootstrap/service-user creations on EC2 hosts",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "REFUTED",
+        "by": "s1",
+        "quote": "(#cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com')",
+        "evidence": "The actual useradd command on hoth carries -p davidverve.com, not -p ilovedavidverve. The password is davidverve.com. The tomcat7-on-hoth selection half of p2 holds (auth.log: new user: name=tomcat7 on hoth), but the password value ilovedavidverve is contradicted by the literal command text in the only useradd event in stream:http."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q320",
+    "senior": "s1",
+    "id": "p3",
+    "kind": "coverage",
+    "text": "Coverage: The created user's password on hoth can appear as (a) a useradd/adduser/passwd/chpasswd command line in bash_history or hoth's osquery pack_incident-response_shell_history (1440 events) - NOT YET SEARCHED; (b) a user-creation entry in hoth's /var/log/auth.log (117 events, sourcetype=syslog) or linux_audit/linux_secure - NOT YET SEARCHED; (c) an osquery process-events cmdline on hoth - SEARCHED, 0 events contain 'useradd' anywhere in osquery:results; (d) Unix:UserAccounts rows for hoth - SEARCHED, host=hoth returns 0 events (feed covers only gacrux.* hosts); (e) a web-shell HTTP POST carrying the command (stream:http) - NOT YET SEARCHED.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Coverage option (e) is the decisive one: the password is recorded in the HTTP RCE command stream (stream:http form_data, POST /frothlyinventory/integration/saveGangster.action on hoth, #cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com'). Option (b) confirms the act host-side (hoth auth.log new user tomcat7). Options (a) bash_history and hoth osquery shell_history were searched this round and contain no user-creation or password-changing command; (c) and (d) were searched in round 1 with 0 results.",
+    "rival": "",
+    "stamp": "true",
+    "stamp_reason": "The quoted results describe the complete 15-command RCE inventory on hoth, the literal useradd command carrying `-p davidverve.com`, and the corroborating auth.log creation row. That supports the claim that the created user's password can be read from the user-creation command stream on hoth and checked against local auth/history for later changes.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the password should instead be taken from osquery/Unix:UserAccounts or a later password-change mechanism. The evidence rules that out for this question by showing the literal password in the only useradd command on hoth and no later passwd/chpasswd/usermod activity in the searched command/auth paths.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "(#cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com')",
+        "evidence": "Coverage option (e) is the decisive one: the password is recorded in the HTTP RCE command stream (stream:http form_data, POST /frothlyinventory/integration/saveGangster.action on hoth, #cmd='useradd -ou 0 -g 0 -M -N -r -s /bin/bash  tomcat7 -p davidverve.com'). Option (b) confirms the act host-side (hoth auth.log new user tomcat7). Options (a) bash_history and hoth osquery shell_history were searched this round and contain no user-creation or password-changing command; (c) and (d) were searched in round 1 with 0 results."
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted results describe the complete 15-command RCE inventory on hoth, the literal useradd command carrying `-p davidverve.com`, and the corroborating auth.log creation row. That supports the claim that the created user's password can be read from the user-creation command stream on hoth and checked against local auth/history for later changes. | rival: The strongest rival is that the password should instead be taken from osquery/Unix:UserAccounts or a later password-change mechanism. The evidence rules that out for this question by showing the literal password in the only useradd command on hoth and no later passwd/chpasswd/usermod activity in the searched command/auth paths."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "davidverve.com",
+      "3": "davidverve.com"
+    }
+  },
+  {
+    "qid": "Q320",
+    "senior": "s1",
+    "id": "p4",
+    "kind": "selection",
+    "text": "Selection: The created user on hoth is asserted to be tomcat7 with password ilovedavidverve (prior Q303/Q304 chain), but no query I ran has yet produced the useradd record itself; rivals such as tomcat8 or cloud bootstrap accounts are NOT yet ruled out by any query of mine - the shell-history/auth.log search that would rule them out is still pending, so this selection is UNVERIFIED.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "The only new-user/useradd/passwd/chpasswd event in hoth's auth.log is the tomcat7 creation; the only useradd in stream:http is the tomcat7 command. tomcat8 and cloud bootstrap accounts (ec2-user etc.) appear nowhere in hoth's creation evidence — the ec2-user/apache/memcached/streamfwd useradd events in linux_secure are Aug 20 bootstrap installs on gacrux hosts, not hoth. Selection settled: tomcat7, password davidverve.com.",
+    "rival": "tomcat8, cloud bootstrap accounts (ec2-user/cloud-init), or any other newly created hoth user",
+    "stamp": "true",
+    "stamp_reason": "The quoted stream:http command literally names tomcat7 and includes `-p davidverve.com`, and auth.log confirms creation of user tomcat7 on hoth. That does establish the claim as written.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is the earlier recalled value ilovedavidverve from Q303. This round rules that rival out for the present question because it provides a direct literal useradd command on hoth with `tomcat7 -p davidverve.com`, plus auth.log confirmation of the created user, making tomcat7 on hoth the right entity and davidverve.com the stronger password reading.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "Aug 20 11:24:44 hoth useradd[12815]: new user: name=tomcat7, UID=0, GID=0, home=/home/tomcat7, shell=/bin/bash",
+        "evidence": "The only new-user/useradd/passwd/chpasswd event in hoth's auth.log is the tomcat7 creation; the only useradd in stream:http is the tomcat7 command. tomcat8 and cloud bootstrap accounts (ec2-user etc.) appear nowhere in hoth's creation evidence — the ec2-user/apache/memcached/streamfwd useradd events in linux_secure are Aug 20 bootstrap installs on gacrux hosts, not hoth. Selection settled: tomcat7, password davidverve.com."
+      },
+      {
+        "round": 7,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The quoted stream:http command literally names tomcat7 and includes `-p davidverve.com`, and auth.log confirms creation of user tomcat7 on hoth. That does establish the claim as written. | rival: The strongest rival is the earlier recalled value ilovedavidverve from Q303. This round rules that rival out for the present question because it provides a direct literal useradd command on hoth with `tomcat7 -p davidverve.com`, plus auth.log confirmation of the created user, making tomcat7 on hoth the right entity and davidverve.com the stronger password reading."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "davidverve.com",
+      "3": "davidverve.com"
+    }
+  }
+]

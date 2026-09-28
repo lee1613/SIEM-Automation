@@ -10,7 +10,7 @@ scoreboard controller:
 
     submitted.lower().strip() == correct.lower().strip()
 
-Public API mirrors ScoreboardClient so it's a drop-in swap in run_all_v1.py:
+Public API mirrors ScoreboardClient so it's a drop-in swap in run_all_v0.py:
     LocalScoreboard(questions_csv, answers_csv, results_path)
         .submit(question_number, agent_answer) -> SubmitResult
         .get_score()                            -> dict

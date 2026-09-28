@@ -1,0 +1,77 @@
+{
+  "flow": [
+    "A Microsoft cloud identity/audit feed was identified as the direct place to look for domain-account disable actions because it can carry both the acting user and the target account as email-style principals.",
+    "In ms:aad:audit, a search for \"Disable account\" returned exactly one event, and that event named fyodor@froth.ly as the actor and bgist@froth.ly as the target.",
+    "The raw event details explicitly showed AccountEnabled changing from [true] to [false] with activityResultStatus Success, confirming this was the disable action the question asks about.",
+    "Competing feeds were checked and did not contain a competing disable action: o365:management:activity had no account-disable operation, ms:o365:management had 0 full-text \"Disable\" matches, and WinEventLog EventCode=4725 had 0 events.",
+    "The answer is the two email addresses in alphabetical order: bgist@froth.ly,fyodor@froth.ly."
+  ],
+  "derivation": "The question was approached by looking for Microsoft cloud identity/audit data that records account-management actions. In ms:aad:audit, the decisive search was a full-text \"Disable account\" query, which returned one event: actor.userPrincipalName fyodor@froth.ly, target bgist@froth.ly, status Success, with AccountEnabled oldValue [true] and newValue [false]. The companion activity inventory showed \"Disable account\" count=1, so there was only one disable-labeled event. Rival checks in o365:management:activity and WinEventLog found no competing domain-account disable record, and ms:o365:management also had no \"Disable\" matches. Therefore the disabled user is bgist@froth.ly and the user who disabled the account is fyodor@froth.ly, ordered alphabetically as requested.",
+  "entities": [
+    {
+      "key": "bgist@froth.ly",
+      "fact": "Domain user whose account was disabled."
+    },
+    {
+      "key": "fyodor@froth.ly",
+      "fact": "Domain user who disabled bgist@froth.ly's account."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "ms:aad:audit",
+      "fact": "Carries identity-management audit events with fields including activity, actor.userPrincipalName, targets{}.userPrincipalName, and targets{}.modifiedProperties{}; the disable event records AccountEnabled oldValue [true] and newValue [false]."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "fact": "Contained SharePoint/Exchange operations only in the checked inventory; no account-disable operation was present."
+    },
+    {
+      "sourcetype": "ms:o365:management",
+      "fact": "Non-empty feed, but full-text 'Disable' search returned 0 matches."
+    },
+    {
+      "sourcetype": "WinEventLog",
+      "fact": "EventCode=4725 returned 0 events, so no on-prem AD account-disable event was present."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "ms:aad:audit",
+      "purpose": "Find the disable-account event and its actor/target identities",
+      "spl": "index=botsv3 sourcetype=\"ms:aad:audit\" \"AccountEnabled\" | stats count by actor.userPrincipalName, targets{}.userPrincipalName, activity",
+      "returns": "3 events; one 'Disable account' event from fyodor@froth.ly to bgist@froth.ly."
+    },
+    {
+      "sourcetype": "ms:aad:audit",
+      "purpose": "Confirm the exact disable event and field change",
+      "spl": "index=botsv3 sourcetype=\"ms:aad:audit\" \"Disable account\"",
+      "returns": "1 event: activity=\"Disable account\", Success, actor fyodor@froth.ly, target bgist@froth.ly, AccountEnabled oldValue=[true] newValue=[false]."
+    },
+    {
+      "sourcetype": "o365:management:activity",
+      "purpose": "Check for a competing disable action in Office 365 audit",
+      "spl": "index=botsv3 sourcetype=\"o365:management:activity\" \"Disable account\" OR \"AccountEnabled\"",
+      "returns": "0 events."
+    },
+    {
+      "sourcetype": "WinEventLog",
+      "purpose": "Check for an on-prem AD disable event",
+      "spl": "index=botsv3 sourcetype=\"WinEventLog\" EventCode=4725",
+      "returns": "0 events."
+    },
+    {
+      "sourcetype": "ms:o365:management",
+      "purpose": "Check a second Microsoft management feed for disable activity",
+      "spl": "index=botsv3 sourcetype=\"ms:o365:management\" | stats count by source",
+      "returns": "142 events total in the feed; full-text 'Disable' search returned 0 matches."
+    }
+  ],
+  "ruled_out": "o365:management:activity, ms:o365:management, and WinEventLog were checked for a competing disable action and found none; the Update user rows were not alternate disables, because one is the same act dual-logged and the other is an enable of klagerfield ([false]->[true]).",
+  "qid": "Q309",
+  "question": "At some point during the attack, a user's domain account is disabled. What is the email address of the user whose account gets disabled and what is the email address of the user who disabled their account?",
+  "guidance": "Comma separated without spaces, in alphabetical order. (Example: jdoe@mycompany.com,tmiller@mycompany.com)",
+  "answer": "SH retired without answering",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

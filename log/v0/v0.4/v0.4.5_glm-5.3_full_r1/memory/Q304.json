@@ -1,0 +1,59 @@
+{
+  "flow": [
+    "The investigation stayed on the on-prem Linux host hoth because earlier work had already tied the compromise to host-side osquery evidence rather than cloud account creation.",
+    "A complete osquery:results search for useradd on hoth returned exactly two events, and both cmdlines named tomcat7 as the account being added; the later one was executed by root.",
+    "A full Unix:UserAccounts listing for hoth showed tomcat7 as the only account present in only 2 of 5 snapshots, while every other account appeared in all 5 snapshots.",
+    "That combination established tomcat7 as the unique user created after compromise, and the later round confirmed the result did not depend on truncated exploratory output.",
+    "The later clarification and rerun also ruled out tomcat8 and other pre-existing accounts, leaving tomcat7 as the created username."
+  ],
+  "derivation": "Start with hoth because the question asks for a user created after endpoint compromise on the on-prem Linux host. Querying osquery:results for useradd on hoth produced exactly two rows, both naming tomcat7; one was run by tomcat8 earlier and the later successful one was run by root. Then use Unix:UserAccounts on hoth to verify which account newly appeared: tomcat7 was the only account with reduced snapshot presence (2 of 5), whereas all other accounts including tomcat8 appeared in all 5 snapshots. Later clarification explicitly confirmed both raw events named tomcat7, the result set was complete, and the answer did not rely on truncated field-summary output. The established username is tomcat7.",
+  "entities": [
+    {
+      "key": "hoth",
+      "fact": "on-prem Linux host involved in the compromise and the host where the user creation evidence was found"
+    },
+    {
+      "key": "tomcat7",
+      "fact": "the user account created after compromise; in Unix:UserAccounts it appears in only 2 of 5 snapshots"
+    },
+    {
+      "key": "tomcat8",
+      "fact": "pre-existing service account on hoth; it ran the earlier useradd attempt but was not the created user"
+    },
+    {
+      "key": "root",
+      "fact": "the account that executed the later successful useradd of tomcat7"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "osquery:results",
+      "fact": "useradd activity on hoth was visible in osquery raw events; the complete result set contained exactly 2 events and both named tomcat7 in the cmdline"
+    },
+    {
+      "sourcetype": "Unix:UserAccounts",
+      "fact": "on hoth, tomcat7 was the only account with reduced snapshot presence (2 of 5); all other accounts appeared in all 5 snapshots"
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "find hoth useradd events and identify the created username",
+      "spl": "index=botsv3 sourcetype=osquery:results host=hoth \"useradd\" | stats count by decorations.username, columns.cmdline, columns.path, columns.pid, unixTime",
+      "returns": "2 rows: root-run useradd of tomcat7 and tomcat8-run useradd of tomcat7; both path /usr/sbin/useradd"
+    },
+    {
+      "sourcetype": "Unix:UserAccounts",
+      "purpose": "confirm which hoth account newly appeared across passwd snapshots",
+      "spl": "index=botsv3 sourcetype=Unix:UserAccounts host=hoth | stats count as snapshots by user, user_id, user_group_id, shell, home | where snapshots != 5",
+      "returns": "1 row: tomcat7, uid 0, gid 0, /bin/bash, /home/tomcat7, snapshots=2"
+    }
+  ],
+  "ruled_out": "tomcat8 and all other pre-existing hoth accounts; cloud bootstrap user-creation on EC2 hosts (mars/gacrux); truncated field-summary output as a basis for the answer",
+  "qid": "Q304",
+  "question": "What is the name of the user that was created after the endpoint was compromised?",
+  "guidance": "",
+  "answer": "SH retired without answering",
+  "verified_premises": [],
+  "validator_verdicts": []
+}

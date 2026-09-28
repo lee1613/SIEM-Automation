@@ -1,0 +1,104 @@
+{
+  "flow": [
+    "BSTOLL-L was carried forward from the prior question as the suspicious high-CPU endpoint, so the hunt started there and tested for mining-specific evidence rather than generic load.",
+    "A broad miner-name sweep across endpoint telemetry found nothing, so the approach shifted to concrete Coinhive/Monero indicators in DNS and network data.",
+    "BSTOLL-L then showed Coinhive-related DNS queries and real outbound TCP connections to the resolved Coinhive IPs on 443, alongside 100% CPU in browser processes, which established actual browser-based Monero mining behavior.",
+    "Coverage was checked across the other Frothly endpoints: the DNS-covered hosts had mining-domain searches with no hits, and BGIST-L was identified as the remaining rival because its Sysmon network events had not yet been read.",
+    "BGIST-L was then fully cleared by reading all 12 Sysmon EventCode=3 connections, which were only Dropbox update/install traffic and not mining-related; with no other endpoint showing the same DNS-plus-TCP mining chain, BSTOLL-L remained the only endpoint that actually mined Monero."
+  ],
+  "derivation": "The question asked for the short hostname of the only Frothly endpoint that actually mined Monero, so SH first reused the established lead BSTOLL-L from Q208. A miner-binary keyword sweep across endpoint telemetry was negative, which pushed the hunt toward mining-specific artifacts in DNS and network feeds. On BSTOLL-L, stream:dns and stream:tcp showed Coinhive-related DNS queries (coinhive.com and ws001/ws005/ws011/ws014/ws019.coinhive.com) followed by matching outbound TCP connections to the resolved Coinhive IPs on port 443, with concurrent browser processes at 100% CPU; that established real browser-based mining, not just high CPU. The uniqueness check then compared all other Frothly endpoints: the DNS-covered hosts had no mining-domain activity, while BGIST-L was the one named rival because its Sysmon network events had not yet been examined. Reading all 12 BGIST-L Sysmon EventCode=3 connections showed only Dropbox updater/install traffic to Dropbox and AWS endpoints, with no Coinhive IPs or mining behavior. With the rival cleared and no other endpoint showing the same mining chain, the short hostname remained BSTOLL-L.",
+  "entities": [
+    {
+      "key": "BSTOLL-L",
+      "fact": "Frothly endpoint that showed Coinhive DNS, matching TCP connections to Coinhive IPs, and browser-process CPU saturation; the short hostname answer."
+    },
+    {
+      "key": "BGIST-L",
+      "fact": "Remaining rival endpoint that was later cleared by reading all 12 Sysmon EventCode=3 network connections, which were Dropbox update/install traffic only."
+    },
+    {
+      "key": "192.168.247.131",
+      "fact": "BSTOLL-L's source IP in the stream:tcp evidence."
+    },
+    {
+      "key": "37.187.167.47",
+      "fact": "Coinhive-related resolved IP contacted by BSTOLL-L on 443."
+    },
+    {
+      "key": "104.20.208.59",
+      "fact": "Coinhive-related resolved IP contacted by BSTOLL-L on 443."
+    },
+    {
+      "key": "104.20.209.59",
+      "fact": "Coinhive-related resolved IP returned from Coinhive DNS resolution."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "stream:dns",
+      "fact": "Captured Coinhive-related DNS queries from BSTOLL-L, including coinhive.com and ws001/ws005/ws011/ws014/ws019.coinhive.com; the all-hosts mining-domain search showed only BSTOLL-L."
+    },
+    {
+      "sourcetype": "stream:tcp",
+      "fact": "Carried the actual browser TLS mining sessions for BSTOLL-L to 37.187.167.47:443 and 104.20.208.59:443 with substantial bidirectional byte counts."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "Returned 0 events for the Coinhive mining evidence; the mining traffic was TLS-encrypted and appeared in stream:tcp instead."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "fact": "On BGIST-L, EventCode=3 network connections were all Dropbox update/install traffic and did not match Coinhive or Monero mining behavior."
+    },
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "fact": "On BSTOLL-L, browser processes such as chrome#4, chrome#5, and MicrosoftEdgeCP#2 reached 100% CPU during the mining window."
+    },
+    {
+      "sourcetype": "WinHostMon",
+      "fact": "On BGIST-L, process/command-line searches for miner indicators returned 0 hits."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "PerfmonMk:Process",
+      "purpose": "Check whether BSTOLL-L showed suspicious CPU activity in specific processes.",
+      "spl": "PerfmonMk:Process host=BSTOLL-L | stats max CPU by process",
+      "returns": "chrome#4/#5 and MicrosoftEdgeCP#2 at 100% CPU."
+    },
+    {
+      "sourcetype": "stream:dns",
+      "purpose": "Find Coinhive or other mining-domain DNS queries across endpoints.",
+      "spl": "stream:dns + stream:http mining-domain search (coinhive/monero/minergate/nanopool/supportxmr/cryptonight/deepminr/coinweb/minero)",
+      "returns": "6 rows, all host=BSTOLL-L; coinhive.com and ws001/ws005/ws011/ws014/ws019.coinhive.com."
+    },
+    {
+      "sourcetype": "stream:tcp",
+      "purpose": "Confirm actual outbound connections to the resolved Coinhive mining servers.",
+      "spl": "stream:tcp for the coinhive IPs",
+      "returns": "2 rows from BSTOLL-L to 104.20.208.59:443 and 37.187.167.47:443 with byte counts."
+    },
+    {
+      "sourcetype": "stream:dns",
+      "purpose": "Test whether any other endpoint had mining-domain DNS activity.",
+      "spl": "stream:dns all-hosts mining-domain search",
+      "returns": "Only BSTOLL-L appeared; no other host."
+    },
+    {
+      "sourcetype": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "purpose": "Clear the remaining rival BGIST-L by reading its network connections.",
+      "spl": "Sysmon host=BGIST-L EventCode=3 | stats by DestinationIp, DestinationPort, Image",
+      "returns": "All 12 events were Dropbox update/install traffic to Dropbox and AWS endpoints; no Coinhive IPs."
+    }
+  ],
+  "ruled_out": "Miner-name keyword search across WinHostMon/PerfmonMk/osquery/ps (xmrig, minerd, cpuminer, cgminer, stratum, cryptonight) was negative; stream:http had no Coinhive evidence; BGIST-L was ruled out by reading all 12 Sysmon EventCode=3 connections, which were only Dropbox update/install traffic; the other Frothly endpoints (BTUN-L, PCERF-L, MKRAEUS-L, JWORTOS-L, ABUNGST-L, FYODOR-L) showed no mining-domain DNS or Coinhive connections.",
+  "qid": "Q210",
+  "question": "What is the short hostname of the only Frothly endpoint to actually mine Monero cryptocurrency?",
+  "guidance": "Example: ahamilton instead of ahamilton.mycompany.com",
+  "answer": "BSTOLL-L",
+  "verified_premises": [
+    "p1 [coverage] Actual Monero mining by a Frothly endpoint would be evidenced in the available data by mining-service DNS queries and matching outbound network connections from covered endpoints, and the searched endpoint-to-network feeds cover the candidate Frothly endpoints well enough to compare them for that behavior. — holds: The strongest rival is that actual Monero mining could be present on another Frothly endpoint in the available data but outside the searched evidence paths. The report addresses this by showing all seven primary endpoints are covered in stream:dns and that BGIST-L's only held feed is WinHostMon with no miner indicators, leaving no better in-scope rival evidenced.",
+    "p2 [selection] BSTOLL-L is the only Frothly endpoint that actually mined Monero because it is the only covered endpoint with Coinhive-related DNS queries and matching outbound connections to the resolved mining-server IPs. — holds: The strongest rival is another endpoint fitting 'actually mined Monero' as well as BSTOLL-L. The evidence rules that out by showing no other covered endpoint has either the mining-domain DNS or the matching outbound connections, and BGIST-L lacks network telemetry while its only held endpoint feed shows no miner indicators."
+  ],
+  "validator_verdicts": []
+}

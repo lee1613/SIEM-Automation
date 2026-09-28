@@ -1,0 +1,90 @@
+{
+  "flow": [
+    "CloudTrail in index=botsv3 was identified as the right feed because it contains AWS API activity, identities, event metadata, and eventID for the S3 access-changing call.",
+    "Searching aws:cloudtrail for userName=bstoll and S3 eventSource showed only two write API events in the whole feed, both PutBucketAcl; the rest were read/list activity.",
+    "Comparing the two PutBucketAcl events by eventID, eventTime, and raw requestParameters showed that ab45689d-69cd-41e7-8705-5350402cf7ac at 2018-08-20T13:01:46Z granted AllUsers READ and WRITE on frothlywebcode, while 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 had no AllUsers grant.",
+    "A feed-wide sweep for other public-enabling S3 write paths found no PutBucketPolicy, PutBucketCors, CreateBucket, or DeleteBucketPolicy events, so the public-access enabling call had to be the AllUsers PutBucketAcl.",
+    "The eventID of that enabling API call is ab45689d-69cd-41e7-8705-5350402cf7ac."
+  ],
+  "derivation": "The question asks for the event ID of the API call that made an S3 bucket publicly accessible. In aws:cloudtrail, the actor selection was bstoll, and the S3 write activity in scope reduced to two PutBucketAcl events. The key distinction came from raw requestParameters: one PutBucketAcl, eventID ab45689d-69cd-41e7-8705-5350402cf7ac at 2018-08-20T13:01:46Z, included AllUsers grants with READ and WRITE permissions on frothlywebcode, which makes the bucket public. The other PutBucketAcl, 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 at 13:57:54Z, had no AllUsers grant and therefore was not the enabling call. A search for alternative S3 public-enabling APIs returned no PutBucketPolicy, PutBucketCors, CreateBucket, or DeleteBucketPolicy events, so no rival path existed. The literal answer established in the reports is ab45689d-69cd-41e7-8705-5350402cf7ac.",
+  "entities": [
+    {
+      "key": "bstoll",
+      "fact": "Bud's CloudTrail userName / actor for the S3 bucket public-access change."
+    },
+    {
+      "key": "frothlywebcode",
+      "fact": "The S3 bucket whose ACL was changed to public."
+    },
+    {
+      "key": "ab45689d-69cd-41e7-8705-5350402cf7ac",
+      "fact": "eventID of the PutBucketAcl call that granted AllUsers READ and WRITE on frothlywebcode."
+    },
+    {
+      "key": "9a33d8df-1e16-4d58-b36d-8e80ce68f8a3",
+      "fact": "Later PutBucketAcl event by bstoll with no AllUsers grant; not the enabling call."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "Contains userName, eventName, eventSource, eventID, eventTime, and requestParameters for AWS API activity."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "For S3 write/public-access-changing activity in this case, PutBucketAcl was the relevant write API; no PutBucketPolicy, PutBucketCors, CreateBucket, or DeleteBucketPolicy events existed in the feed."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "AllUsers in requestParameters marks the public grant used to identify the enabling ACL change."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Confirm available fields and S3 write APIs for the actor Bud",
+      "spl": "get_sourcetype_fields aws:cloudtrail -> feed confirmed (6571 events) with userName/eventName/eventID/requestParameters.\nuserName=bstoll eventSource=s3.amazonaws.com | stats count by eventName, errorCode",
+      "returns": "16 eventNames; only write API is PutBucketAcl (2 successes), rest are read-only Get*/List*."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Identify the two PutBucketAcl events and their IDs/times",
+      "spl": "eventName=PutBucketAcl | stats count by userName, eventID, eventTime, errorCode",
+      "returns": "Exactly 2 events feed-wide, both bstoll: ab45689d-69cd-41e7-8705-5350402cf7ac @ 2018-08-20T13:01:46Z and 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 @ 13:57:54Z."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Show which PutBucketAcl added AllUsers grants",
+      "spl": "get_raw_events PutBucketAcl",
+      "returns": "The 13:01:46Z call grants AllUsers (http://acs.amazonaws.com/groups/global/AllUsers) READ and WRITE on bucket frothlywebcode; the 13:57:54Z call grants only bstoll FULL_CONTROL and LogDelivery (no AllUsers)."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Rule out other S3 public-enabling write paths",
+      "spl": "eventSource=s3.amazonaws.com (PutBucketPolicy OR PutBucketCors OR CreateBucket OR DeleteBucketPolicy)",
+      "returns": "0 events feed-wide."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Confirm only one AllUsers grant exists in the feed",
+      "spl": "sourcetype=aws:cloudtrail AllUsers | stats count by eventName, userName, eventID, eventTime",
+      "returns": "Exactly 1 event feed-wide: bstoll's PutBucketAcl ab45689d-69cd-41e7-8705-5350402cf7ac."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "Verify the public/non-public distinction directly",
+      "spl": "eventName=PutBucketAcl | eval allusers_count=mvcount(split(_raw,\"AllUsers\"))-1 | rex ... | stats values(allusers_permission) by eventID, eventTime, userName, allusers_count",
+      "returns": "2 rows: 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 (13:57:54Z, allusers_count=0) and ab45689d-69cd-41e7-8705-5350402cf7ac (13:01:46Z, allusers_count=2, permissions READ and WRITE)."
+    }
+  ],
+  "ruled_out": "PutBucketAcl 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 (13:57:54Z) - no AllUsers grant, so it did not enable public access; PutBucketPolicy / PutBucketCors / CreateBucket / DeleteBucketPolicy - none existed in the feed; other CloudTrail users - the AllUsers sweep found only bstoll's event.",
+  "qid": "Q203",
+  "question": "Bud accidentally makes an S3 bucket publicly accessible. What is the event ID of the API call that enabled public access?",
+  "guidance": "Include any special characters/punctuation.",
+  "answer": "ab45689d-69cd-41e7-8705-5350402cf7ac",
+  "verified_premises": [
+    "p1 [coverage] Public-access enabling in scope shows up in aws:cloudtrail as an S3 ACL/policy write containing an AllUsers/public grant; searched via feed-wide AllUsers sweep (1 hit), PutBucketPolicy/PutBucketCors/CreateBucket/DeleteBucketPolicy (0 hits), and bstoll's full S3 eventName list (only PutBucketAcl writes). — holds: The strongest rival reading is that public access was enabled through a different S3 control-plane route not covered here. The report says PutBucketAcl events were examined, PutBucketPolicy route returned zero events feed-wide, and the only AllUsers grant event was the cited PutBucketAcl, so no better in-scope rival is shown.",
+    "p2 [selection] The enabling call is bstoll's PutBucketAcl ab45689d-69cd-41e7-8705-5350402cf7ac at 2018-08-20T13:01:46Z, not the later PutBucketAcl 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3, because only the former's grant list adds AllUsers (public) READ and WRITE on frothlywebcode. — holds: The strongest rival is the later PutBucketAcl 9a33d8df-1e16-4d58-b36d-8e80ce68f8a3 or another S3 write route such as PutBucketPolicy. The evidence rules both out by showing allusers_count=0 on the later ACL event and a feed-wide S3 write-API sweep that returned only bstoll's two PutBucketAcl events."
+  ],
+  "validator_verdicts": []
+}

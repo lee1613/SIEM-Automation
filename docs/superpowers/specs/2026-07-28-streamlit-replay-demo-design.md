@@ -102,7 +102,7 @@ Visual direction: dark SOC/terminal theme (native Streamlit dark theme + monospa
   static JSON, still `json.load()` at runtime, still zero log parsing in the deployed app.
 - **Curated question set expanded 4 → 6**: 2 correct (Q332, Q333, 1000pt), 2 honest-refusal
   (Q303, Q328), 2 wrong-answer (2 of Q216/Q217/Q224/Q329/Q330/Q331 — the 1000pt residue list from
-  `v1.2_improvement_plans.md` — selected during extraction for the clearest, most instructive
+  `v0.2_improvement_plans.md` — selected during extraction for the clearest, most instructive
   wrong-reasoning trace).
 - **Refusal badge**: Q303/Q328 display a distinct badge reading "Refused to guess" (not
   "Incorrect"), with a one-line rationale that the agent declined to fabricate an answer under
@@ -111,8 +111,8 @@ Visual direction: dark SOC/terminal theme (native Streamlit dark theme + monospa
 - **Score step cost narrative**: no dollar figure is displayed. The callout describes the
   cost-tracking data-integrity fix (`load_cost` previously defaulted untracked runs to a false
   `$0.00`; now returns `None`/"not tracked" instead, per commit `8aa9fa1`) as evidence that cost
-  numbers are validated before being trusted, without citing v1.1's `$0.63` or v1.2's `$31.36` —
-  a run restart is known to have overwritten v1.1's recorded cost, making any multiplier
+  numbers are validated before being trusted, without citing v0.1's `$0.63` or v0.2's `$31.36` —
+  a run restart is known to have overwritten v0.1's recorded cost, making any multiplier
   comparison between the two unsafe to publish.
 - **App location**: unchanged from original design — `streamlit_app/app.py`,
   `streamlit_app/requirements.txt` (`streamlit`, `pandas` only), `datasets/evaluation/
@@ -144,7 +144,7 @@ Visual direction: dark SOC/terminal theme (native Streamlit dark theme + monospa
   "optional live mode" note.
 - Full 56-question browser — only the 6 curated trajectories.
 - `run_eval.py` in-browser execution — leaderboard + trajectories only, both from static JSON.
-- Publishing or citing specific dollar cost figures for v1.1/v1.2 runs — the v1.1 baseline is
+- Publishing or citing specific dollar cost figures for v0.1/v0.2 runs — the v0.1 baseline is
   known-unreliable (overwritten by a run restart), so no dollar-based comparison is shown
   publicly; only the qualitative data-integrity-fix story is told.
 - Mobile-specific layout optimization — not raised as a requirement; default Streamlit
@@ -154,9 +154,9 @@ Visual direction: dark SOC/terminal theme (native Streamlit dark theme + monospa
 
 ## Further Notes
 
-- Cost figures were independently verified before this decision was made: v1.1 ($0.63) and
-  v1.2 ($31.36) both come from real, non-zero `token_usage` blocks (not the "silently reported
-  as $0" bug case that commit `8aa9fa1` fixed) — but the user has since flagged that v1.1's
+- Cost figures were independently verified before this decision was made: v0.1 ($0.63) and
+  v0.2 ($31.36) both come from real, non-zero `token_usage` blocks (not the "silently reported
+  as $0" bug case that commit `8aa9fa1` fixed) — but the user has since flagged that v0.1's
   figure specifically was overwritten by a run restart and is not trustworthy as a baseline.
   The Score step's narrative was redesigned around this: tell the (accurate, verifiable) story
   of the integrity fix itself, and drop the (disputed) multiplier comparison entirely.

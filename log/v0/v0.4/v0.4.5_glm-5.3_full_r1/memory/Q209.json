@@ -1,0 +1,91 @@
+{
+  "flow": [
+    "The question asks for the package counts from the launch-time cloud-init automation on the Frothly web-server EC2 instances, so the relevant evidence is the gacrux web tier’s cloud-init-output and yum logs, not CloudTrail.",
+    "cloud-init-output on the gacrux hosts shows two yum-related actions: a separate modules:config gnupg2 update and a modules:final install whose summary literally reads 'Install  7 Packages (+13 Dependent packages)'.",
+    "The launch-time install is the modules:final transaction; the separate gnupg2 modules:config event is an Upgrade and was ruled out as the thing being asked about.",
+    "yum-too_small / yum.log confirms the same launch-time install transaction on each gacrux host as a single 20-package Installed event, with the 20 packages dividing into 7 primary packages and 13 dependency packages.",
+    "The final supported answer is the literal pair of counts from that cloud-init install transaction: 7,13."
+  ],
+  "derivation": "The first useful artifact was cloud-init-output on the gacrux web-server fleet. It showed Cloud-init v0.7.6 and, in modules:final, a yum transaction summary reading 'Install  7 Packages (+13 Dependent packages)'. That established the launch-time install step and the two counts. A separate modules:config row showed 'Upgrade  1 Package' for gnupg2, which was excluded. The answer was then cross-checked with yum-too_small / yum.log, which showed the same launch-time install as a 20-package Installed transaction on each gacrux host and split those 20 packages into 7 primary packages and 13 dependencies. The stable literal answer is 7,13.",
+  "entities": [
+    {
+      "key": "gacrux",
+      "fact": "the Frothly web-server fleet / web-tier hosts"
+    },
+    {
+      "key": "cloud-init-output",
+      "fact": "launch-time initialization log feed on the gacrux hosts"
+    },
+    {
+      "key": "yum-too_small",
+      "fact": "yum package-manager log feed used to confirm the install transaction and package split"
+    },
+    {
+      "key": "/var/log/cloud-init-output.log",
+      "fact": "source file for the cloud-init-output feed"
+    },
+    {
+      "key": "/var/log/yum.log",
+      "fact": "source file for the yum-too_small feed"
+    },
+    {
+      "key": "modules:final",
+      "fact": "cloud-init stage that contains the launch-time yum install transaction"
+    },
+    {
+      "key": "modules:config",
+      "fact": "cloud-init stage that contains the separate gnupg2 upgrade"
+    },
+    {
+      "key": "gnupg2",
+      "fact": "the separate package upgraded in modules:config, not part of the install set"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "cloud-init-output",
+      "fact": "On the gacrux web-server instances, modules:final contains the launch-time yum install summary 'Install  7 Packages (+13 Dependent packages)'."
+    },
+    {
+      "sourcetype": "cloud-init-output",
+      "fact": "The same feed also shows a separate modules:config 'Upgrade  1 Package' event for gnupg2."
+    },
+    {
+      "sourcetype": "yum-too_small",
+      "fact": "The yum log shows a 20-package Installed transaction on each gacrux host, corresponding to 7 primary packages and 13 dependency packages."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "cloud-init-output",
+      "purpose": "Find the launch-time install summary on the web-server init logs",
+      "spl": "index=botsv3 sourcetype=cloud-init-output \"Dependent\" | rex field=_raw \"(?<line>.*Dependent.*)\" | stats count by line",
+      "returns": "3 events, all 'Install  7 Packages (+13 Dependent packages)'."
+    },
+    {
+      "sourcetype": "cloud-init-output",
+      "purpose": "Confirm the install summary and separate upgrade stage",
+      "spl": "sourcetype=cloud-init-output | rex stage + summary | stats count by host, stage, summary",
+      "returns": "Each gacrux host shows modules:config 'Upgrade  1 Package' and modules:final 'Install  7 Packages (+13 Dependent packages)'."
+    },
+    {
+      "sourcetype": "yum-too_small",
+      "purpose": "Confirm the package split in yum logs",
+      "spl": "index=botsv3 sourcetype=yum-too_small host=\"gacrux*\" | rex field=_raw \"(?<line>[^\\n]+)\" | ...",
+      "returns": "20 Installed packages per host, split into 7 primary and 13 dependent packages."
+    }
+  ],
+  "ruled_out": "CloudTrail and bootstrap/hoth artifacts; the separate modules:config gnupg2 Upgrade; Splunk forwarder/file-extraction steps; any rival install transaction other than the single launch-time modules:final yum install.",
+  "qid": "Q209",
+  "question": "When a Frothly web server EC2 instance is launched via auto scaling, it performs automated configuration tasks after the instance starts. How many packages and dependent packages are installed by the cloud initialization script?",
+  "guidance": "Provide the number of installed packages then number of dependent packages, comma separated without spaces.",
+  "answer": "7,13",
+  "verified_premises": [
+    "p1 [coverage] Launch-time package installation by the gacrux web-server cloud initialization script is recorded in sourcetype=cloud-init-output (source=/var/log/cloud-init-output.log) as yum transaction output inside the cloud-init modules:final stage; queried and found on all 3 gacrux instances. Feeds not yet queried for the same act: sourcetype=bootstrap, sourcetype=cloud-init, sourcetype=yum-too_small. — holds: The strongest rival is that some other feed or non-launch transaction is the measurement source for the package-install act. The evidence ties the install activity to gacrux launch time and rules out bootstrap/hoth and the separate gnupg2 update, so this coverage claim holds for the question's web-server cloud-initialization act.",
+    "p2 [selection] The measured act is the yum Install transaction in cloud-init modules:final (7 packages + 13 dependent), not the gnupg2 security update in modules:config, which is an Upgrade of 1 package rather than an install and not part of the web-tier bootstrap package set. — holds: The strongest rival is that the question refers to the modules:config gnupg2 update or some other configuration step after launch. The evidence rules that out by showing only modules:final carries the install summary with package and dependent-package counts, which matches the question's requested measure.",
+    "p3 [coverage] The launch-time package-install act for the gacrux web tier is recorded in (a) sourcetype=yum-too_small, source=/var/log/yum.log - queried: 63 events, 3 gacrux hosts, 20 'Installed:' + 1 'Updated:' lines each, complete via stats by action,pkg (21 rows) - and (b) sourcetype=cloud-init-output as the yum transaction inside the single modules:final multi-line event - queried: 1 'Installing' event per host. sourcetype=bootstrap not searched this round (prior round established it belongs to hoth, not the web tier). — holds: The strongest rival is that the install act could be recorded in some other feed instead of these launch-time artifacts. For this question's measure, the evidence shows the launch-time install summary and package lists in cloud-init-output, with yum.log carrying the same install set, so the claim holds.",
+    "p4 [selection] The measured act is the 20-package 'Installed:' transaction in /var/log/yum.log at raw timestamps Jul 26 00:45/01:35/01:37 on the 3 gacrux hosts, not the gnupg2 upgrade; the rival is ruled out by 'index=botsv3 sourcetype=yum-too_small | rex field=_raw \"^[A-Za-z]{3} +\\d+ +\\d+:\\d+:\\d+ +(?<action>\\w+): +(?<pkg>\\S+)\" | stats count by action, pkg' showing gnupg2 as the only non-Install action (an Update of 1 package), and by cloud-init placing it in modules:config as an upgrade rather than in the launch install set. — holds: The strongest rival is that another yum install event or the modules:config gnupg2 update is what the question means by packages installed by the cloud initialization script. The evidence rules that out by accounting for all yum-too_small events per host as 20 Installed plus 1 Updated and placing the gnupg2 action in modules:config while the 7+13 install summary sits in modules:final.",
+    "p5 [other] The 20 installed packages divide into 7 primary (httpd, php, php-mysql, php-pecl-memcached, memcached, osquery, php-pear) and 13 dependencies (httpd-tools, apr, apr-util, apr-util-ldap, php-cli, php-common, php-pdo, php-process, php-xml, php-pecl-igbinary, libmemcached, mysql55-libs, compat-gmp4), matching p2's cloud-init-output 'Installing:' vs 'Installing for dependencies:' sections; NOT directly re-extracted this round - the cloud-init-output raw event is clipped at 1500 chars and the rex max_match extraction was rejected for lacking a stats aggregation. Next round run: index=botsv3 sourcetype=cloud-init-output \"Installing\" | rex max_match=0 field=_raw \"Installing:\\s+(?<primary>\\S+)\" | rex max_match=0 field=_raw \"Installing for dependencies:\\s+(?<dep>\\S+)\" | stats values(host) as hosts, mvcount(primary) as n_primary, mvcount(dep) as n_dep. — holds: The strongest rival is that the 20 installed packages divide differently, or that one listed package belongs to the wrong side. The evidence rules that out by using yum's own Transaction Summary and end-of-run Installed versus Dependency Installed blocks, which directly define the two sets and counts."
+  ],
+  "validator_verdicts": []
+}

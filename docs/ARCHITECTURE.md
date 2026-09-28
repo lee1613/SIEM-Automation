@@ -1,21 +1,21 @@
 # Architecture
 
-> **Current code is v1.4.1**, the conversational SH ↔ Senior loop and the default
-> `--loop conversational` (`docs/version_architecture/v1/v1.4.0.md`, `v1.4.1.md`). v1.4.0 is
-> the architecture as smoke-tested on five hard questions. v1.4.1 adds the hardening made after
-> that test and has not yet been run. **No v1.4 version has had a full run.** The only full-run
-> numbers that exist are **v1.2's**: 26/56, 8000 points, $31.36
-> (`docs/scoreboard_result/v1/v1.2.md`). Nothing here extrapolates a measurement from one
+> **Current code is v0.4.1**, the conversational SH ↔ Senior loop and the default
+> `--loop conversational` (`docs/version_architecture/v0/v0.4.0.md`, `v0.4.1.md`). v0.4.0 is
+> the architecture as smoke-tested on five hard questions. v0.4.1 adds the hardening made after
+> that test and has not yet been run. **No v0.4 version has had a full run.** The only full-run
+> numbers that exist are **v0.2's**: 26/56, 8000 points, $31.36
+> (`docs/scoreboard_result/v0/v0.2.md`). Nothing here extrapolates a measurement from one
 > version to another; where a claim has no measurement, it says so.
 >
-> The v1.3.0 plan-and-execute loop is still in the code as `--loop compiler`, the A/B control.
+> The v0.3.0 plan-and-execute loop is still in the code as `--loop compiler`, the A/B control.
 > It is described below from [Two tiers](#two-tiers) on, and every deterministic guard it
 > introduced is shared by both loops.
 
-## The conversational loop (v1.4) — `agent/v1/sh_loop.py`
+## The conversational loop (v0.4) — `agent/v0/sh_loop.py`
 
-v1.3.0 planned a DAG of one-shot workers. A joiner read their results, and a `REPLAN:` threw
-them away and briefed fresh ones from zero. v1.4 replaces that with a **bounded
+v0.3.0 planned a DAG of one-shot workers. A joiner read their results, and a `REPLAN:` threw
+them away and briefed fresh ones from zero. v0.4 replaces that with a **bounded
 conversation**. A few question-scoped seniors keep their LangGraph thread across rounds. Each
 one files a templated report at the end of every round, and SH reads all the reports of a wave
 in **one** turn, grades them, and routes each senior.
@@ -37,18 +37,18 @@ flowchart TD
     N --> F
 ```
 
-**Six routes** in one strict `json_schema` (`agent/v1/conversation.py`):
+**Six routes** in one strict `json_schema` (`agent/v0/conversation.py`):
 
 | Route | What it does |
 |---|---|
-| `SPAWN` | open a senior, either plain or `metrics` (the only technique tag left after v1.4.1's prune) |
+| `SPAWN` | open a senior, either plain or `metrics` (the only technique tag left after v0.4.1's prune) |
 | `COMMAND` | continue, or change scope, with a directive for the next round |
 | `CRITIC` | name a flaw from a closed five-value `basis` enum and say how to fix it |
 | `CLARIFY` | ask the senior a question without spending a round |
 | `RETIRE` | stop a senior; it writes a handoff |
 | `ANSWER` | submit a value, citing the senior report it came from |
 
-**The report** (`agent/v1/senior_report.py`) has a fixed template: Prior rounds (rewritten each
+**The report** (`agent/v0/senior_report.py`) has a fixed template: Prior rounds (rewritten each
 round, at most 6 lines), This round, **Assumptions**, Ruled out, **Open questions for SH**. The
 runner stamps `rounds_remaining` and `novel_spl_count` itself, because a self-reported progress
 number is one the senior can report favourably.
@@ -60,7 +60,7 @@ number is one the senior can report favourably.
 | **R1** scope | is this the question that was asked? | FAIL blocks ANSWER |
 | **R2** progress | did the round learn something new? | code overrides: `novel_spl == 0` is FAIL; two FAILs in a row force a change |
 | **R3** readiness | is a value ready to submit? | advisory |
-| **R4** premise verification | are the premises the conclusion rests on verified? | **warning only** (v1.4.1): UNVERIFIED premises are flagged in the wave, and the senior's next directive opens with "verify these first" |
+| **R4** premise verification | are the premises the conclusion rests on verified? | **warning only** (v0.4.1): UNVERIFIED premises are flagged in the wave, and the senior's next directive opens with "verify these first" |
 
 **Gates**, all deterministic, all in `conversation.py`, and a rejected turn goes back to SH
 with the reason:
@@ -69,10 +69,10 @@ with the reason:
 - **Cut-off:** a report that hit the iteration cap cannot back an ANSWER.
 - **Open questions:** SH must answer every one of the senior's open questions. The answers
   travel with its next directive.
-- **Parallel scope (v1.4.1):** a second concurrent senior must share no sourcetype/source with
+- **Parallel scope (v0.4.1):** a second concurrent senior must share no sourcetype/source with
   any running one.
 
-**Budgets** (`agent/v1/question_state.py`), keyed off the question's points:
+**Budgets** (`agent/v0/question_state.py`), keyed off the question's points:
 
 | Tier | Seniors | Rounds **per senior** | SH turns | Iterations per round | Ceiling |
 |---|---|---|---|---|---|
@@ -95,18 +95,18 @@ suspicion that can be checked on different data. A question ends when one of the
 literal `SH retired without answering`. It is scored wrong, and no senior value is ever
 submitted behind SH's back.
 
-**Artifacts** (`agent/v1/conversation_log.py`), per question: `conversation.md` (every turn,
+**Artifacts** (`agent/v0/conversation_log.py`), per question: `conversation.md` (every turn,
 grade, directive and rejection), each senior's round reports, and `handoffs/`.
-`agent/v1/grade_report.py` builds the grade distribution (R1–R4, and R2 as SH graded it vs
+`agent/v0/grade_report.py` builds the grade distribution (R1–R4, and R2 as SH graded it vs
 as it took effect).
 
-## Measured: v1.4.0 five-question smoke test (2026-09-18)
+## Measured: v0.4.0 five-question smoke test (2026-09-18)
 
 The five hard questions are Q216, Q217, Q224, Q328 and Q329. Every one survived two full runs,
-and v1.2 got all five wrong. Cost is priced by the tracker (`PRICES_PER_1M`), not
+and v0.2 got all five wrong. Cost is priced by the tracker (`PRICES_PER_1M`), not
 provider-billed, and is broken out by role.
 
-| | v1.3.0, mini senior | v1.4.0, GLM-5.3 senior | v1.4.0, mini senior |
+| | v0.3.0, mini senior | v0.4.0, GLM-5.3 senior | v0.4.0, mini senior |
 |---|---|---|---|
 | Score | 0/5 | **2/5** (Q224, Q328) | 0/5 |
 | Cost | $1.36 (SH $0.29 / senior $1.07) | $6.45 (SH $0.39 / senior $6.06) | $1.26 (SH $0.57 / senior $0.69) |
@@ -118,32 +118,32 @@ What the table shows:
   cost about 7% less than the plan-and-execute loop ($1.26 vs $1.36). The senior's share fell
   from $1.07 to $0.69, because live seniors stop re-briefing replacements from zero. SH's share
   rose, because it now reads and grades every round.
-- **GLM-5.3 is the reliable senior.** It solved two questions that v1.2 and v1.3.0 never had,
+- **GLM-5.3 is the reliable senior.** It solved two questions that v0.2 and v0.3.0 never had,
   Q224 and Q328. The same loop with a mini senior solved none, so the score came from the
-  senior model. GLM-5.3 has not been run on the v1.3.0 loop, so how much of the 2/5 is due to
+  senior model. GLM-5.3 has not been run on the v0.3.0 loop, so how much of the 2/5 is due to
   the loop itself is unmeasured.
 - **Latency roughly doubled** (18 → 37 min on the same senior), because the conversation is
   sequential: SH waits for each wave and each senior waits for SH. Questions are independent,
   so solving them in parallel should recover most of this (`future_work.md` #6).
 
 Details, transcripts and the per-question breakdown are in
-`docs/version_architecture/v1/v1.4.0.md`. The same table and the three insights are step 5
+`docs/version_architecture/v0/v0.4.0.md`. The same table and the three insights are step 5
 of the Streamlit demo. `scripts/smoke_eval.py` generates them from the committed per-question
 rows in `datasets/evaluation/smoke/`, and CI (`smoke_eval.py --check`) fails if they drift.
 
 ## Two tiers
 
-*(The compiler loop, `--loop compiler`: v1.3.0's plan-and-execute architecture, kept as the
+*(The compiler loop, `--loop compiler`: v0.3.0's plan-and-execute architecture, kept as the
 A/B control. The worker pool, grounding gate, submit guard, manifest and connection pool
-below are shared with v1.4.)*
+below are shared with v0.4.)*
 
-### SH orchestrator — `agent/v1/orchestrator.py`
+### SH orchestrator — `agent/v0/orchestrator.py`
 
 GPT-5.4. A three-node LangGraph — `planner → executor → joiner` — with the joiner able to
 route back to either. It holds planning strategy, cross-question memory, round budget, and
 answer selection; it never touches Splunk itself.
 
-The planner emits a **strict `json_schema` structured `Plan`** (`agent/v1/plan_schema.py`),
+The planner emits a **strict `json_schema` structured `Plan`** (`agent/v0/plan_schema.py`),
 not prose. Each `Spawn` in it declares `{spawn_type, subquestion, sourcetypes, sources,
 prior_info, confidence, deps}`. `deps` carries `$N` substitution, so tasks depending on an
 earlier result wait for it while independent ones run concurrently.
@@ -151,19 +151,19 @@ earlier result wait for it while independent ones run concurrently.
 `MAX_PLAN_ROUNDS = 3` planner→executor→joiner cycles per question; `MAX_WORKERS = 6`
 workers per wave, matching `SplunkConnectionPool`'s six connections.
 
-### Worker pool — `agent/v1/splunk_subagent.py`
+### Worker pool — `agent/v0/splunk_subagent.py`
 
 Two kinds of worker, both fresh-session (new `thread_id`, no cross-task memory) so one
 task's assumptions cannot contaminate another.
 
 **Senior** (`zai-org/GLM-5.3` on Featherless) runs the actual investigation. Six pre-built graphs: three
-specialist prompts (`hunter` / `content` / `metrics`, in `agent/v1/specialists.py`) × two
+specialist prompts (`hunter` / `content` / `metrics`, in `agent/v0/specialists.py`) × two
 iteration budgets (`iter_budget` gives 25 iterations at ≥500 points, `MAX_ITER` otherwise).
 Tools are the seven Splunk ones in `agent/splunk_agent.py` — `run_splunk_search`,
 `get_sources`, `get_sourcetype_fields`, `get_field_values`, `sample_events`,
 `search_keyword`, `get_raw_events` — plus `web_lookup` and `submit_finding`.
 
-**Exploration** (`agent/v1/exploration.py`, a cheap NIM model) answers *where does this data
+**Exploration** (`agent/v0/exploration.py`, a cheap NIM model) answers *where does this data
 live*, not *what is the answer*. SH spawns it when it cannot name a search space at all. Its
 pivots are ordered by measured cost, and the ordering is the point:
 
@@ -179,7 +179,7 @@ payloads, while costing 26× the cheapest pivot. Content scans are capped at 2 p
 risk is not timeout (`splunk_client` allows 600s) but **pool starvation**: six connections,
 six workers, so a 40s scan holds a slot for its whole duration.
 
-> In the v1.3.0 smoke test SH chose exploration **zero times** out of 25 spawns. This tier
+> In the v0.3.0 smoke test SH chose exploration **zero times** out of 25 spawns. This tier
 > is currently unexercised code.
 
 ## Data and control flow
@@ -204,17 +204,17 @@ flowchart TD
 
 ## Control mechanisms
 
-Every guard below is **deterministic**. That is deliberate. v1.3.0 deleted the verifier, the
+Every guard below is **deterministic**. That is deliberate. v0.3.0 deleted the verifier, the
 adjudicator, and 3× self-consistency sampling (−897 lines) because none of them could be
 shown to work: sampling reached a majority **0 times in 14** attempts, the verifier scored
 43% against 48% for no verifier, and the adjudicator never produced a measurable number.
 The deterministic guards survived because they *can* be measured — the grounding gate was a
-perfect failure predictor on run_1.2 (`grounded=False → 0/11 correct`).
+perfect failure predictor on run_0.2 (`grounded=False → 0/11 correct`).
 
-### Structured worker returns — `agent/v1/finding.py`
+### Structured worker returns — `agent/v0/finding.py`
 
 A worker finishes with a `submit_finding` **tool call** whose arguments are the schema,
-rather than prose that downstream code scrapes. Scraping is what cost run_1.2 5,100 points:
+rather than prose that downstream code scrapes. Scraping is what cost run_0.2 5,100 points:
 not wrong investigation, but wrong transcription (`BSTOLL-L.froth.ly`→`BSTOLL-L`,
 `nullweb_admin`→`web_admin`, `1367.875`→`1499.25`). Prose parsing remains as a fallback and
 `structured` records which path was taken — 72% structured in the smoke test.
@@ -232,18 +232,18 @@ Two guards run on the parsed finding:
 Both were added after the smoke test showed 8 of 18 non-empty values were unsubmittable
 prose, and that Q216's wrong answer came from a `solved` finding at confidence 38.
 
-### Grounding gate — `agent/v1/grounding.py`
+### Grounding gate — `agent/v0/grounding.py`
 
 Accepts an answer only when the whole value — or every component of a genuine
 comma-separated list — appears in the question or in worker evidence. Ungrounded with rounds
 remaining: targeted replan. Ungrounded with budget spent: fall back to the best available
 result. The guard never manufactures a refusal, though one can survive as that result.
 
-Measured on run_1.2: `grounded=True → 26/45`, `grounded=False → **0/11**`. It did not
+Measured on run_0.2: `grounded=True → 26/45`, `grounded=False → **0/11**`. It did not
 recover points — three of four previously-fabricated cases stayed wrong — but it converted
 confident fabrication into visible failure.
 
-### Candidate ledger — `agent/v1/case_file.py`
+### Candidate ledger — `agent/v0/case_file.py`
 
 Every delegation's committed value is captured **verbatim** at delegation time with its
 evidence and SPL. The joiner chooses *from* the ledger and copies rather than retyping;
@@ -271,9 +271,9 @@ its final answer — is now caught here deterministically, with no model.
 
 ### Dual-track planning
 
-For 1000-point questions, `run_all_v1.py` instructs SH to produce two orthogonal task
+For 1000-point questions, `run_all_v0.py` instructs SH to produce two orthogonal task
 tracks, at least one of which enumerates the candidate population **unfiltered** before
-narrowing. This targets premature narrowing — v1.2 solved only 2 of 9 in that tier.
+narrowing. This targets premature narrowing — v0.2 solved only 2 of 9 in that tier.
 
 > **Known hazard, unresolved.** Track 2 is meant as corroboration, but nothing marks it as
 > such, so its output competes as a peer candidate. In Q216 the corroboration track's answer
@@ -316,18 +316,18 @@ hold the **pool**, not the client, and the pool forwards every public client met
 
 That design is a scar. The mirrors existed, the client was widened to the `source` axis, and
 the mirrors were not — so every source-scoped call failed on every worker in the first
-v1.3.0 run while `test_source_axis.py` stayed green, because its fake borrowed
+v0.3.0 run while `test_source_axis.py` stayed green, because its fake borrowed
 `SplunkClient`'s methods directly and proved the right thing about a layer no agent holds.
-`agent/v1/tests/test_pool_contract.py` now asserts the contract *between* the layers and was
+`agent/v0/tests/test_pool_contract.py` now asserts the contract *between* the layers and was
 verified against a simulated old pool to confirm it actually fails.
 
 ## Run artifacts
 
-A versioned full run writes to a `log/v1/run_1.N/` root; smoke runs (`--ids` / `--limit`) go to
+A versioned full run writes to a `log/v0/run_0.N/` root; smoke runs (`--ids` / `--limit`) go to
 `log/temp/` and are not versioned, compared, or cost-tracked.
 
-`agent/v1/agent_logger.py` creates the run root, `timeline.md`, and `events.jsonl`.
-`agent/v1/run_all_v1.py` writes `case_file.json`, `sh_checkpoints.sqlite`,
+`agent/v0/agent_logger.py` creates the run root, `timeline.md`, and `events.jsonl`.
+`agent/v0/run_all_v0.py` writes `case_file.json`, `sh_checkpoints.sqlite`,
 `scoreboard_submissions.json`, `metrics.json`, `run_summary.json`, and per-question
 `questions/<qid>.json`. Per-step LLM and tool traces go to LangSmith; the historical
 `SH/` / `Senior Splunk/` / `Junior Splunk/` / `Extractor/` role directories are **not**
@@ -335,17 +335,17 @@ emitted, and there is no Junior dispatch path.
 
 `scripts/run_eval.py` reads only `scoreboard_submissions.json` for verdicts and
 `run_summary.json`'s `token_usage` for cost. It ignores `run_summary["score"]`, which can be
-stale — run_1.1's was overwritten by a later partial re-run.
+stale — run_0.1's was overwritten by a later partial re-run.
 
-`agent/v1/spawn_report.py` is a post-hoc reader over `questions/*.json`: spawn counts,
+`agent/v0/spawn_report.py` is a post-hoc reader over `questions/*.json`: spawn counts,
 outcome split, structured-vs-prose rate, and solved-rate by SH confidence decile.
 
 ## Known limitations
 
-- **The 1000-point tier is mostly unsolved.** v1.2 solved 2 of 9. On five of the survivors,
-  v1.3.0 scored 0/5 and v1.4.0 with a GLM-5.3 senior scored 2/5 (Q224, Q328). That is a smoke
+- **The 1000-point tier is mostly unsolved.** v0.2 solved 2 of 9. On five of the survivors,
+  v0.3.0 scored 0/5 and v0.4.0 with a GLM-5.3 senior scored 2/5 (Q224, Q328). That is a smoke
   test, not a full run.
-- **The conversational loop is sequential.** Latency is about 2× v1.3.0 on the same senior.
+- **The conversational loop is sequential.** Latency is about 2× v0.3.0 on the same senior.
   Questions are independent, but the runner solves them one at a time. `future_work.md` #6.
 - **Confidence is recorded but uncalibrated, and not even monotonic** — 90–99 → 0/3 while
   30–39 → 1/1 across 25 spawns. Nothing routes on it. `future_work.md` #4.
@@ -354,7 +354,7 @@ outcome split, structured-vs-prose rate, and solved-rate by SH confidence decile
   strategy succeeds. `future_work.md` #2.
 - **The joiner's LLM synthesis step has never been isolated.** The deterministic guard around
   it has receipts; the call itself does not. `future_work.md` #3.
-- **Cross-question findings are partly discarded.** In v1.4 a senior's dead ends survive
+- **Cross-question findings are partly discarded.** In v0.4 a senior's dead ends survive
   within a question, because its thread is live and its report has "Ruled out". The
   `handoffs/` written at retirement are never read back into the case file, though, so the
   next question starts without them. `future_work.md` #7.

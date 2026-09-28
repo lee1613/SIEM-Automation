@@ -1,0 +1,191 @@
+[
+  {
+    "qid": "Q225",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "The .jpeg filename used by Taedonggang to deface brewery websites is reachable either (a) embedded in the memcached payload itself, (b) in a web/object feed (access_combined, stream:http, aws:s3:accesslogs) referencing the payload or the image, or (c) in aws:cloudtrail where the payload data is reused (e.g., as a credential). Searched (a) and (b): zero matches; (c) not yet searched.",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Branch (b) of p1 is confirmed: the .jpeg filename IS reachable in stream:http — as uri_path=/images/index1.jpeg on www.lilyandhops.com and tapsosmitty.com. The prior 'zero matches' was a term-tokenization artifact: searching the literal '.jpeg' token returns nothing because the period is a minor breaker, while rex over _raw extracts the filename. The same rex over aws:s3:accesslogs and aws:cloudtrail returned 0 rows, so no .jpeg object name exists in those feeds.",
+    "rival": "aws:cloudtrail requestParameters/errorMessage — in scope but not yet queried for the payload string; could carry the reuse of the memcached payload as a credential",
+    "stamp": "true",
+    "stamp_reason": "The report's quoted outputs support the claim that the JPEG filename is reachable through post-payload web/object evidence rather than from the memcached UDP payload itself: it shows no JPEG object names in S3 or CloudTrail, but a stream:http JPEG census and tarball GET deployment path.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is that the filename should have been visible directly in the memcached payload or S3 object names. The held evidence rules that out by reporting no jpeg/jpg text in the memcached payload conversation and no jpeg/jpg object names in S3/CloudTrail, while stream:http does surface deployed JPEG filenames.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"imgfile\": \"/images/index1.jpeg\", \"site\": \"www.lilyandhops.com\", \"http_content_length\": \"631287\", \"count\": \"4\"}",
+        "evidence": "Branch (b) of p1 is confirmed: the .jpeg filename IS reachable in stream:http — as uri_path=/images/index1.jpeg on www.lilyandhops.com and tapsosmitty.com. The prior 'zero matches' was a term-tokenization artifact: searching the literal '.jpeg' token returns nothing because the period is a minor breaker, while rex over _raw extracts the filename. The same rex over aws:s3:accesslogs and aws:cloudtrail returned 0 rows, so no .jpeg object name exists in those feeds."
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report's quoted outputs support the claim that the JPEG filename is reachable through post-payload web/object evidence rather than from the memcached UDP payload itself: it shows no JPEG object names in S3 or CloudTrail, but a stream:http JPEG census and tarball GET deployment path. | rival: The strongest rival is that the filename should have been visible directly in the memcached payload or S3 object names. The held evidence rules that out by reporting no jpeg/jpg text in the memcached payload conversation and no jpeg/jpg object names in S3/CloudTrail, while stream:http does surface deployed JPEG filenames."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": ""
+    }
+  },
+  {
+    "qid": "Q225",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The memcached attack is the UDP conversation 13.125.33.130 -> 172.16.0.178:11211 (key 'injected'), and its payload data is the strings 'CRYP70KOL5CH-OWNS-YOU' (105 bytes) and '6HOUL@G3RpwnzFrothyl4Life' (50000 bytes).",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "Any other memcached traffic (different src/dest pair or TCP 11211) — ruled out: stream:tcp 'memcache' text search returned 0 events and the UDP port-11211 aggregation returned only this one pair.",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": ""
+    }
+  },
+  {
+    "qid": "Q225",
+    "senior": "s2",
+    "id": "p3",
+    "kind": "coverage",
+    "text": "The .jpeg filename used in the brewery-website defacement is reachable in stream:http as a uri_path value, but only via rex over _raw — Splunk term searches for '.jpeg' return zero because the period is a minor breaker; the retired scope's 'zero matches' in stream:http was a tokenization artifact, not absence.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": "index1.jpeg",
+      "5": "index1.jpeg"
+    }
+  },
+  {
+    "qid": "Q225",
+    "senior": "s2",
+    "id": "p4",
+    "kind": "selection",
+    "text": "The defacement .jpeg is index1.jpeg, not brunch.jpeg, the fsd.servicemax.com WordPress .jpegs, or pwned.jpg: only index1.jpeg is served on multiple brewery websites (www.lilyandhops.com and tapsosmitty.com) as part of an identical deployed kit (/, /images/index1.jpeg, /styles/layout.css), and the memcached tarball frothly_html_memcached.tar.gz was fetched by five web-server IPs from bucket frothlywebcode immediately before those sites served the kit.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "The multi-site census (rex over stream:http _raw, stats dc(site), where sites > 1) returned exactly 3 rows: /images/index1.jpeg on two distinct brewery websites, plus two greenflashbrew.com logo .jpgs each served only from that one website's own S3 endpoint and www domain. Kit composition confirmed: both sites serve the identical three-file kit — / (561B text/html), /images/index1.jpeg (631287B image/jpeg), /styles/layout.css (6443B text/css). Rivals are all single-site: /assets/brunch.jpeg (21st-amendment.com, 8512B), /files/incoming/hoffa/pwned.jpg (temp-e.net, 53022B), two fsd.servicemax.com WordPress .jpegs. One correction to the premise's timing clause: the kit was served 17:48-19:17 +08, BEFORE the tarball GETs (21:03-22:25 +08) — 'immediately before' was wrong; the tarball fetches are staging/re-deployment, not the initial deployment. The selection core of the premise (index1.jpeg, not the rivals) is verified.",
+    "rival": "/assets/brunch.jpeg on 21st-amendment.com (single site, 8512-byte normal asset; query: uri_path=\"/assets/brunch.jpeg\" | stats count by site, http_content_length -> 1 row, 21st-amendment.com only) and /files/incoming/hoffa/pwned.jpg on temp-e.net (single site, forum upload; query: uri_path=\"/files/incoming/hoffa/pwned.jpg\" | stats count by site -> 1 row, temp-e.net only) — neither appears on more than one brewery site nor in a deployed kit.",
+    "stamp": "true",
+    "stamp_reason": "The report states complete HTTP census results and direct rival comparisons showing index1.jpeg on two brewery sites while the named rivals are single-site or not .jpeg. That quote supports the claim as written that index1.jpeg, rather than the listed rivals, is the defacement image candidate.",
+    "stamp_holds": "true",
+    "holds_reason": "The strongest rival is brunch.jpeg or another brewery-site image asset fitting the question as well as index1.jpeg. The evidence rules that out by showing index1.jpeg is the only .jpeg deployed across multiple brewery sites as part of the repeated defacement kit, while the rivals are single-site assets or .jpgs.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 5,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "{\"imgfile\": \"/images/index1.jpeg\", \"sites\": \"2\", \"site_list\": [\"tapsosmitty.com\", \"www.lilyandhops.com\"], \"size\": \"631287\"}",
+        "evidence": "The multi-site census (rex over stream:http _raw, stats dc(site), where sites > 1) returned exactly 3 rows: /images/index1.jpeg on two distinct brewery websites, plus two greenflashbrew.com logo .jpgs each served only from that one website's own S3 endpoint and www domain. Kit composition confirmed: both sites serve the identical three-file kit — / (561B text/html), /images/index1.jpeg (631287B image/jpeg), /styles/layout.css (6443B text/css). Rivals are all single-site: /assets/brunch.jpeg (21st-amendment.com, 8512B), /files/incoming/hoffa/pwned.jpg (temp-e.net, 53022B), two fsd.servicemax.com WordPress .jpegs. One correction to the premise's timing clause: the kit was served 17:48-19:17 +08, BEFORE the tarball GETs (21:03-22:25 +08) — 'immediately before' was wrong; the tarball fetches are staging/re-deployment, not the initial deployment. The selection core of the premise (index1.jpeg, not the rivals) is verified."
+      },
+      {
+        "round": 9,
+        "status": "VERIFIED",
+        "by": "sh-stamp",
+        "quote": "",
+        "evidence": "stamp=true (establishes=True, holds=True): The report states complete HTTP census results and direct rival comparisons showing index1.jpeg on two brewery sites while the named rivals are single-site or not .jpeg. That quote supports the claim as written that index1.jpeg, rather than the listed rivals, is the defacement image candidate. | rival: The strongest rival is brunch.jpeg or another brewery-site image asset fitting the question as well as index1.jpeg. The evidence rules that out by showing index1.jpeg is the only .jpeg deployed across multiple brewery sites as part of the repeated defacement kit, while the rivals are single-site assets or .jpgs."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": "index1.jpeg",
+      "5": "index1.jpeg"
+    }
+  },
+  {
+    "qid": "Q225",
+    "senior": "s2",
+    "id": "p5",
+    "kind": "other",
+    "text": "The defacement kit was already live on www.lilyandhops.com and tapsosmitty.com (served 17:48-19:17 +08) before the tarball frothly_html_memcached.tar.gz was fetched from frothlywebcode (GETs 21:03-22:25 +08 by five web-server IPs, with two additional PUTs at 21:04:17 and 22:19:19), so the tarball activity is staging/re-deployment of the same kit rather than the initial deployment.",
+    "load_bearing": false,
+    "round_first_seen": 5,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "rival": "",
+    "stamp": "",
+    "stamp_reason": "",
+    "stamp_holds": "",
+    "holds_reason": "",
+    "history": [
+      {
+        "round": 5,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": "index1.jpeg",
+      "5": "index1.jpeg"
+    }
+  }
+]

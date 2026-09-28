@@ -1,0 +1,94 @@
+{
+  "flow": [
+    "The memcached attack was identified as the UDP conversation 13.125.33.130 -> 172.16.0.178:11211 carrying injected payloads, including CRYP70KOL5CH-OWNS-YOU and 6HOUL@G3RpwnzFrothyl4Life.",
+    "Those payload strings did not contain a .jpeg filename, so the search pivoted to where the payload was reused or deployed; the uploaded tarball frothly_html_memcached.tar.gz in bucket frothlywebcode became the key artifact.",
+    "Host-side and cloud feeds (bash_history, access_combined, osquery:results, linux_audit, aws:s3:accesslogs, aws:cloudtrail) did not expose the internal filename directly, but bash_history confirmed the tarball upload on mars and S3/CloudTrail confirmed the tarball’s presence and later GETs by web-server IPs.",
+    "stream:http then showed the defaced brewery sites www.lilyandhops.com and tapsosmitty.com serving the same three-file kit, with the image component /images/index1.jpeg.",
+    "A complete rival census established that index1.jpeg was the only .jpeg appearing on more than one brewery website, while brunch.jpeg, pwned.jpg, fsd.servicemax.com’s .jpegs, and greenflashbrew.com’s .jpg logos were single-site or otherwise unrelated, leaving index1.jpeg as the defacement JPEG."
+  ],
+  "derivation": "Start with the memcached UDP payload conversation 13.125.33.130 -> 172.16.0.178:11211, which yielded payload strings CRYP70KOL5CH-OWNS-YOU and 6HOUL@G3RpwnzFrothyl4Life. Those strings did not expose the filename, so the investigation moved to deployment evidence and found frothly_html_memcached.tar.gz in frothlywebcode, with bash_history showing the tarball upload from mars and S3/CloudTrail confirming later web-server GETs. The decisive evidence came from stream:http: both www.lilyandhops.com and tapsosmitty.com served the same three-file defacement kit, and the only image in that kit was /images/index1.jpeg. A complete image census across stream:http showed index1.jpeg was the only .jpeg on more than one brewery website, while the other image candidates were single-site or unrelated. Therefore the filename used by Taedonggang to deface other brewery websites is index1.jpeg.",
+  "entities": [
+    {
+      "key": "13.125.33.130",
+      "fact": "Source IP in the memcached UDP conversation identified as the attack traffic."
+    },
+    {
+      "key": "172.16.0.178",
+      "fact": "Destination host in the memcached UDP conversation."
+    },
+    {
+      "key": "frothly_html_memcached.tar.gz",
+      "fact": "Uploaded tarball in bucket frothlywebcode tied to the memcached payload deployment."
+    },
+    {
+      "key": "www.lilyandhops.com",
+      "fact": "Brewery website serving the defacement kit."
+    },
+    {
+      "key": "tapsosmitty.com",
+      "fact": "Brewery website serving the same defacement kit."
+    },
+    {
+      "key": "index1.jpeg",
+      "fact": "The defacement .jpeg filename."
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "stream:udp",
+      "fact": "Contains the memcached attack conversation on dest_port=11211, including injected payload strings."
+    },
+    {
+      "sourcetype": "bash_history",
+      "fact": "Shows the tarball upload command from mars to frothlywebcode, but not unpacking of the archive contents."
+    },
+    {
+      "sourcetype": "aws:s3:accesslogs",
+      "fact": "Shows the tarball object in frothlywebcode and later GETs by web-server IPs; no .jpeg object name appears."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "Used as a deployment corroborator; no .jpeg object name appears."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "Exposes served web content and revealed the identical three-file kit on two brewery sites, including /images/index1.jpeg."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "stream:udp",
+      "purpose": "Identify the memcached attack and extract payload strings",
+      "spl": "sourcetype=stream:udp dest_port=11211 | stats count by src_ip, dest_ip",
+      "returns": "1 pair: 13.125.33.130 -> 172.16.0.178, 17 events; raw events contained injected payloads CRYP70KOL5CH-OWNS-YOU and 6HOUL@G3RpwnzFrothyl4Life."
+    },
+    {
+      "sourcetype": "bash_history",
+      "purpose": "Confirm tarball upload context on the staging host",
+      "spl": "sourcetype=bash_history \"frothly_html_memcached\" | stats count by host,_raw",
+      "returns": "Events on mars.i-08e52f8b5a034012d showing python s3-upload.py commands that uploaded frothly_html_memcached.tar.gz to frothlywebcode."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Find the defacement kit and JPEG filename",
+      "spl": "site=\"www.lilyandhops.com\" OR site=\"tapsosmitty.com\" | stats count by site, uri_path, status",
+      "returns": "Both sites serve the identical three-file kit: /, /images/index1.jpeg, /styles/layout.css; /images/index1.jpeg is the image asset."
+    },
+    {
+      "sourcetype": "stream:http",
+      "purpose": "Establish rival JPEG census and uniqueness",
+      "spl": "rex over stream:http for image filenames | stats dc(site) by imgfile",
+      "returns": "Exactly one multi-site brewery JPEG candidate: /images/index1.jpeg; other image files were single-site or unrelated."
+    }
+  ],
+  "ruled_out": "No .jpeg filename was exposed in the memcached UDP payloads, bash_history only showed tarball upload not unpacking, access_combined and aws:s3:accesslogs/aws:cloudtrail did not surface a .jpeg object name, and rival image candidates (brunch.jpeg, pwned.jpg, fsd.servicemax.com .jpegs, greenflashbrew.com logos) were single-site or otherwise unrelated.",
+  "qid": "Q225",
+  "question": "Using the payload data found in the memcached attack, what is the name of the .jpeg file that is used by Taedonggang to deface other brewery websites?",
+  "guidance": "Include the file extension.",
+  "answer": "index1.jpeg",
+  "verified_premises": [
+    "p1 [coverage] The .jpeg filename used by Taedonggang to deface brewery websites is reachable either (a) embedded in the memcached payload itself, (b) in a web/object feed (access_combined, stream:http, aws:s3:accesslogs) referencing the payload or the image, or (c) in aws:cloudtrail where the payload data is reused (e.g., as a credential). Searched (a) and (b): zero matches; (c) not yet searched. — holds: The strongest rival is that the filename should have been visible directly in the memcached payload or S3 object names. The held evidence rules that out by reporting no jpeg/jpg text in the memcached payload conversation and no jpeg/jpg object names in S3/CloudTrail, while stream:http does surface deployed JPEG filenames.",
+    "p4 [selection] The defacement .jpeg is index1.jpeg, not brunch.jpeg, the fsd.servicemax.com WordPress .jpegs, or pwned.jpg: only index1.jpeg is served on multiple brewery websites (www.lilyandhops.com and tapsosmitty.com) as part of an identical deployed kit (/, /images/index1.jpeg, /styles/layout.css), and the memcached tarball frothly_html_memcached.tar.gz was fetched by five web-server IPs from bucket frothlywebcode immediately before those sites served the kit. — holds: The strongest rival is brunch.jpeg or another brewery-site image asset fitting the question as well as index1.jpeg. The evidence rules that out by showing index1.jpeg is the only .jpeg deployed across multiple brewery sites as part of the repeated defacement kit, while the rivals are single-site assets or .jpgs."
+  ],
+  "validator_verdicts": []
+}

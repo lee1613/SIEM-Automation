@@ -10,13 +10,13 @@ cd SIEM-Automation
 python3 scripts/run_eval.py                 # full latest run
 python3 scripts/run_eval.py --tier 1000     # the hard tier: 2/9
 python3 scripts/run_eval.py --ids Q332,Q333 # the two CVE hits
-python3 scripts/run_eval.py --run run_1.1   # 26/56 for $0.63
+python3 scripts/run_eval.py --run run_0.1   # 26/56 for $0.63
 ```
 
 Verified output for the hard tier (`python3 scripts/run_eval.py --tier 1000`):
 
 ```text
-Run:      run_1.2
+Run:      run_0.2
 Accuracy: 2/9 = 22.2%
 Points:   2000 / 9000
 
@@ -51,10 +51,10 @@ The runner preflight requires these non-empty values:
 Run this five-question smoke test before any full run:
 
 ```bash
-python agent/v1/run_all_v1.py --ids Q216,Q217,Q224,Q328,Q329
+python agent/v0/run_all_v0.py --ids Q216,Q217,Q224,Q328,Q329
 ```
 
-A full 56-question v1.2 run cost **$31.36**. Smoke tests cover five questions and write their logs to `log/temp/`.
+A full 56-question v0.2 run cost **$31.36**. Smoke tests cover five questions and write their logs to `log/temp/`.
 
 ## Regenerating the leaderboard after a run
 

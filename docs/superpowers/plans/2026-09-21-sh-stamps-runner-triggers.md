@@ -8,14 +8,14 @@
 
 **Tech Stack:** Python 3.11, pydantic v2 (strict `json_schema` structured output), pytest, ruff. No new dependencies.
 
-**Spec:** `docs/version_architecture/v1/v1.4.3.md`, section *"Revision — SH stamps, the runner triggers, the AA replaces (2026-09-21)"* (status there: *designed, not built*). It supersedes `docs/superpowers/specs/2026-09-20-validation-agent-design.md` §3.1 and §7, and finally builds that spec's §4.
+**Spec:** `docs/version_architecture/v0/v0.4.3.md`, section *"Revision — SH stamps, the runner triggers, the AA replaces (2026-09-21)"* (status there: *designed, not built*). It supersedes `docs/superpowers/specs/2026-09-20-validation-agent-design.md` §3.1 and §7, and finally builds that spec's §4.
 
 **Two decisions taken with the user before writing this plan (they are not in the spec text):**
 
 1. **What lifts a refutation block.** The existing escape in `conversation.ledger_violations` stays: a same-kind premise VERIFIED *by a validator* clears the block. SH reaches it by stamping the replacement false and nominating it, which costs a senior slot like any other false stamp. The spec's *"the REFUTED block never lifts"* therefore means only *"it does not lift when the budget runs out"* — the contrast it draws with the UNVERIFIED block.
 2. **When SH nominates.** On the same turn as the false stamp. A turn carrying a false stamp must also carry `nominate_premise_id`, or it is rejected. No grade conjunction fires anything — the spec measured `R1/R2/R3 = PASS and R4 != PASS` at zero occurrences in both r2 runs.
 
-**Where the changelog goes:** `docs/version_architecture/v1/v1.4.3.md`. Per `CLAUDE.md`, a version is in progress until its own first **full** `run_all_v1.py` run completes; v1.4.3 has only had smoke runs, so it is still in progress and the revision spec already lives in that file. Every task below writes its changelog line in the same commit as its code.
+**Where the changelog goes:** `docs/version_architecture/v0/v0.4.3.md`. Per `CLAUDE.md`, a version is in progress until its own first **full** `run_all_v0.py` run completes; v0.4.3 has only had smoke runs, so it is still in progress and the revision spec already lives in that file. Every task below writes its changelog line in the same commit as its code.
 
 ---
 
@@ -23,25 +23,25 @@
 
 | File | Responsibility after this plan |
 |---|---|
-| `agent/v1/premise.py` | The ledger. Gains the stamp (`stamp`, `stamp_reason`, `stamp_premise`, `unstamped`, `false_stamped`, `nominatable`), the selection `rival` requirement, the refusal of any settlement authored by `"sh"`, and refuted-premise rendering into every senior's brief. Loses the `definition` kind. |
-| `agent/v1/conversation.py` | The SH turn schema and the gates. Gains `PremiseStamp`, `premise_stamps`, `nominate_premise_id`, `deviation`, `inherited_entities`, and four gates: `stamp_violations`, `grade_ceiling_violations`, `nomination_violations`, `deviation_violations`. Loses `premise_updates` and `sh_update_violations`. |
-| `agent/v1/sh_loop.py` | The loop and both prompts. Applies stamps, fires the retire-and-validate trigger, builds the AA's spawn directive. `_run_validators` becomes nomination-driven. |
-| `agent/v1/validator.py` | The validation worker. `brief_for` gains its second mode; `as_refutation` turns an UNVERIFIED verdict into a refutation. `MAX_VALIDATORS_PER_QUESTION` is deleted. |
-| `agent/v1/finding.py` | The senior's `submit_finding` contract: parses `rival`, drops `definition`. |
-| `agent/v1/tests/` | New: `test_stamp.py`, `test_alternative_agent.py`. Extended: `test_premise.py`, `test_conversation_routes.py`, `test_sh_loop.py`, `test_validator.py`, `test_validator_bypass.py`. |
+| `agent/v0/premise.py` | The ledger. Gains the stamp (`stamp`, `stamp_reason`, `stamp_premise`, `unstamped`, `false_stamped`, `nominatable`), the selection `rival` requirement, the refusal of any settlement authored by `"sh"`, and refuted-premise rendering into every senior's brief. Loses the `definition` kind. |
+| `agent/v0/conversation.py` | The SH turn schema and the gates. Gains `PremiseStamp`, `premise_stamps`, `nominate_premise_id`, `deviation`, `inherited_entities`, and four gates: `stamp_violations`, `grade_ceiling_violations`, `nomination_violations`, `deviation_violations`. Loses `premise_updates` and `sh_update_violations`. |
+| `agent/v0/sh_loop.py` | The loop and both prompts. Applies stamps, fires the retire-and-validate trigger, builds the AA's spawn directive. `_run_validators` becomes nomination-driven. |
+| `agent/v0/validator.py` | The validation worker. `brief_for` gains its second mode; `as_refutation` turns an UNVERIFIED verdict into a refutation. `MAX_VALIDATORS_PER_QUESTION` is deleted. |
+| `agent/v0/finding.py` | The senior's `submit_finding` contract: parses `rival`, drops `definition`. |
+| `agent/v0/tests/` | New: `test_stamp.py`, `test_alternative_agent.py`. Extended: `test_premise.py`, `test_conversation_routes.py`, `test_sh_loop.py`, `test_validator.py`, `test_validator_bypass.py`. |
 
-`agent/v1/question_state.py` is **not** touched: the spec's budget rule ("retirement consumes a slot, so the mechanism self-caps") is already how spawn slots work — a slot is spent at spawn and retirement never returns it.
+`agent/v0/question_state.py` is **not** touched: the spec's budget rule ("retirement consumes a slot, so the mechanism self-caps") is already how spawn slots work — a slot is spent at spawn and retirement never returns it.
 
 ---
 
 ### Task 1: Open the changelog for the revision
 
 **Files:**
-- Modify: `docs/version_architecture/v1/v1.4.3.md` (append at end of file)
+- Modify: `docs/version_architecture/v0/v0.4.3.md` (append at end of file)
 
 - [ ] **Step 1: Append the changelog section**
 
-Add this to the very end of `docs/version_architecture/v1/v1.4.3.md`:
+Add this to the very end of `docs/version_architecture/v0/v0.4.3.md`:
 
 ```markdown
 
@@ -59,8 +59,8 @@ in the same turn as the change.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/version_architecture/v1/v1.4.3.md
-git commit -m "docs(v1.4.3): open the changelog for the revision
+git add docs/version_architecture/v0/v0.4.3.md
+git commit -m "docs(v0.4.3): open the changelog for the revision
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -72,14 +72,14 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 The distinction was wrong. `p3` — *"whether it is the wall-clock span `max(fes)-min(fss)` or the sum of per-flow durations is unresolved and changes the answer"* — was called unfalsifiable by search, but *do these records overlap in time* is a query. The genuinely interpretive part (*which records are the act*) is a **selection** claim and always was; `p12` was a selection claim wearing the definition label, which is exactly why it could be "verified". A measurement ambiguity becomes an open question from the senior to SH — existing machinery, hard-gated.
 
 **Files:**
-- Modify: `agent/v1/premise.py:29`, `:78-82`, `:117`
-- Modify: `agent/v1/finding.py:135`
-- Modify: `agent/v1/sh_loop.py:128` (SH_SYSTEM_PROMPT), `:170` (SENIOR_BRIEF)
-- Test: `agent/v1/tests/test_premise.py`
+- Modify: `agent/v0/premise.py:29`, `:78-82`, `:117`
+- Modify: `agent/v0/finding.py:135`
+- Modify: `agent/v0/sh_loop.py:128` (SH_SYSTEM_PROMPT), `:170` (SENIOR_BRIEF)
+- Test: `agent/v0/tests/test_premise.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_premise.py`:
+Append to `agent/v0/tests/test_premise.py`:
 
 ```python
 def test_definition_is_no_longer_a_kind():
@@ -104,7 +104,7 @@ def test_a_senior_still_saying_definition_keeps_its_claim_as_other():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py -k definition -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py -k definition -v`
 Expected: FAIL — `test_definition_is_no_longer_a_kind` fails on the `KINDS` assertion (it is still the four-tuple).
 
 - [ ] **Step 3: Narrow the kinds in `premise.py`**
@@ -132,7 +132,7 @@ Replace `Premise.kind` (line 117):
 
 - [ ] **Step 4: Update the senior's tool contract**
 
-In `agent/v1/finding.py`, replace line 135:
+In `agent/v0/finding.py`, replace line 135:
 
 ```python
       {"text": ..., "kind": "coverage"|"selection"|"other",
@@ -140,7 +140,7 @@ In `agent/v1/finding.py`, replace line 135:
 
 - [ ] **Step 5: Update both prompts**
 
-In `agent/v1/sh_loop.py`, inside `SH_SYSTEM_PROMPT` at line 128, delete this sentence from the "BEFORE ANY ANSWER" paragraph (leave the rest of the paragraph intact):
+In `agent/v0/sh_loop.py`, inside `SH_SYSTEM_PROMPT` at line 128, delete this sentence from the "BEFORE ANY ANSWER" paragraph (leave the rest of the paragraph intact):
 
 ```
 When the answer is a measurement, a `definition` premise: its meaning taken from the question's verbatim words, not your framing and not a rule a senior states - a senior citing a rule is not a result.
@@ -154,17 +154,17 @@ WHEN THE ANSWER IS A MEASUREMENT, take its meaning from the question's verbatim 
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py agent/v1/tests/test_finding_premises.py -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py agent/v0/tests/test_finding_premises.py -v`
 Expected: PASS.
 
 - [ ] **Step 7: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
-Expected: PASS, except `agent/v1/tests/test_ledger_refile_loop.py`, which files a `definition` draft. In that file, change every `kind="definition"` to `kind="other"` and update the surrounding comment to say the triplet is now a pair plus an `other`. Re-run until green.
+Run: `python -m pytest agent/v0/tests -q`
+Expected: PASS, except `agent/v0/tests/test_ledger_refile_loop.py`, which files a `definition` draft. In that file, change every `kind="definition"` to `kind="other"` and update the surrounding comment to say the triplet is now a pair plus an `other`. Re-run until green.
 
 - [ ] **Step 8: Changelog**
 
-Add under `## Changelog — building the revision (2026-09-21)` in `docs/version_architecture/v1/v1.4.3.md`:
+Add under `## Changelog — building the revision (2026-09-21)` in `docs/version_architecture/v0/v0.4.3.md`:
 
 ```markdown
 - **`definition` is deleted** (`KINDS = ("coverage", "selection", "other")`). The
@@ -182,8 +182,8 @@ Add under `## Changelog — building the revision (2026-09-21)` in `docs/version
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/finding.py agent/v1/sh_loop.py agent/v1/tests/test_premise.py agent/v1/tests/test_ledger_refile_loop.py docs/version_architecture/v1/v1.4.3.md
-git commit -m "feat(v1.4.3): delete the definition premise kind
+git add agent/v0/premise.py agent/v0/finding.py agent/v0/sh_loop.py agent/v0/tests/test_premise.py agent/v0/tests/test_ledger_refile_loop.py docs/version_architecture/v0/v0.4.3.md
+git commit -m "feat(v0.4.3): delete the definition premise kind
 
 A measurement ambiguity is an open question, not a premise. Which records
 are the act is a selection claim and a query settles it.
@@ -200,14 +200,14 @@ Two changes to the singular-selection rule, which itself stays (it is what kille
 `s1` in r1 held two live record sets — the `dp=3333` flow and the six CoinHive flows — and the ledger had no way to hold both, so one became a premise and the other stayed prose in a report and was argued away. A selection premise must now name at least one rival record set it beats; the prompt already asked for this in prose, and it becomes a schema requirement. And a draft folded into an existing open premise of the same kind is reported back in that turn's feedback instead of having its text silently discarded.
 
 **Files:**
-- Modify: `agent/v1/premise.py` (`PremiseDraft`, `Premise`, `PremiseLedger.add`)
-- Modify: `agent/v1/finding.py` (`_drafts`, the `new_premises` docstring)
-- Modify: `agent/v1/sh_loop.py` (`SENIOR_BRIEF` line 171)
-- Test: `agent/v1/tests/test_premise.py`
+- Modify: `agent/v0/premise.py` (`PremiseDraft`, `Premise`, `PremiseLedger.add`)
+- Modify: `agent/v0/finding.py` (`_drafts`, the `new_premises` docstring)
+- Modify: `agent/v0/sh_loop.py` (`SENIOR_BRIEF` line 171)
+- Test: `agent/v0/tests/test_premise.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_premise.py`:
+Append to `agent/v0/tests/test_premise.py`:
 
 ```python
 def test_a_selection_premise_without_a_rival_is_not_filed():
@@ -263,12 +263,12 @@ def test_refiling_the_same_text_is_silent():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py -k "rival or absorption or refiling" -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py -k "rival or absorption or refiling" -v`
 Expected: FAIL — `PremiseDraft` has no `rival` field (`ValidationError`), and the absorption test finds no note.
 
 - [ ] **Step 3: Add `rival` to the draft and the premise**
 
-In `agent/v1/premise.py`, add to `PremiseDraft` after the `load_bearing` field:
+In `agent/v0/premise.py`, add to `PremiseDraft` after the `load_bearing` field:
 
 ```python
     rival: str = Field(
@@ -342,7 +342,7 @@ In `PremiseLedger.add`, replace the body of the `for d in drafts or []:` loop (e
 
 - [ ] **Step 5: Parse `rival` off the senior's tool call**
 
-In `agent/v1/finding.py`, inside `_drafts`, add the field to the `PremiseDraft(...)` construction:
+In `agent/v0/finding.py`, inside `_drafts`, add the field to the `PremiseDraft(...)` construction:
 
 ```python
             out.append(PremiseDraft(text=text,
@@ -365,7 +365,7 @@ And in the `new_premises` docstring (around line 135), replace the object shape 
 
 - [ ] **Step 6: Update the senior's brief**
 
-In `agent/v1/sh_loop.py`, replace line 171 of `SENIOR_BRIEF`:
+In `agent/v0/sh_loop.py`, replace line 171 of `SENIOR_BRIEF`:
 
 ```
 THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full set. Your `selection` premise says why this entity (or feed, or value) and not the other candidates coverage found, and it must NAME one of them in `rival`, with the query that ruled it out — a selection naming no rival is not filed at all. When two record sets are both still live, that is two candidates, not one premise: settle the first before filing the second, or say in `rival` why one beats the other.
@@ -373,12 +373,12 @@ THE PREMISE MOST OFTEN MISSED IS THE CHOICE ITSELF. Then choose from that full s
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failures in every test that files a `kind="selection"` draft without a rival — `test_sh_loop.py` (its `PREMISES` constant), `test_ledger.py`, `test_ledger_wiring.py`, `test_validator_bypass.py`, `test_conversation_routes.py`. Fix each by adding a rival to the draft, e.g. in `test_sh_loop.py`:
 
 ```python
@@ -408,8 +408,8 @@ Re-run until green.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/finding.py agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.4.3): a selection premise names its rival; absorption is reported
+git add agent/v0/premise.py agent/v0/finding.py agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.4.3): a selection premise names its rival; absorption is reported
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -423,14 +423,14 @@ The largest single change. In r1 SH settled **19 of 28** premises — all 18 it 
 Two enforcement points, because the schema alone is not enough: `PremiseDraft.quote` also settles a premise, through `add`'s file-and-settle path.
 
 **Files:**
-- Modify: `agent/v1/conversation.py` (delete `premise_updates` from `SeniorDirective`; delete `sh_update_violations`)
-- Modify: `agent/v1/premise.py` (`PremiseLedger.apply` refuses `author="sh"`)
-- Modify: `agent/v1/sh_loop.py` (drop the `sh_update_violations` call and the SH `apply` call)
-- Test: `agent/v1/tests/test_premise.py`, `agent/v1/tests/test_conversation_routes.py`
+- Modify: `agent/v0/conversation.py` (delete `premise_updates` from `SeniorDirective`; delete `sh_update_violations`)
+- Modify: `agent/v0/premise.py` (`PremiseLedger.apply` refuses `author="sh"`)
+- Modify: `agent/v0/sh_loop.py` (drop the `sh_update_violations` call and the SH `apply` call)
+- Test: `agent/v0/tests/test_premise.py`, `agent/v0/tests/test_conversation_routes.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_premise.py`:
+Append to `agent/v0/tests/test_premise.py`:
 
 ```python
 SH_QUOTE = '{"dest_port": "3333", "count": "3"}'
@@ -489,12 +489,12 @@ def test_a_senior_and_a_validator_still_settle():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py -k "sh_cannot or still_settle" -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py -k "sh_cannot or still_settle" -v`
 Expected: FAIL — `apply` takes SH's verdict and `p1` is VERIFIED.
 
 - [ ] **Step 3: Refuse any settlement authored by SH**
 
-In `agent/v1/premise.py`, inside `PremiseLedger.apply`, insert at the very top of the `for u in updates or []:` loop, before `p = self.premises.get(u.id)`:
+In `agent/v0/premise.py`, inside `PremiseLedger.apply`, insert at the very top of the `for u in updates or []:` loop, before `p = self.premises.get(u.id)`:
 
 ```python
             if author == "sh":
@@ -522,11 +522,11 @@ Update the `apply` docstring's opening to:
 
 - [ ] **Step 4: Remove SH's settling channel from the schema**
 
-In `agent/v1/conversation.py`, delete the `premise_updates` field from `SeniorDirective` (lines 161-165) entirely. Delete the whole `sh_update_violations` function (lines 394-414). Then run `grep -n "quote_supported\|_CIRCULAR" agent/v1/conversation.py` and delete the now-unused imports it reports.
+In `agent/v0/conversation.py`, delete the `premise_updates` field from `SeniorDirective` (lines 161-165) entirely. Delete the whole `sh_update_violations` function (lines 394-414). Then run `grep -n "quote_supported\|_CIRCULAR" agent/v0/conversation.py` and delete the now-unused imports it reports.
 
 - [ ] **Step 5: Drop both call sites in the loop**
 
-In `agent/v1/sh_loop.py`, in `run_question`, replace the ledger-write block (lines 536-549) with:
+In `agent/v0/sh_loop.py`, in `run_question`, replace the ledger-write block (lines 536-549) with:
 
 ```python
         ledger_notes: list[str] = []
@@ -547,12 +547,12 @@ Then delete the `sh_update_violations(...)` clause from the `problems = ...` cha
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_premise.py -v`
+Run: `python -m pytest agent/v0/tests/test_premise.py -v`
 Expected: PASS.
 
 - [ ] **Step 7: Repoint the bypass tests off SH**
 
-`agent/v1/tests/test_validator_bypass.py` builds its ledger by having SH verify a premise, which no longer works. Replace `_ledger_with_validator_refutation` with:
+`agent/v0/tests/test_validator_bypass.py` builds its ledger by having SH verify a premise, which no longer works. Replace `_ledger_with_validator_refutation` with:
 
 ```python
 def _ledger_with_validator_refutation():
@@ -577,7 +577,7 @@ In `test_a_validator_refutation_blocks_an_answer_that_does_not_cite_it` and `tes
 
 - [ ] **Step 8: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failures in `test_conversation_routes.py` (imports `sh_update_violations`, and `BLANK` carries `"premise_updates": []`) and `test_sh_loop.py` (same `BLANK`). Fix by deleting the `sh_update_violations` import and its tests from `test_conversation_routes.py`, and removing `"premise_updates": []` from the `BLANK` dict in **both** test files. Re-run until green.
 
 - [ ] **Step 9: Changelog**
@@ -602,8 +602,8 @@ Expected: failures in `test_conversation_routes.py` (imports `sh_update_violatio
 - [ ] **Step 10: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.4.3): SH settles nothing
+git add agent/v0/premise.py agent/v0/conversation.py agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.4.3): SH settles nothing
 
 A premise reaches VERIFIED from the senior whose search shows it or from an
 independent validator. SH read a report and decided; that is a stamp.
@@ -616,15 +616,15 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ### Task 5: The stamp — the ledger side
 
 **Files:**
-- Modify: `agent/v1/premise.py` (`Premise`, `PremiseLedger`)
-- Test: `agent/v1/tests/test_stamp.py` (create)
+- Modify: `agent/v0/premise.py` (`Premise`, `PremiseLedger`)
+- Test: `agent/v0/tests/test_stamp.py` (create)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_stamp.py`:
+Create `agent/v0/tests/test_stamp.py`:
 
 ```python
-"""SH's stamp: its reading of one newly-claimed verification (v1.4.3 revision).
+"""SH's stamp: its reading of one newly-claimed verification (v0.4.3 revision).
 
 The measurement this replaces, across three runs and six seniors: R4 flipped to PASS on
 the turn SH stopped investigating, without exception. A single word about a whole report
@@ -718,12 +718,12 @@ def test_the_stamp_is_in_the_table_and_the_dump():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -v`
 Expected: FAIL with `AttributeError: 'PremiseLedger' object has no attribute 'unstamped'`.
 
 - [ ] **Step 3: Add the stamp to `Premise`**
 
-In `agent/v1/premise.py`, add to `Premise` after `evidence`:
+In `agent/v0/premise.py`, add to `Premise` after `evidence`:
 
 ```python
     stamp: Literal["", "true", "false"] = ""
@@ -732,7 +732,7 @@ In `agent/v1/premise.py`, add to `Premise` after `evidence`:
 
 - [ ] **Step 4: Add the ledger methods**
 
-In `agent/v1/premise.py`, add to `PremiseLedger` in the `# -- reading ---` section, after `refuted`:
+In `agent/v0/premise.py`, add to `PremiseLedger` in the `# -- reading ---` section, after `refuted`:
 
 ```python
     def unstamped(self, author: str | None = None) -> list[Premise]:
@@ -832,12 +832,12 @@ for it to `test_the_stamp_is_in_the_table_and_the_dump`:
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -v`
 Expected: PASS (8 tests).
 
 - [ ] **Step 7: Run the full suite**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: PASS. If `test_ledger.py` asserts on the exact `render_table` header, update the expected string to include the `stamp` column.
 
 - [ ] **Step 8: Changelog**
@@ -857,8 +857,8 @@ Expected: PASS. If `test_ledger.py` asserts on the exact `render_table` header, 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agent/v1/premise.py agent/v1/tests/test_stamp.py
-git commit -m "feat(v1.4.3): the stamp - SH's reading, recorded beside the status
+git add agent/v0/premise.py agent/v0/tests/test_stamp.py
+git commit -m "feat(v0.4.3): the stamp - SH's reading, recorded beside the status
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -868,13 +868,13 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ### Task 6: The stamp — the turn schema and the mandatory gate
 
 **Files:**
-- Modify: `agent/v1/conversation.py` (add `PremiseStamp`, two fields, `stamp_violations`)
-- Modify: `agent/v1/sh_loop.py` (call the gate; apply accepted stamps)
-- Test: `agent/v1/tests/test_stamp.py`
+- Modify: `agent/v0/conversation.py` (add `PremiseStamp`, two fields, `stamp_violations`)
+- Modify: `agent/v0/sh_loop.py` (call the gate; apply accepted stamps)
+- Test: `agent/v0/tests/test_stamp.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_stamp.py`:
+Append to `agent/v0/tests/test_stamp.py`:
 
 ```python
 from conversation import PremiseStamp, SeniorDirective, stamp_violations
@@ -965,12 +965,12 @@ def test_a_stamp_may_arrive_on_a_different_entry_of_the_same_turn():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -k "gate or stamped or restamped or unknown_id or different_entry" -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -k "gate or stamped or restamped or unknown_id or different_entry" -v`
 Expected: FAIL — `ImportError: cannot import name 'PremiseStamp' from 'conversation'`.
 
 - [ ] **Step 3: Add the model and the fields**
 
-In `agent/v1/conversation.py`, add after the `QuestionAnswer` class:
+In `agent/v0/conversation.py`, add after the `QuestionAnswer` class:
 
 ```python
 class PremiseStamp(BaseModel):
@@ -1007,7 +1007,7 @@ Add to `SeniorDirective`, in place of the deleted `premise_updates` field:
 
 - [ ] **Step 4: Write the gate**
 
-In `agent/v1/conversation.py`, add after `open_question_violations`:
+In `agent/v0/conversation.py`, add after `open_question_violations`:
 
 ```python
 def stamp_violations(entries: list, ledger) -> list[str]:
@@ -1051,12 +1051,12 @@ def stamp_violations(entries: list, ledger) -> list[str]:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Wire the gate and apply accepted stamps**
 
-In `agent/v1/sh_loop.py`, add `stamp_violations` to the `from conversation import (...)` list and to the `problems = ...` chain:
+In `agent/v0/sh_loop.py`, add `stamp_violations` to the `from conversation import (...)` list and to the `problems = ...` chain:
 
 ```python
         ) + premise_audit_violations(
@@ -1079,7 +1079,7 @@ Then, immediately after the accepted-turn open-question block (the `for e in tur
 
 - [ ] **Step 7: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failures in `test_conversation_routes.py` and `test_sh_loop.py`, whose `BLANK` dicts lack the two new required fields. Add `"premise_stamps": [], "nominate_premise_id": "",` to `BLANK` in both files.
 
 `test_sh_loop.py` will then fail on the new gate, because its fake senior verifies `p1` every round and no scripted turn stamps it. Fix by adding stamps to the answering turn — in `_answer`, extend the base dict:
@@ -1117,8 +1117,8 @@ and add `from conversation import PremiseStamp` at the top of `test_sh_loop.py`.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.4.3): the stamp is mandatory, and due the round it is claimed
+git add agent/v0/conversation.py agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.4.3): the stamp is mandatory, and due the round it is claimed
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -1130,13 +1130,13 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 R4 was a permission slip. Every grade SH gave, across three runs and six seniors, flipped to PASS on the turn SH stopped investigating — no exceptions. The grade now **records**; it triggers nothing, and the runner holds the facts that cap it.
 
 **Files:**
-- Modify: `agent/v1/conversation.py` (`r4_ceiling`, `grade_ceiling_violations`, R4's field description)
-- Modify: `agent/v1/sh_loop.py` (call the gate; R4's prompt paragraph)
-- Test: `agent/v1/tests/test_stamp.py`
+- Modify: `agent/v0/conversation.py` (`r4_ceiling`, `grade_ceiling_violations`, R4's field description)
+- Modify: `agent/v0/sh_loop.py` (call the gate; R4's prompt paragraph)
+- Test: `agent/v0/tests/test_stamp.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_stamp.py`:
+Append to `agent/v0/tests/test_stamp.py`:
 
 ```python
 from conversation import grade_ceiling_violations, r4_ceiling
@@ -1197,12 +1197,12 @@ def test_an_ungraded_entry_has_no_ceiling():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -k ceiling -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -k ceiling -v`
 Expected: FAIL — `ImportError: cannot import name 'r4_ceiling'`.
 
 - [ ] **Step 3: Write the ceiling**
 
-In `agent/v1/conversation.py`, add after `grade_violations`:
+In `agent/v0/conversation.py`, add after `grade_violations`:
 
 ```python
 def r4_ceiling(sid: str, entry, ledger) -> str:
@@ -1251,7 +1251,7 @@ def grade_ceiling_violations(entries: list, ledger) -> list[str]:
 
 - [ ] **Step 4: Rewrite R4's field description**
 
-In `agent/v1/conversation.py`, replace the `r4_premise_verification` field (lines 84-90) with:
+In `agent/v0/conversation.py`, replace the `r4_premise_verification` field (lines 84-90) with:
 
 ```python
     r4_premise_verification: Literal["PASS", "WEAK", "FAIL", "NA"] = Field(
@@ -1267,7 +1267,7 @@ In `agent/v1/conversation.py`, replace the `r4_premise_verification` field (line
 
 - [ ] **Step 5: Wire the gate**
 
-In `agent/v1/sh_loop.py`, add `grade_ceiling_violations` to the `from conversation import (...)` list and to the `problems = ...` chain, right after `stamp_violations`:
+In `agent/v0/sh_loop.py`, add `grade_ceiling_violations` to the `from conversation import (...)` list and to the `problems = ...` chain, right after `stamp_violations`:
 
 ```python
         ) + stamp_violations(
@@ -1279,7 +1279,7 @@ In `agent/v1/sh_loop.py`, add `grade_ceiling_violations` to the `from conversati
 
 - [ ] **Step 6: Rewrite R4's prompt paragraph**
 
-In `agent/v1/sh_loop.py`, replace line 122 of `SH_SYSTEM_PROMPT` in full:
+In `agent/v0/sh_loop.py`, replace line 122 of `SH_SYSTEM_PROMPT` in full:
 
 ```
 R4 IS A CEILING THE RUNNER HOLDS, not a free grade. You may write PASS only when that senior has no load-bearing premise still UNVERIFIED and no stamp of yours on its verifications reads false; a REFUTED load-bearing premise forces FAIL. Grade lower than the ceiling whenever you mean it — you may never grade above it, and a turn that does is rejected. Across three earlier runs R4 flipped to PASS on the turn SH stopped investigating, every time, without exception: the ceiling is what that measurement bought.
@@ -1287,12 +1287,12 @@ R4 IS A CEILING THE RUNNER HOLDS, not a free grade. You may write PASS only when
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failures in `test_sh_loop.py`, where scripted turns grade `r4_premise_verification="PASS"` while `p2` (the selection premise the fake senior files) is load-bearing and UNVERIFIED. Fix by having the fake senior settle `p2` too — extend `UPDATES`:
 
 ```python
@@ -1332,8 +1332,8 @@ Tests that deliberately exercise a blocked-answer path (the ones that leave a pr
 - [ ] **Step 10: Commit**
 
 ```bash
-git add agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.4.3): R4 becomes a ceiling the runner holds
+git add agent/v0/conversation.py agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.4.3): R4 becomes a ceiling the runner holds
 
 R4 flipped to PASS on the turn SH stopped investigating, in every run.
 It now records; it triggers nothing.
@@ -1347,17 +1347,17 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 
 No clock, no conjunction with R1/R2/R3. A false stamp is SH stating in writing that a specific premise's evidence does not establish its claim; that is a defect the moment it is written. Requiring a candidate to be ready first only waits for the senior to finish tidying up — which is when it settles its own premises.
 
-This task deletes the two triggers v1.4.3 shipped: the settle-time trigger and the ANSWER-cited pass. Both are made redundant by Task 4 — the bypass they closed (SH settling `p6`/`p7` on the answering turn, where no wave follows) is no longer reachable, because SH settles nothing.
+This task deletes the two triggers v0.4.3 shipped: the settle-time trigger and the ANSWER-cited pass. Both are made redundant by Task 4 — the bypass they closed (SH settling `p6`/`p7` on the answering turn, where no wave follows) is no longer reachable, because SH settles nothing.
 
 **Files:**
-- Modify: `agent/v1/conversation.py` (`nomination_violations`)
-- Modify: `agent/v1/sh_loop.py` (`_run_validators` rewritten; the trigger block; delete both old call sites)
-- Modify: `agent/v1/validator.py` (delete `MAX_VALIDATORS_PER_QUESTION`)
-- Test: `agent/v1/tests/test_stamp.py`, `agent/v1/tests/test_sh_loop.py`
+- Modify: `agent/v0/conversation.py` (`nomination_violations`)
+- Modify: `agent/v0/sh_loop.py` (`_run_validators` rewritten; the trigger block; delete both old call sites)
+- Modify: `agent/v0/validator.py` (delete `MAX_VALIDATORS_PER_QUESTION`)
+- Test: `agent/v0/tests/test_stamp.py`, `agent/v0/tests/test_sh_loop.py`
 
 - [ ] **Step 1: Write the failing gate tests**
 
-Append to `agent/v1/tests/test_stamp.py`:
+Append to `agent/v0/tests/test_stamp.py`:
 
 ```python
 from conversation import nomination_violations
@@ -1407,12 +1407,12 @@ def test_a_nomination_without_a_false_stamp_is_rejected():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -k nomination -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -k nomination -v`
 Expected: FAIL — `ImportError: cannot import name 'nomination_violations'`.
 
 - [ ] **Step 3: Write the nomination gate**
 
-In `agent/v1/conversation.py`, add after `stamp_violations`:
+In `agent/v0/conversation.py`, add after `stamp_violations`:
 
 ```python
 def nomination_violations(entries: list, ledger) -> list[str]:
@@ -1448,12 +1448,12 @@ def nomination_violations(entries: list, ledger) -> list[str]:
 
 - [ ] **Step 4: Run to verify the gate tests pass**
 
-Run: `python -m pytest agent/v1/tests/test_stamp.py -k nomination -v`
+Run: `python -m pytest agent/v0/tests/test_stamp.py -k nomination -v`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing integration test**
 
-Append to `agent/v1/tests/test_sh_loop.py`:
+Append to `agent/v0/tests/test_sh_loop.py`:
 
 ```python
 def test_a_false_stamp_retires_the_senior_and_spawns_one_validator(tmp_path):
@@ -1490,12 +1490,12 @@ def test_a_true_stamp_spawns_no_validator(tmp_path):
 
 - [ ] **Step 6: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_sh_loop.py -k "false_stamp or true_stamp" -v`
+Run: `python -m pytest agent/v0/tests/test_sh_loop.py -k "false_stamp or true_stamp" -v`
 Expected: FAIL — `pool.validations == 0` on the first test, and `pool.rounds == 3` (the COMMAND still ran).
 
 - [ ] **Step 7: Rewrite `_run_validators` to be nomination-driven**
 
-In `agent/v1/sh_loop.py`, replace everything from `def _run_validators(` down to (but not including) `    jobs, targets = {}, {}` with:
+In `agent/v0/sh_loop.py`, replace everything from `def _run_validators(` down to (but not including) `    jobs, targets = {}, {}` with:
 
 ```python
 def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
@@ -1527,7 +1527,7 @@ Everything below that line — the `for n, p in enumerate(due, ...)` loop, the `
 
 - [ ] **Step 8: Delete the two old triggers**
 
-In `agent/v1/sh_loop.py`:
+In `agent/v0/sh_loop.py`:
 
 Delete the ANSWER-cited block (the `answer_cited` assignment, its comment, and the `answer_verdicts = ...` block, lines 551-564). Then, in the rejection path, replace
 
@@ -1576,7 +1576,7 @@ Remove `MAX_VALIDATORS_PER_QUESTION` from the `from validator import (...)` line
 
 - [ ] **Step 9: Add the trigger block**
 
-In `agent/v1/sh_loop.py`, immediately after the stamp-application loop added in Task 6 (and before `grades.extend(rows)`), insert:
+In `agent/v0/sh_loop.py`, immediately after the stamp-application loop added in Task 6 (and before `grades.extend(rows)`), insert:
 
 ```python
         # The trigger. A false stamp is SH stating in writing that this premise's
@@ -1629,16 +1629,16 @@ Add `nomination_violations` to the `from conversation import (...)` list and to 
 
 - [ ] **Step 11: Delete the constant**
 
-In `agent/v1/validator.py`, delete `MAX_VALIDATORS_PER_QUESTION = 6` and the three comment lines above it, leaving `VALIDATOR_ROUNDS` and `VALIDATOR_ITERS`.
+In `agent/v0/validator.py`, delete `MAX_VALIDATORS_PER_QUESTION = 6` and the three comment lines above it, leaving `VALIDATOR_ROUNDS` and `VALIDATOR_ITERS`.
 
 - [ ] **Step 12: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_sh_loop.py -k "false_stamp or true_stamp" -v`
+Run: `python -m pytest agent/v0/tests/test_sh_loop.py -k "false_stamp or true_stamp" -v`
 Expected: PASS.
 
 - [ ] **Step 13: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failure in `test_validator.py` — `test_the_question_budget_is_a_real_number` imports the deleted constant. Delete that test and drop `MAX_VALIDATORS_PER_QUESTION` from its import list, then add:
 
 ```python
@@ -1669,7 +1669,7 @@ Also expect failures in any `test_sh_loop.py` test that asserted on the settle-t
   spent. **`MAX_VALIDATORS_PER_QUESTION` is deleted**: retirement consumes a spawn slot,
   so the senior pool is the budget (3 at the 1000pt tier; r2 used 1).
 
-- **Both v1.4.3 triggers are deleted**: the settle-time trigger and the ANSWER-cited
+- **Both v0.4.3 triggers are deleted**: the settle-time trigger and the ANSWER-cited
   pass. The bypass the ANSWER-cited pass closed — SH settling `p6`/`p7` on the answering
   turn, where no wave follows — is unreachable now that SH settles nothing.
 ```
@@ -1677,8 +1677,8 @@ Also expect failures in any `test_sh_loop.py` test that asserted on the settle-t
 - [ ] **Step 15: Commit**
 
 ```bash
-git add agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/validator.py agent/v1/tests/
-git commit -m "feat(v1.4.3): a false stamp retires the senior and spawns one validator
+git add agent/v0/conversation.py agent/v0/sh_loop.py agent/v0/validator.py agent/v0/tests/
+git commit -m "feat(v0.4.3): a false stamp retires the senior and spawns one validator
 
 No clock, no grade conjunction. The senior pool is the budget.
 
@@ -1696,12 +1696,12 @@ This is the step that makes the trigger bite. Without it: SH stamps `p1` false, 
 The mapping applies to a **verdict**, not to a failure. A validator that files no usable verdict, quotes something it did not run, or dies in transport leaves the status untouched and says so — a transport failure is not a reasoning outcome, the same principle `state.refund_spawn` rests on.
 
 **Files:**
-- Modify: `agent/v1/sh_loop.py` (`_run_validators`, the verdict branch)
-- Test: `agent/v1/tests/test_validator.py`
+- Modify: `agent/v0/sh_loop.py` (`_run_validators`, the verdict branch)
+- Test: `agent/v0/tests/test_validator.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_validator.py`:
+Append to `agent/v0/tests/test_validator.py`:
 
 ```python
 from premise import PremiseUpdate as _PU
@@ -1733,12 +1733,12 @@ def test_no_verdict_at_all_is_not_a_refutation():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_validator.py -k refutation -v`
+Run: `python -m pytest agent/v0/tests/test_validator.py -k refutation -v`
 Expected: FAIL — `ImportError: cannot import name 'as_refutation'`.
 
 - [ ] **Step 3: Write the mapping**
 
-In `agent/v1/validator.py`, add after `refusal_reason`:
+In `agent/v0/validator.py`, add after `refusal_reason`:
 
 ```python
 def as_refutation(update):
@@ -1763,7 +1763,7 @@ def as_refutation(update):
 
 - [ ] **Step 4: Apply it in the runner**
 
-In `agent/v1/sh_loop.py`, inside `_run_validators`'s results loop, replace the two lines that compute the refusal and apply the update:
+In `agent/v0/sh_loop.py`, inside `_run_validators`'s results loop, replace the two lines that compute the refusal and apply the update:
 
 ```python
         why = refusal_reason(res["update"], res["corpus"])
@@ -1802,12 +1802,12 @@ Add `as_refutation` to the `from validator import (...)` list.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_validator.py -v`
+Run: `python -m pytest agent/v0/tests/test_validator.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: PASS. `test_an_unverified_verdict_needs_no_quote` still passes — it asserts on `refusal_reason`, which is unchanged.
 
 - [ ] **Step 7: Changelog**
@@ -1826,8 +1826,8 @@ Expected: PASS. `test_an_unverified_verdict_needs_no_quote` still passes — it 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/validator.py agent/v1/sh_loop.py agent/v1/tests/test_validator.py
-git commit -m "feat(v1.4.3): an UNVERIFIED verdict is a refutation
+git add agent/v0/validator.py agent/v0/sh_loop.py agent/v0/tests/test_validator.py
+git commit -m "feat(v0.4.3): an UNVERIFIED verdict is a refutation
 
 Two readers could not stand the claim up. Leaving it VERIFIED made the
 mechanism cost a senior slot and change nothing.
@@ -1839,17 +1839,17 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 
 ### Task 9: The validator's second mode
 
-A nomination has two sources, so the brief has two shapes. Handed r2's `p1` — *"(c) flows to pool IP 45.77.53.176 on any port — NOT yet searched"* — with nothing attached and told to settle it, the obvious move is to go and search route (c). That is what `v1` did in v1.4.3 r1 with its full-feed `dh` scan, which is the one time this architecture found the right lead.
+A nomination has two sources, so the brief has two shapes. Handed r2's `p1` — *"(c) flows to pool IP 45.77.53.176 on any port — NOT yet searched"* — with nothing attached and told to settle it, the obvious move is to go and search route (c). That is what `v1` did in v0.4.3 r1 with its full-feed `dh` scan, which is the one time this architecture found the right lead.
 
 The mode lives in `brief_for`, not in `SPECIALISTS["validator"]`: the difference is per-premise, and the system prompt has no premise to look at.
 
 **Files:**
-- Modify: `agent/v1/validator.py` (`brief_for`)
-- Test: `agent/v1/tests/test_validator.py`
+- Modify: `agent/v0/validator.py` (`brief_for`)
+- Test: `agent/v0/tests/test_validator.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_validator.py`:
+Append to `agent/v0/tests/test_validator.py`:
 
 ```python
 def test_an_offered_quote_asks_whether_it_establishes_the_claim():
@@ -1874,12 +1874,12 @@ def test_no_offered_quote_asks_it_to_settle_the_claim_itself():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_validator.py -k "offered_quote or settle_the_claim" -v`
+Run: `python -m pytest agent/v0/tests/test_validator.py -k "offered_quote or settle_the_claim" -v`
 Expected: FAIL — neither phrase is in the brief.
 
 - [ ] **Step 3: Branch the brief**
 
-In `agent/v1/validator.py`, replace `brief_for` in full:
+In `agent/v0/validator.py`, replace `brief_for` in full:
 
 ```python
 def brief_for(premise) -> str:
@@ -1893,7 +1893,7 @@ def brief_for(premise) -> str:
     The second is the mode that worked. Handed r2's `p1` - "(c) flows to pool IP
     45.77.53.176 on any port - NOT yet searched" - with nothing attached and told to
     settle it, the obvious move is to go and search route (c). That is what `v1` did in
-    v1.4.3 r1 with its full-feed `dh` scan, the one time this architecture found the
+    v0.4.3 r1 with its full-feed `dh` scan, the one time this architecture found the
     right lead.
 
     Everything that could identify the question is left out either way, including the
@@ -1921,12 +1921,12 @@ def brief_for(premise) -> str:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_validator.py -v`
+Run: `python -m pytest agent/v0/tests/test_validator.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: PASS.
 
 - [ ] **Step 6: Changelog**
@@ -1938,7 +1938,7 @@ Expected: PASS.
   mode lives in the brief, not in `SPECIALISTS["validator"]`: the difference is
   per-premise and the system prompt has no premise to look at. The second mode is the
   one with evidence behind it: handed r2's `p1` with nothing attached, the obvious move
-  is to search route (c), which is what `v1` did in v1.4.3 r1 with its full-feed `dh`
+  is to search route (c), which is what `v1` did in v0.4.3 r1 with its full-feed `dh`
   scan — the one time this architecture found the right lead. It also answers the
   standing `§7.4` question: both r2 validator failures were *"quoted something it did
   not run"*, the validator echoing the evidence it was handed, and this mode hands it
@@ -1948,8 +1948,8 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/v1/validator.py agent/v1/tests/test_validator.py
-git commit -m "feat(v1.4.3): the validator's second mode - settle it yourself
+git add agent/v0/validator.py agent/v0/tests/test_validator.py
+git commit -m "feat(v0.4.3): the validator's second mode - settle it yourself
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -1963,17 +1963,17 @@ Spawned after a REFUTED verdict. Carries `deviation` and `inherited_entities` (S
 This task also closes a live defect: `render_refuted()` has never had a caller, and `render_for_senior` excludes REFUTED premises justifying it with *"render_refuted() already tells the senior which premises are dead"*. Today no senior is told which premises are dead. It is now wired into **every** senior's carried brief, not only the AA's spawn.
 
 **Files:**
-- Modify: `agent/v1/conversation.py` (two SPAWN fields, `deviation_violations`)
-- Modify: `agent/v1/premise.py` (`render_for_senior` carries `render_refuted`)
-- Modify: `agent/v1/sh_loop.py` (`_spawn_directive`; the SPAWN branch; the ALTERNATIVE SENIOR prompt block)
-- Test: `agent/v1/tests/test_alternative_agent.py` (create)
+- Modify: `agent/v0/conversation.py` (two SPAWN fields, `deviation_violations`)
+- Modify: `agent/v0/premise.py` (`render_for_senior` carries `render_refuted`)
+- Modify: `agent/v0/sh_loop.py` (`_spawn_directive`; the SPAWN branch; the ALTERNATIVE SENIOR prompt block)
+- Test: `agent/v0/tests/test_alternative_agent.py` (create)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `agent/v1/tests/test_alternative_agent.py`:
+Create `agent/v0/tests/test_alternative_agent.py`:
 
 ```python
-"""The alternative agent (spec 2 §4, built in the v1.4.3 revision).
+"""The alternative agent (spec 2 §4, built in the v0.4.3 revision).
 
 Not a new agent type: an ordinary senior whose brief the runner augments with the
 refuted premises. Treating it as a new type would duplicate the whole senior stack to
@@ -1990,7 +1990,7 @@ from conversation import SeniorDirective, deviation_violations
 from premise import PremiseDraft, PremiseLedger, PremiseUpdate
 from sh_loop import _spawn_directive
 
-# Repeated rather than imported from test_stamp: agent/v1/tests is not a package and
+# Repeated rather than imported from test_stamp: agent/v0/tests is not a package and
 # the repo has a second top-level tests/ directory, so a cross-test import is
 # ambiguous. Same reason test_sh_loop.py carries its own copy.
 BLANK = {
@@ -2087,12 +2087,12 @@ def test_a_clean_ledger_carries_no_refuted_block():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_alternative_agent.py -v`
+Run: `python -m pytest agent/v0/tests/test_alternative_agent.py -v`
 Expected: FAIL — `ImportError: cannot import name 'deviation_violations'`.
 
 - [ ] **Step 3: Add the two SPAWN fields**
 
-In `agent/v1/conversation.py`, add to `SeniorDirective` in the `# SPAWN` block, after `reason`:
+In `agent/v0/conversation.py`, add to `SeniorDirective` in the `# SPAWN` block, after `reason`:
 
 ```python
     deviation: str = Field(
@@ -2110,7 +2110,7 @@ In `agent/v1/conversation.py`, add to `SeniorDirective` in the `# SPAWN` block, 
 
 - [ ] **Step 4: Write the gate**
 
-In `agent/v1/conversation.py`, add after `nomination_violations`:
+In `agent/v0/conversation.py`, add after `nomination_violations`:
 
 ```python
 def deviation_violations(entries: list, ledger) -> list[str]:
@@ -2134,7 +2134,7 @@ def deviation_violations(entries: list, ledger) -> list[str]:
 
 - [ ] **Step 5: Carry the refuted block to every senior**
 
-In `agent/v1/premise.py`, in `render_for_senior`, replace the docstring's closing sentence (*"`render_refuted()` already tells the senior which premises are dead."*) with:
+In `agent/v0/premise.py`, in `render_for_senior`, replace the docstring's closing sentence (*"`render_refuted()` already tells the senior which premises are dead."*) with:
 
 ```python
         `render_refuted()` is rendered at the head of this block, for EVERY senior and
@@ -2179,7 +2179,7 @@ Replace `render_refuted`'s docstring, which is now wrong about having no caller:
 
 - [ ] **Step 6: Build the AA's spawn directive**
 
-In `agent/v1/sh_loop.py`, add after `_route_directive`:
+In `agent/v0/sh_loop.py`, add after `_route_directive`:
 
 ```python
 def _spawn_directive(e, ledger) -> str:
@@ -2224,7 +2224,7 @@ Add `deviation_violations` to the `from conversation import (...)` list and to `
 
 - [ ] **Step 8: Replace the prose ALTERNATIVE SENIOR paragraph**
 
-In `agent/v1/sh_loop.py`, replace lines 91-92 of `SH_SYSTEM_PROMPT` with:
+In `agent/v0/sh_loop.py`, replace lines 91-92 of `SH_SYSTEM_PROMPT` with:
 
 ```
 Brief the replacement on the question as asked, then fill two fields. `deviation`: where the evidence may sit if the retired reading was wrong — the fields, feeds or entities it did not touch, and what not to re-walk. The deviation can be small; the same feed read through a different field is a different direction, the same field re-read is not. `inherited_entities`: what the retired senior ESTABLISHED — a host, account, file, window — that carries forward. Carrying a proven entity into the feed the question names is the most common way a stuck question is solved; dropping it because it was found elsewhere is how one is lost. A SPAWN made while a load-bearing premise is REFUTED is rejected without a `deviation`.
@@ -2233,12 +2233,12 @@ The third thing a replacement needs — what NOT to rebuild on — the runner fi
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_alternative_agent.py -v`
+Run: `python -m pytest agent/v0/tests/test_alternative_agent.py -v`
 Expected: PASS (7 tests).
 
 - [ ] **Step 10: Run the full suite and fix the fallout**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: failures in `test_conversation_routes.py` / `test_sh_loop.py` `BLANK` dicts — add `"deviation": "", "inherited_entities": "",` to both. Any test that spawns while a premise is REFUTED needs a `deviation=` on its spawn. Re-run until green.
 
 - [ ] **Step 11: Changelog**
@@ -2264,8 +2264,8 @@ Expected: failures in `test_conversation_routes.py` / `test_sh_loop.py` `BLANK` 
 - [ ] **Step 12: Commit**
 
 ```bash
-git add agent/v1/conversation.py agent/v1/premise.py agent/v1/sh_loop.py agent/v1/tests/
-git commit -m "feat(v1.4.3): the alternative agent, and a refuted block that reaches seniors
+git add agent/v0/conversation.py agent/v0/premise.py agent/v0/sh_loop.py agent/v0/tests/
+git commit -m "feat(v0.4.3): the alternative agent, and a refuted block that reaches seniors
 
 render_refuted() has had no caller since it was written. Every senior now
 gets it, and a replacement gets deviation + inherited_entities as fields.
@@ -2280,12 +2280,12 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 The gates are built; the prompt still describes the old ones. Every edit here is text in `SH_SYSTEM_PROMPT` — no logic.
 
 **Files:**
-- Modify: `agent/v1/sh_loop.py` (`SH_SYSTEM_PROMPT` lines 126, 128, 132-141)
-- Test: `agent/v1/tests/test_sh_prompts.py`
+- Modify: `agent/v0/sh_loop.py` (`SH_SYSTEM_PROMPT` lines 126, 128, 132-141)
+- Test: `agent/v0/tests/test_sh_prompts.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `agent/v1/tests/test_sh_prompts.py`:
+Append to `agent/v0/tests/test_sh_prompts.py`:
 
 ```python
 def test_the_prompt_does_not_invite_sh_to_settle_a_premise():
@@ -2315,12 +2315,12 @@ def test_r4_is_no_longer_described_as_inert():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_sh_prompts.py -v`
+Run: `python -m pytest agent/v0/tests/test_sh_prompts.py -v`
 Expected: FAIL on the first two — the prompt still says `premise_updates` and has no stamp section.
 
 - [ ] **Step 3: Rewrite the ledger paragraph**
 
-In `agent/v1/sh_loop.py`, replace line 126 of `SH_SYSTEM_PROMPT` in full:
+In `agent/v0/sh_loop.py`, replace line 126 of `SH_SYSTEM_PROMPT` in full:
 
 ```
 THE PREMISE LEDGER. Every premise on this question lives in one ledger, shown to you in full each turn. The seniors file their own; you file the ones they missed, in `new_premises`. YOU DO NOT SETTLE PREMISES. You have no Splunk access, so "SH verified it" has only ever meant "SH read a report and decided" — and in the run this rule comes from, you settled 19 of 28 premises, including every one that lost the question. A premise reaches VERIFIED from the senior whose own search shows it, or from an independent validator, and from nobody else. A premise YOU file therefore starts UNVERIFIED and stays there until a senior settles it: the runner carries it to every active senior as a load-bearing premise filed by others, so FILE IT EARLY — one you file on your answering turn has nobody left to settle it.
@@ -2373,12 +2373,12 @@ A premise you file is UNVERIFIED until a senior settles it, so file it while a s
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_sh_prompts.py -v`
+Run: `python -m pytest agent/v0/tests/test_sh_prompts.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `python -m pytest agent/v1/tests -q`
+Run: `python -m pytest agent/v0/tests -q`
 Expected: PASS.
 
 - [ ] **Step 9: Changelog**
@@ -2394,8 +2394,8 @@ Expected: PASS.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add agent/v1/sh_loop.py agent/v1/tests/test_sh_prompts.py
-git commit -m "docs(v1.4.3): the SH prompt catches up with the mechanism
+git add agent/v0/sh_loop.py agent/v0/tests/test_sh_prompts.py
+git commit -m "docs(v0.4.3): the SH prompt catches up with the mechanism
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -2409,11 +2409,11 @@ Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 This behaviour already holds — `ledger_violations`' two REFUTED blocks have no budget escape, and `run_question` returns `NO_ANSWER` when no ANSWER route is ever accepted. It has never been pinned by a test, and it is exactly the property a future "let it answer anyway" patch would quietly remove.
 
 **Files:**
-- Test: `agent/v1/tests/test_validator_bypass.py`
+- Test: `agent/v0/tests/test_validator_bypass.py`
 
 - [ ] **Step 1: Write the test**
 
-Append to `agent/v1/tests/test_validator_bypass.py`:
+Append to `agent/v0/tests/test_validator_bypass.py`:
 
 ```python
 def test_the_refuted_block_does_not_lift_when_the_budget_runs_out():
@@ -2450,15 +2450,15 @@ def test_an_unverified_block_does_lift_when_the_budget_runs_out():
 
 - [ ] **Step 2: Run it**
 
-Run: `python -m pytest agent/v1/tests/test_validator_bypass.py -v`
+Run: `python -m pytest agent/v0/tests/test_validator_bypass.py -v`
 Expected: PASS. Both describe behaviour that already holds — if either fails, an earlier task broke the gate, and that is the bug to fix, not the test.
 
 - [ ] **Step 3: Run the whole suite and the linter**
 
-Run: `python -m pytest agent/v1/tests tests -q`
+Run: `python -m pytest agent/v0/tests tests -q`
 Expected: PASS, no failures. Record the count.
 
-Run: `python -m ruff check agent/v1/premise.py agent/v1/conversation.py agent/v1/sh_loop.py agent/v1/validator.py agent/v1/finding.py agent/v1/tests/`
+Run: `python -m ruff check agent/v0/premise.py agent/v0/conversation.py agent/v0/sh_loop.py agent/v0/validator.py agent/v0/finding.py agent/v0/tests/`
 Expected: `All checks passed!`. Fix anything it reports — most likely an unused import left by Task 4 or Task 8.
 
 > `python -m ruff check agent/` reports **18 pre-existing errors** on this branch, all in
@@ -2486,8 +2486,8 @@ Replace `N` with the number from Step 3.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/tests/test_validator_bypass.py docs/version_architecture/v1/v1.4.3.md
-git commit -m "test(v1.4.3): pin the endgame - a refuted premise outlasts the budget
+git add agent/v0/tests/test_validator_bypass.py docs/version_architecture/v0/v0.4.3.md
+git commit -m "test(v0.4.3): pin the endgame - a refuted premise outlasts the budget
 
 Claude-Session: https://claude.ai/code/session_0164q3usEHekK9HHT9p8JzWR"
 ```
@@ -2499,18 +2499,18 @@ Do **not** run this without the user's go-ahead: `CLAUDE.md`'s cost-limited-runs
 The acceptance run for this mechanism is Q216, the question every reading in the spec comes from:
 
 ```bash
-python agent/v1/run_all_v1.py --ids Q216 --run-name v1.4.3_stamp_Q216_r1
+python agent/v0/run_all_v0.py --ids Q216 --run-name v0.4.3_stamp_Q216_r1
 ```
 
 Output lands in `log/temp/`. What to read, in order:
 
-1. **Did SH ever stamp false?** `grep -c '"stamp": "false"' log/temp/v1.4.3_stamp_Q216_r1/premise_ledger.json`. Zero means the mechanism never fired, and the risk the spec accepted in the open ("SH can stamp everything true and the mechanism never fires") is what happened.
+1. **Did SH ever stamp false?** `grep -c '"stamp": "false"' log/temp/v0.4.3_stamp_Q216_r1/premise_ledger.json`. Zero means the mechanism never fired, and the risk the spec accepted in the open ("SH can stamp everything true and the mechanism never fires") is what happened.
 2. **Where did the true stamps sit?** For each `"stamp": "true"`, read `stamp_reason` against the premise text and its quote. A true stamp on a premise the answer then dies on is the diagnosable failure the spec traded for, and it reads straight out of the ledger.
-3. **Did a validator run, and did it reach a verdict?** The usable-verdict rate was 2/4 then 4/6 across the two v1.4.3 runs, both times failing as *"quoted something it did not run"*. Task 9's second briefing mode is the change aimed at it.
+3. **Did a validator run, and did it reach a verdict?** The usable-verdict rate was 2/4 then 4/6 across the two v0.4.3 runs, both times failing as *"quoted something it did not run"*. Task 9's second briefing mode is the change aimed at it.
 4. **Did the AA rebuild on a premise it was handed as refuted?** (spec 2 §8.2 — read its ledger entries against the refuted list by hand.) If it did, that is the evidence needed to design a check, and the shape of the real failure beats a guess at it. If it did not, the brief was enough and no check is owed.
 5. **Cost**, with the senior's share broken out separately.
 
-Write the readings into `docs/version_architecture/v1/v1.4.3.md` as a new `## Q216 acceptance run` section, and ask the user for the run's dollar figure rather than guessing it.
+Write the readings into `docs/version_architecture/v0/v0.4.3.md` as a new `## Q216 acceptance run` section, and ask the user for the run's dollar figure rather than guessing it.
 
 ---
 

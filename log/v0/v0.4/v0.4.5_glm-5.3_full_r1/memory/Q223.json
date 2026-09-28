@@ -1,0 +1,165 @@
+{
+  "flow": [
+    "The compromised IAM user was web_admin, using temporary access key ASIAZB6TMXZ7LL6JBJQA from 139.198.18.205; CloudTrail showed a burst of 576 failed RunInstances calls and the first attempted AMI was ami-41e0b93b at 2018-08-20T09:16:22Z.",
+    "The CloudTrail/GuardDuty/aws:description/stream:http path did not name any attacker AMI as Ubuntu: RunInstances and DescribeImages held only image IDs or null responseElements, GuardDuty's only imageDescription was Amazon Linux, and us-west-1:ec2_images listed only Frothly-owned AMIs.",
+    "Local artifact paths were then exhausted in stages: bash_history, cloud-init, cloud-init-output, osquery:results, history-2, out-3, localhost-5, config_file, amazon-ssm-agent, syslog, WinHostMon, and Script:GetEndpointInfo produced no AMI name or Ubuntu codename for the attacker burst.",
+    "A final clarification established that the held evidence supports only the first attempted AMI ID ami-41e0b93b and that no searched feed named any attacker AMI as Ubuntu; the remaining residual surfaces named were codename-only strings in CloudTrail/HTTP and specific osquery proc_events matches, but no literal Ubuntu codename appeared in the evidence.",
+    "The investigation therefore ended without a dataset literal for the two-word codename; the record supports the first attempted AMI ID but not an Ubuntu version name for it or any later attempted AMI."
+  ],
+  "derivation": "Start from the compromised-user RunInstances burst in aws:cloudtrail, where web_admin on ASIAZB6TMXZ7LL6JBJQA from 139.198.18.205 attempted 576 launches and the first imageId was ami-41e0b93b. Try to resolve that AMI through CloudTrail/DescribeImages, GuardDuty, aws:description us-west-1:ec2_images, and stream:http; these routes showed only bare image IDs, null DescribeImages responses, one unrelated Amazon Linux GuardDuty imageDescription, and no attacker AMI names. Then sweep local artifacts in order: bash_history, cloud-init, cloud-init-output, osquery:results, history-2, out-3, localhost-5, config_file, amazon-ssm-agent, syslog, WinHostMon, and Script:GetEndpointInfo; none named ami-41e0b93b or any attempted AMI as Ubuntu, and the Ubuntu-flavored strings found were only hoth's own package-repo/configuration artifacts. A later clarification confirmed no searched feed named any attacker AMI as Ubuntu and that the only remaining theoretical surfaces were codename-only strings in CloudTrail/HTTP and unreviewed osquery proc_events rows, but no literal codename was present in the evidence that was actually read. So the question's requested two-word codename was not evidenced in-dataset.",
+  "entities": [
+    {
+      "key": "web_admin",
+      "fact": "compromised IAM user"
+    },
+    {
+      "key": "ASIAZB6TMXZ7LL6JBJQA",
+      "fact": "temporary access key for web_admin"
+    },
+    {
+      "key": "139.198.18.205",
+      "fact": "source IP for the attacker RunInstances burst"
+    },
+    {
+      "key": "ami-41e0b93b",
+      "fact": "first attempted AMI in the burst"
+    },
+    {
+      "key": "aws:cloudtrail",
+      "fact": "source of the RunInstances burst and later ubuntu searches"
+    },
+    {
+      "key": "aws:description",
+      "fact": "source that exposed us-west-1:ec2_images"
+    },
+    {
+      "key": "us-west-1:ec2_images",
+      "fact": "image-description feed that only listed Frothly-owned AMIs"
+    }
+  ],
+  "feed_facts": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "fact": "RunInstances and DescribeImages exposed image IDs but no Ubuntu codename; DescribeImages responseElements were null on the relevant calls."
+    },
+    {
+      "sourcetype": "aws:cloudwatch:guardduty",
+      "fact": "only imageDescription found was 'Amazon Linux AMI 2018.03.0.20180622 x86_64 HVM GP2' and it was not tied to the attacker AMIs."
+    },
+    {
+      "sourcetype": "aws:description",
+      "fact": "us-west-1:ec2_images contained only Frothly-owned AMIs, not ami-41e0b93b."
+    },
+    {
+      "sourcetype": "stream:http",
+      "fact": "contained none of the attacker AMI IDs or RunInstances references."
+    },
+    {
+      "sourcetype": "bash_history",
+      "fact": "no aws/ec2/AMI commands or ami- tokens appeared."
+    },
+    {
+      "sourcetype": "cloud-init",
+      "fact": "no Ubuntu mentions."
+    },
+    {
+      "sourcetype": "cloud-init-output",
+      "fact": "no Ubuntu mentions."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "fact": "no ami- tokens across the sourcetype; shell_history/proc_events searches did not yield AMI names."
+    },
+    {
+      "sourcetype": "history-2",
+      "fact": "apt history only, no AMI data."
+    },
+    {
+      "sourcetype": "out-3",
+      "fact": "catalina.out, no Ubuntu/AMI tokens."
+    },
+    {
+      "sourcetype": "localhost-5",
+      "fact": "Tomcat localhost log, no Ubuntu/AMI tokens."
+    },
+    {
+      "sourcetype": "config_file",
+      "fact": "system config files only; no AMI/Ubuntu data."
+    },
+    {
+      "sourcetype": "amazon-ssm-agent",
+      "fact": "no ami-/Ubuntu/run-instances tokens."
+    },
+    {
+      "sourcetype": "syslog",
+      "fact": "Ubuntu-flavored strings were only hoth's own apt repository lines, not attacker AMIs."
+    },
+    {
+      "sourcetype": "WinHostMon",
+      "fact": "no ami-/Ubuntu/ec2 tokens."
+    },
+    {
+      "sourcetype": "Script:GetEndpointInfo",
+      "fact": "endpoint IP/MAC/geo only; no AMI identity."
+    }
+  ],
+  "working_spl": [
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "establish the attacker RunInstances burst and first attempted AMI",
+      "spl": "index=botsv3 sourcetype=aws:cloudtrail eventName=RunInstances | stats count min(_time) values(userIdentity.arn) by userName",
+      "returns": "2 rows total: web_admin (576 events, first 1534756582) and AWSServiceRoleForAutoScaling (6 events, first 1534769727)."
+    },
+    {
+      "sourcetype": "aws:cloudtrail",
+      "purpose": "map the attacker's attempted AMIs in time order",
+      "spl": "index=botsv3 sourcetype=aws:cloudtrail eventName=RunInstances userName=web_admin | stats count min(_time) values(errorCode) by image_id",
+      "returns": "15 rows, earliest ami-41e0b93b at 2018-08-20T09:16:22Z; all failed with Client.UnauthorizedOperation / InstanceLimitExceeded / Unsupported / Server.InsufficientInstanceCapacity."
+    },
+    {
+      "sourcetype": "aws:description",
+      "purpose": "check image-description feed for attacker AMIs",
+      "spl": "get_raw_events us-west-1:ec2_images",
+      "returns": "14 events; only Frothly-owned AMIs ami-071fdb5b695e37666 (FrothlyWebServerAMI) and ami-055313c50737a491a (FrothlyWeb)."
+    },
+    {
+      "sourcetype": "aws:cloudwatch:guardduty",
+      "purpose": "see whether GuardDuty named an AMI OS/image description",
+      "spl": "sourcetype=aws:cloudwatch:guardduty | stats count by title",
+      "returns": "one finding with imageDescription 'Amazon Linux AMI 2018.03.0.20180622 x86_64 HVM GP2' on ami-0e86606d."
+    },
+    {
+      "sourcetype": "osquery:results",
+      "purpose": "search local process/shell capture for aws/ec2/AMI text",
+      "spl": "index=botsv3 sourcetype=osquery:results \"ami-\"",
+      "returns": "0 events across osquery queries, including proc_events and shell_history."
+    },
+    {
+      "sourcetype": "bash_history",
+      "purpose": "check host shell history for AWS launch commands",
+      "spl": "index=botsv3 sourcetype=bash_history \"ami-\"",
+      "returns": "0 events; no aws commands or AMI IDs."
+    },
+    {
+      "sourcetype": "cloud-init",
+      "purpose": "check cloud-init for Ubuntu/image names",
+      "spl": "index=botsv3 sourcetype=cloud-init \"Ubuntu\"",
+      "returns": "0 events."
+    },
+    {
+      "sourcetype": "cloud-init-output",
+      "purpose": "check cloud-init output for Ubuntu/image names",
+      "spl": "index=botsv3 sourcetype=cloud-init-output \"Ubuntu\"",
+      "returns": "0 events."
+    }
+  ],
+  "ruled_out": "CloudTrail RunInstances/DescribeImages as a codename source (only imageIds or null responses); GuardDuty imageDescription as attacker AMI OS source (only Amazon Linux, unrelated); aws:description us-west-1:ec2_images (only Frothly-owned AMIs); stream:http (no attacker AMI IDs or RunInstances); bash_history, cloud-init, cloud-init-output, osquery:results, history-2, out-3, localhost-5, config_file, amazon-ssm-agent, syslog, WinHostMon, Script:GetEndpointInfo (none named an attacker AMI as Ubuntu); hoth's own Ubuntu-flavored repo/config strings such as xenial/ondrej-ubuntu-php-xenial/keyserver.ubuntu.com (not the attacker AMI); ami-0e86606d as the attacker launch target (it was AutoScaling/AWSServiceRoleForAutoScaling, not web_admin).",
+  "qid": "Q223",
+  "question": "The adversary attempts to launch an Ubuntu cloud image as the compromised IAM user. What is the codename for that operating system version in the first attempt?",
+  "guidance": "Two words.",
+  "answer": "SH retired without answering",
+  "verified_premises": [
+    "p2 [selection] The image whose codename is sought is ami-41e0b93b, the first RunInstances attempt at 2018-08-20T09:16:22Z by web_admin using ASIAZB6TMXZ7LL6JBJQA from 139.198.18.205, not one of the other 14 attempted AMIs. — holds: The strongest rival reading is that the codename might be sought for the first Ubuntu attempt rather than the first attempted image overall. The question says 'the first attempt,' and the held results order the attacker attempts explicitly, so ami-41e0b93b is the correct first-attempt entity even though its Ubuntu identity remains unresolved."
+  ],
+  "validator_verdicts": []
+}

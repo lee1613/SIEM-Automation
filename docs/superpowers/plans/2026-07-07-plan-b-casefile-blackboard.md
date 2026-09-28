@@ -6,7 +6,7 @@
 
 **Architecture:** A JSON-backed `CaseFile` (entities + findings with `status ∈ {verified, hypothesis, refuted}` + confidence + source qid) is the SH's planning substrate instead of raw message history. The joiner emits `CASE UPDATES:` lines parsed into it; the planner reads a rendered digest. A Phase-0 recon pass seeds the file. The planner tags each task with a specialist role (`HUNTER`/`CONTENT`/`METRICS`); the executor selects a matching worker graph. `buy_hint` deducts the official `HintCost` from earned points (honest scoring).
 
-**Tech Stack:** Python 3.11, pytest 9.1, LangGraph, existing v0 worker graph, CSV hint data.
+**Tech Stack:** Python 3.11, pytest 9.1, LangGraph, existing v0.0.0 worker graph, CSV hint data.
 
 **Depends on:** observability foundation (merged) + Plan A (merged). Plan B's Verifier promotes hypotheses; Plan A's grounding guard still applies. Build Plan B ON TOP of the current `jy` HEAD.
 
@@ -18,14 +18,14 @@
 
 | File | Responsibility | Change |
 |------|----------------|--------|
-| `agent/v1/case_file.py` | `CaseFile` store: entities, findings, digest render, CASE-UPDATES parse | **Create** |
-| `agent/v1/orchestrator.py` | Planner reads digest; joiner emits+parses CASE UPDATES; specialist task tags; recon entrypoint | Modify |
-| `agent/v1/recon.py` | Phase-0 recon pass — parallel workers build the incident skeleton | **Create** |
-| `agent/v1/specialists.py` | Specialist prompt/tool configs + `python_calc` tool | **Create** |
-| `agent/v1/splunk_subagent.py` | Build per-specialist worker graphs; select by task tag | Modify |
-| `agent/v1/hint_client.py` | `HintBook` — load hints CSV, buy_hint with cost | **Create** |
-| `agent/v1/run_all_v1.py` | Init case file; run recon; thread hint policy; pass points/specialist | Modify |
-| `agent/v1/tests/` | pytest for all of the above | add files |
+| `agent/v0/case_file.py` | `CaseFile` store: entities, findings, digest render, CASE-UPDATES parse | **Create** |
+| `agent/v0/orchestrator.py` | Planner reads digest; joiner emits+parses CASE UPDATES; specialist task tags; recon entrypoint | Modify |
+| `agent/v0/recon.py` | Phase-0 recon pass — parallel workers build the incident skeleton | **Create** |
+| `agent/v0/specialists.py` | Specialist prompt/tool configs + `python_calc` tool | **Create** |
+| `agent/v0/splunk_subagent.py` | Build per-specialist worker graphs; select by task tag | Modify |
+| `agent/v0/hint_client.py` | `HintBook` — load hints CSV, buy_hint with cost | **Create** |
+| `agent/v0/run_all_v0.py` | Init case file; run recon; thread hint policy; pass points/specialist | Modify |
+| `agent/v0/tests/` | pytest for all of the above | add files |
 
 Run all commands from project root. A run's case file lives at `<run_dir>/case_file.json` (survives resume, like the metrics files).
 
@@ -34,14 +34,14 @@ Run all commands from project root. A run's case file lives at `<run_dir>/case_f
 ## Task 1: CaseFile store (pure, the planning substrate)
 
 **Files:**
-- Create: `agent/v1/case_file.py`
-- Create: `agent/v1/tests/test_case_file.py`
+- Create: `agent/v0/case_file.py`
+- Create: `agent/v0/tests/test_case_file.py`
 
 **Context:** the SH loses/contaminates knowledge because it re-reads a growing chat thread (LangSmith showed 200–320K token SH contexts by run end, and Q210's wrong verdict poisoned Q216). The case file is a compact, structured, confidence-tagged store the planner reads instead.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_case_file.py`:
+Create `agent/v0/tests/test_case_file.py`:
 
 ```python
 import json
@@ -102,12 +102,12 @@ def test_parse_case_updates_absent_returns_empty():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_case_file.py -v`
+Run: `python -m pytest agent/v0/tests/test_case_file.py -v`
 Expected: FAIL — no `case_file` module.
 
 - [ ] **Step 3: Implement `case_file.py`**
 
-Create `agent/v1/case_file.py`:
+Create `agent/v0/case_file.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -119,7 +119,7 @@ chat thread (lossy, and it propagates unverified errors across questions), the
 SH plans against a compact digest of this store: named entities and findings,
 each tagged verified | hypothesis | refuted. Carried-forward claims arrive as
 'hypothesis' and must be promoted by the Verifier before a later question trusts
-them — this is what breaks the v1.1 cascade (Q210 wrong verdict -> Q216).
+them — this is what breaks the v0.1 cascade (Q210 wrong verdict -> Q216).
 
 JSON-backed so it survives process resume (same run_dir, like metrics.json).
 """
@@ -237,31 +237,31 @@ def parse_case_updates(text: str) -> list[dict]:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_case_file.py -v`
+Run: `python -m pytest agent/v0/tests/test_case_file.py -v`
 Expected: 6 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/v1/case_file.py agent/v1/tests/test_case_file.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): CaseFile store + CASE UPDATES parser"
+git add agent/v0/case_file.py agent/v0/tests/test_case_file.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): CaseFile store + CASE UPDATES parser"
 ```
 
-(Add a changelog line to `v1.2.md` in this and every task below.)
+(Add a changelog line to `v0.2.md` in this and every task below.)
 
 ---
 
 ## Task 2: Joiner emits + writes CASE UPDATES; planner reads the digest
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py`
-- Create: `agent/v1/tests/test_case_integration.py`
+- Modify: `agent/v0/orchestrator.py`
+- Create: `agent/v0/tests/test_case_integration.py`
 
 **Context:** wire the case file into the graph. The `DelegationContext` will carry a `CaseFile`. The joiner prompt gains a `CASE UPDATES:` output section; after the joiner produces a final answer, parse+apply updates. The planner prompt injects the digest. Put this behind a `ctx.use_case_file` flag (default True) so it can be disabled for A/B comparison.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_case_integration.py`:
+Create `agent/v0/tests/test_case_integration.py`:
 
 ```python
 from case_file import CaseFile
@@ -287,12 +287,12 @@ def test_apply_case_updates_noop_when_absent(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_case_integration.py -v`
+Run: `python -m pytest agent/v0/tests/test_case_integration.py -v`
 Expected: FAIL — no `apply_case_updates`.
 
 - [ ] **Step 3: Implement `apply_case_updates` + DelegationContext wiring**
 
-In `agent/v1/orchestrator.py`:
+In `agent/v0/orchestrator.py`:
 - Import: `from case_file import CaseFile, parse_case_updates`.
 - Add module-level:
 
@@ -332,23 +332,23 @@ In `planner_node`, when `ctx.case_file and ctx.use_case_file`, prepend the diges
 
 - [ ] **Step 5: Run tests + import check + full suite**
 
-Run: `python -m pytest agent/v1/tests/ -v` (expect prior + 2 new, all green).
-Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v1'); import orchestrator; print('ok')"`.
+Run: `python -m pytest agent/v0/tests/ -v` (expect prior + 2 new, all green).
+Run: `python -c "import sys; sys.path.insert(0,'agent'); sys.path.insert(0,'agent/v0'); import orchestrator; print('ok')"`.
 
 - [ ] **Step 6: Runner initializes the case file**
 
-In `run_all_v1.py`: create `case_file = CaseFile(os.path.join(logger.run_dir, "case_file.json"))`, pass into `DelegationContext(pool, logger, case_file=case_file)`. (It auto-persists; resume picks up the existing file.)
+In `run_all_v0.py`: create `case_file = CaseFile(os.path.join(logger.run_dir, "case_file.json"))`, pass into `DelegationContext(pool, logger, case_file=case_file)`. (It auto-persists; resume picks up the existing file.)
 
 - [ ] **Step 7: Cheap smoke — cascade pair**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q210,Q216`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q210,Q216`
 Expected: completes; `case_file.json` exists with entities/findings after Q210; report whether Q216's plan digest referenced Q210's finding and with what status marker. (Correctness not required — the digest carrying a `[?]`/`[OK]`-tagged finding into Q216 is the signal.)
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/run_all_v1.py agent/v1/tests/test_case_integration.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): case-file digest in planner + CASE UPDATES from joiner"
+git add agent/v0/orchestrator.py agent/v0/run_all_v0.py agent/v0/tests/test_case_integration.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): case-file digest in planner + CASE UPDATES from joiner"
 ```
 
 ---
@@ -356,15 +356,15 @@ git commit -m "feat(v1.2-planB): case-file digest in planner + CASE UPDATES from
 ## Task 3: Hint economy
 
 **Files:**
-- Create: `agent/v1/hint_client.py`
-- Create: `agent/v1/tests/test_hint_client.py`
-- Modify: `agent/v1/run_all_v1.py` (hint policy)
+- Create: `agent/v0/hint_client.py`
+- Create: `agent/v0/tests/test_hint_client.py`
+- Modify: `agent/v0/run_all_v0.py` (hint policy)
 
 **Context:** 97 official hints in `botsv3content/ctf_hints.csv` (cost 10–25 pts) sit unused. A wrong answer scores 0; a hint-assisted correct answer scores base − hint cost (still 75–990). Buy a hint when confidence is low on a ≥500-pt question.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_hint_client.py`:
+Create `agent/v0/tests/test_hint_client.py`:
 
 ```python
 import csv
@@ -398,12 +398,12 @@ def test_missing_hint_returns_none(tmp_path):
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_hint_client.py -v`
+Run: `python -m pytest agent/v0/tests/test_hint_client.py -v`
 Expected: FAIL — no `hint_client`.
 
 - [ ] **Step 3: Implement `hint_client.py`**
 
-Create `agent/v1/hint_client.py`:
+Create `agent/v0/hint_client.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -447,24 +447,24 @@ class HintBook:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_hint_client.py -v`
+Run: `python -m pytest agent/v0/tests/test_hint_client.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 5: Hint policy in the runner (minimal, gated)**
 
-In `run_all_v1.py`: after the SH produces `sh_answer` and BEFORE extraction/submit, if the question is ≥500 pts AND the answer is ungrounded (reuse the `build_metrics_row` grounded logic on `ctx.q_delegations`), buy hint 1, append it to a re-delegation message, and run one more `run_sh(...)` pass with the hint text embedded. Deduct the hint cost from `pts_earned` when scoring (record `hint_cost` in the metrics row and the `submit` event). Keep it to ONE hint (hint 1) per question to bound cost. Guard with a `--hints` CLI flag (default off) so the baseline run is unaffected and the effect is measurable.
+In `run_all_v0.py`: after the SH produces `sh_answer` and BEFORE extraction/submit, if the question is ≥500 pts AND the answer is ungrounded (reuse the `build_metrics_row` grounded logic on `ctx.q_delegations`), buy hint 1, append it to a re-delegation message, and run one more `run_sh(...)` pass with the hint text embedded. Deduct the hint cost from `pts_earned` when scoring (record `hint_cost` in the metrics row and the `submit` event). Keep it to ONE hint (hint 1) per question to bound cost. Guard with a `--hints` CLI flag (default off) so the baseline run is unaffected and the effect is measurable.
 
 - [ ] **Step 6: Full suite + cheap smoke**
 
-Run: `python -m pytest agent/v1/tests/ -v` (green).
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q216 --hints`
+Run: `python -m pytest agent/v0/tests/ -v` (green).
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q216 --hints`
 Expected: completes; report whether a hint was bought, its cost, and the net earned.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/v1/hint_client.py agent/v1/tests/test_hint_client.py agent/v1/run_all_v1.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): hint economy (buy hint on low-confidence >=500pt, --hints flag)"
+git add agent/v0/hint_client.py agent/v0/tests/test_hint_client.py agent/v0/run_all_v0.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): hint economy (buy hint on low-confidence >=500pt, --hints flag)"
 ```
 
 ---
@@ -472,15 +472,15 @@ git commit -m "feat(v1.2-planB): hint economy (buy hint on low-confidence >=500p
 ## Task 4: Specialist workers + python_calc tool
 
 **Files:**
-- Create: `agent/v1/specialists.py`
-- Modify: `agent/v1/splunk_subagent.py`, `agent/v1/orchestrator.py`
-- Create: `agent/v1/tests/test_specialists.py`
+- Create: `agent/v0/specialists.py`
+- Modify: `agent/v0/splunk_subagent.py`, `agent/v0/orchestrator.py`
+- Create: `agent/v0/tests/test_specialists.py`
 
 **Context:** different question classes need different worker behavior. Hunter (default), Content-Inspector (raw-content reads, gate relaxed — the `get_raw_events` tool from Plan A), Metrics-Analyst (mandatory SPL `eval` arithmetic + a `python_calc` tool to cross-check, for Q206/Q211/Q224/Q331). Planner tags each task; executor picks the graph.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `agent/v1/tests/test_specialists.py`:
+Create `agent/v0/tests/test_specialists.py`:
 
 ```python
 from specialists import parse_specialist_tag, SPECIALISTS, python_calc
@@ -510,12 +510,12 @@ def test_python_calc_evaluates_safe_arithmetic():
 
 - [ ] **Step 2: Run tests, verify they fail**
 
-Run: `python -m pytest agent/v1/tests/test_specialists.py -v`
+Run: `python -m pytest agent/v0/tests/test_specialists.py -v`
 Expected: FAIL — no `specialists` module.
 
 - [ ] **Step 3: Implement `specialists.py`**
 
-Create `agent/v1/specialists.py` with:
+Create `agent/v0/specialists.py` with:
 - `SPECIALISTS: dict[str, str]` — extra-instruction text per role (hunter = "", content = raw-read guidance, metrics = "show the SPL eval formula and inputs; cross-check with python_calc").
 - `parse_specialist_tag(subquestion) -> str` — regex for a leading `[CONTENT]`/`[METRICS]`/`[HUNTER]` tag (case-insensitive), default `"hunter"`.
 - `python_calc` `@tool` — evaluate an arithmetic expression safely. Use a restricted eval: `eval(expr, {"__builtins__": {}}, {"round": round, "abs": abs, "min": min, "max": max, "len": len, "str": str, "sum": sum})`; return the result as a string, or `"error: <msg>"` on exception. NEVER allow imports/attribute access — reject any expression containing `__` or `import`.
@@ -555,28 +555,28 @@ def python_calc(expression: str) -> str:
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `python -m pytest agent/v1/tests/test_specialists.py -v`
+Run: `python -m pytest agent/v0/tests/test_specialists.py -v`
 Expected: 5 passed.
 
 - [ ] **Step 5: Build specialist graphs + select by tag**
 
-In `agent/v1/splunk_subagent.py` `SplunkWorkerPool.__init__`, build one worker graph per specialist (three graphs, each with `extra_instructions = ESCALATE_INSTRUCTIONS + "\n" + SPECIALISTS[name]`, `extra_tools = [web_lookup] (+ [python_calc] for metrics)`). Keep the existing budget dual (base/hi) — so it's `specialist × budget`; to bound construction, build the 3 specialists at the hi budget only if that keeps it simple, OR build 3 specialists × 2 budgets = 6 graphs (all offline construction, one-time). `run_senior(subquestion, qid, idx, points=0)` calls `parse_specialist_tag(subquestion)` and selects the matching graph. In `orchestrator.py`, append to `PLANNER_SYSTEM_PROMPT` the instruction to prefix each task with `[HUNTER]` / `[CONTENT]` / `[METRICS]` per the task's nature.
+In `agent/v0/splunk_subagent.py` `SplunkWorkerPool.__init__`, build one worker graph per specialist (three graphs, each with `extra_instructions = ESCALATE_INSTRUCTIONS + "\n" + SPECIALISTS[name]`, `extra_tools = [web_lookup] (+ [python_calc] for metrics)`). Keep the existing budget dual (base/hi) — so it's `specialist × budget`; to bound construction, build the 3 specialists at the hi budget only if that keeps it simple, OR build 3 specialists × 2 budgets = 6 graphs (all offline construction, one-time). `run_senior(subquestion, qid, idx, points=0)` calls `parse_specialist_tag(subquestion)` and selects the matching graph. In `orchestrator.py`, append to `PLANNER_SYSTEM_PROMPT` the instruction to prefix each task with `[HUNTER]` / `[CONTENT]` / `[METRICS]` per the task's nature.
 
 - [ ] **Step 6: Full suite + import check**
 
-Run: `python -m pytest agent/v1/tests/ -v` (green).
+Run: `python -m pytest agent/v0/tests/ -v` (green).
 Run: `python -c "...; import splunk_subagent, specialists; print('ok')"`.
 
 - [ ] **Step 7: Cheap smoke — a metrics question**
 
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q331`
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q331`
 Expected: completes; report whether the planner tagged a `[METRICS]` task and whether `python_calc` was called (grep questions/Q331.json full_state).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agent/v1/specialists.py agent/v1/splunk_subagent.py agent/v1/orchestrator.py agent/v1/tests/test_specialists.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): specialist workers (hunter/content/metrics) + python_calc"
+git add agent/v0/specialists.py agent/v0/splunk_subagent.py agent/v0/orchestrator.py agent/v0/tests/test_specialists.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): specialist workers (hunter/content/metrics) + python_calc"
 ```
 
 ---
@@ -584,15 +584,15 @@ git commit -m "feat(v1.2-planB): specialist workers (hunter/content/metrics) + p
 ## Task 5: Phase-0 recon pass
 
 **Files:**
-- Create: `agent/v1/recon.py`
-- Modify: `agent/v1/run_all_v1.py`
-- Create: `agent/v1/tests/test_recon.py`
+- Create: `agent/v0/recon.py`
+- Modify: `agent/v0/run_all_v0.py`
+- Create: `agent/v0/tests/test_recon.py`
 
 **Context:** run once before the question loop — 4–6 parallel workers build the incident skeleton (sourcetype inventory + time ranges, key hosts/roles, phishing waves, C2 infra, cloud story) and seed the case file as **verified** baseline. Fixes plan-misdirection (Q329) and wave-confusion (Q310). Keep it behind a `--recon` flag (default off) so the baseline and the recon-enabled run are both measurable.
 
 - [ ] **Step 1: Write failing test (recon question set + seeding is pure-ish)**
 
-Create `agent/v1/tests/test_recon.py`:
+Create `agent/v0/tests/test_recon.py`:
 
 ```python
 from case_file import CaseFile
@@ -620,36 +620,36 @@ def test_seed_writes_verified_findings(tmp_path):
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_recon.py -v`
+Run: `python -m pytest agent/v0/tests/test_recon.py -v`
 Expected: FAIL — no `recon` module.
 
 - [ ] **Step 3: Implement `recon.py`**
 
-Create `agent/v1/recon.py`:
+Create `agent/v0/recon.py`:
 - `RECON_TASKS: list[str]` — 4–6 self-contained recon subquestions (sourcetype inventory with time spans; key hosts + roles; phishing waves and their artifacts; C2 infrastructure/domains; AWS/cloud account story). Each is a normal Senior subquestion string.
 - `seed_case_from_recon(case_file, results) -> None` — for each recon result with a usable answer, `add_finding(claim=answer, evidence="recon", source_qid="RECON", status="verified", confidence=0.8)` and best-effort extract obvious entities (hostnames matching `\b[A-Z0-9-]+-L\b`, etc.) via a light regex into `add_entity`.
 - `run_recon(ctx, pool) -> list[dict]` — dispatch `RECON_TASKS` in parallel via the same `ThreadPoolExecutor(max_workers=MAX_WORKERS)` pattern the executor uses (import or replicate minimally), returning the worker results. (This function needs a live pool, so it is exercised in the smoke run, not the unit test; keep the dispatch small and mirror `executor_node`'s pattern.)
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_recon.py -v`
+Run: `python -m pytest agent/v0/tests/test_recon.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Wire `--recon` into the runner**
 
-In `run_all_v1.py`: add `--recon` flag. When set (and a fresh run, not a resume that already has recon findings), before the question loop call `run_recon(ctx, pool)` then `seed_case_from_recon(case_file, results)`; emit a `recon_done` event with the finding count. Guard so a resumed run doesn't re-run recon (check the case file already has `source_qid=="RECON"` findings).
+In `run_all_v0.py`: add `--recon` flag. When set (and a fresh run, not a resume that already has recon findings), before the question loop call `run_recon(ctx, pool)` then `seed_case_from_recon(case_file, results)`; emit a `recon_done` event with the finding count. Guard so a resumed run doesn't re-run recon (check the case file already has `source_qid=="RECON"` findings).
 
 - [ ] **Step 6: Full suite + cheap smoke**
 
-Run: `python -m pytest agent/v1/tests/ -v` (green).
-Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v1/run_all_v1.py --ids Q329 --recon`
+Run: `python -m pytest agent/v0/tests/ -v` (green).
+Run: `SIEM_LOG_ROOT=$LOCALAPPDATA/siem-smoke python agent/v0/run_all_v0.py --ids Q329 --recon`
 Expected: recon runs first (report finding count seeded), then Q329; report whether Q329's plan referenced any recon finding. (Slow — best-effort; unit tests are the gate.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/v1/recon.py agent/v1/run_all_v1.py agent/v1/tests/test_recon.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): phase-0 recon pass seeds verified case-file baseline (--recon)"
+git add agent/v0/recon.py agent/v0/run_all_v0.py agent/v0/tests/test_recon.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): phase-0 recon pass seeds verified case-file baseline (--recon)"
 ```
 
 ---
@@ -657,14 +657,14 @@ git commit -m "feat(v1.2-planB): phase-0 recon pass seeds verified case-file bas
 ## Task 6: Verifier promotes case-file hypotheses
 
 **Files:**
-- Modify: `agent/v1/orchestrator.py` (verifier_node writes case updates)
-- Create: `agent/v1/tests/test_verifier_promotes.py`
+- Modify: `agent/v0/orchestrator.py` (verifier_node writes case updates)
+- Create: `agent/v0/tests/test_verifier_promotes.py`
 
 **Context:** close the loop — when Plan A's Verifier confirms/refutes an answer on a ≥500-pt question, reflect that into the case file so downstream questions inherit the corrected status (this is what actually breaks the Q210→Q216 cascade: Q210's finding flips to `verified` or `refuted` before Q216 plans).
 
 - [ ] **Step 1: Write failing test**
 
-Create `agent/v1/tests/test_verifier_promotes.py`:
+Create `agent/v0/tests/test_verifier_promotes.py`:
 
 ```python
 from case_file import CaseFile
@@ -690,7 +690,7 @@ def test_refuted_marks_refuted(tmp_path):
 
 - [ ] **Step 2: Run test, verify it fails**
 
-Run: `python -m pytest agent/v1/tests/test_verifier_promotes.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier_promotes.py -v`
 Expected: FAIL — no `promote_from_verdict`.
 
 - [ ] **Step 3: Implement `promote_from_verdict` + call it in verifier_node**
@@ -715,25 +715,25 @@ In `verifier_node`, after computing `verdict` and only if `ctx.case_file and ctx
 
 - [ ] **Step 4: Run test, verify it passes**
 
-Run: `python -m pytest agent/v1/tests/test_verifier_promotes.py -v`
+Run: `python -m pytest agent/v0/tests/test_verifier_promotes.py -v`
 Expected: 2 passed.
 
 - [ ] **Step 5: Full suite + import**
 
-Run: `python -m pytest agent/v1/tests/ -v` (all green).
+Run: `python -m pytest agent/v0/tests/ -v` (all green).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent/v1/orchestrator.py agent/v1/tests/test_verifier_promotes.py docs/version_architecture/v1/v1.2.md
-git commit -m "feat(v1.2-planB): verifier promotes/refutes case-file findings"
+git add agent/v0/orchestrator.py agent/v0/tests/test_verifier_promotes.py docs/version_architecture/v0/v0.2.md
+git commit -m "feat(v0.2-planB): verifier promotes/refutes case-file findings"
 ```
 
 ---
 
 ## Done criteria
 
-- `python -m pytest agent/v1/tests/ -v` all green.
+- `python -m pytest agent/v0/tests/ -v` all green.
 - Every new capability is behind a flag (`--recon`, `--hints`) or a `ctx.use_case_file` toggle, so a baseline vs Plan-B run is measurable via `compare.py`.
 - No change to the scoring/submit path except the explicit hint-cost deduction (which is honest CTF scoring).
 - Whole-implementation review focuses on: (a) the planner-digest context size (must stay bounded — it replaces, not adds to, unbounded chat history); (b) case-file thread-safety under parallel workers writing findings; (c) recon not re-running on resume; (d) hint-cost accounting matching `scoreboard_submissions.json`.

@@ -6,11 +6,11 @@ Build a multi-agent LLM system that autonomously answers the Splunk BOTSv3 CTF
 question set (56 scored questions) against a live Splunk instance, as a research
 entry toward automated SIEM investigation.
 
-- **User:** the researcher iterating on agent architectures (v0 → v1 → v1.x).
+- **User:** the researcher iterating on agent architectures (v0.0.0 → v0 → v0.x).
 - **Success:** each new version scores strictly more scoreboard points than its
   predecessor on a full 56-question run, at recorded cost. Baseline to beat:
-  v1.1 = 26/56 correct, 8,300 pts, $0.63.
-- **Why multi-agent:** single-agent v0 plateaued; hierarchical
+  v0.1 = 26/56 correct, 8,300 pts, $0.63.
+- **Why multi-agent:** single-agent v0.0.0 plateaued; hierarchical
   orchestrator/worker/extractor with grounding + verification is the research
   hypothesis under test.
 
@@ -31,19 +31,19 @@ entry toward automated SIEM investigation.
 ## Commands
 
 ```bash
-# Full scored run (versioned, logged to log/v1/run_1.x/) — user-triggered only
-python agent/v1/run_all_v1.py
+# Full scored run (versioned, logged to log/v0/run_0.x/) — user-triggered only
+python agent/v0/run_all_v0.py
 
 # Smoke run (unversioned, log/temp/) — for validating changes
-python agent/v1/run_all_v1.py --ids Q200,Q210
+python agent/v0/run_all_v0.py --ids Q200,Q210
 
 # Tests
-python -m pytest agent/v1/tests/ -q
+python -m pytest agent/v0/tests/ -q
 
 # Reports
-python agent/v1/make_report.py log/v1/run_1.2          # render report.md
-python agent/v1/make_report.py log/v1/run_1.2 --watch   # live tail during run
-python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
+python agent/v0/make_report.py log/v0/run_0.2          # render report.md
+python agent/v0/make_report.py log/v0/run_0.2 --watch   # live tail during run
+python agent/v0/compare.py log/v0/run_0.1 log/v0/run_0.2  # cross-run diff
 
 # Live score check
 # Splunk: index=scoreboard sourcetype=scoreboard | rex "Result=(?P<r>[^,]+)" | stats count by r
@@ -62,7 +62,7 @@ python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
 │   ├── scoreboard_result/     # v0/, v1/ — per-version full-run results
 │   └── superpowers/plans/     # TDD implementation plans
 ├── agent/
-│   ├── splunk_agent.py        # v0 ReAct graph — reused as Senior worker engine
+│   ├── splunk_agent.py        # v0.0.0 ReAct graph — reused as Senior worker engine
 │   ├── splunk_client.py       # single Splunk REST session
 │   ├── splunk_pool.py         # thread-safe pool (6 slots) — production data plane
 │   ├── scoreboard_client.py   # scoring: KV store submit + index=scoreboard log (FROZEN)
@@ -78,14 +78,14 @@ python agent/v1/compare.py log/v1/run_1.1 log/v1/run_1.2  # cross-run diff
 │       ├── event_log.py       # events.jsonl canonical stream
 │       ├── usage_tracker.py   # per-(qid,role,model) token/cost attribution
 │       ├── agent_logger.py    # hierarchical run dirs; SIEM_LOG_ROOT override
-│       ├── run_all_v1.py      # runner: full → log/v1/run_1.x/, test → log/temp/
+│       ├── run_all_v0.py      # runner: full → log/v0/run_0.x/, test → log/temp/
 │       ├── make_report.py     # report.md renderer + --watch
 │       ├── compare.py         # cross-run fixes/regressions diff
 │       └── tests/             # pytest suite (all green required)
 ├── datasets/                  # botsv3_questions.json / answers.json (answers = reference only)
 ├── botsv3/                    # raw BOTSv3 dataset (922M; tgz + extracted app) — data plane source
 ├── botsv3content/             # official CTF CSVs (loaded into KV stores)
-├── log/                       # v1/run_1.x/ versioned; baseline/ baseline runs; temp/ unversioned
+├── log/                       # v1/run_0.x/ versioned; baseline/ baseline runs; temp/ unversioned
 
 ```
 
@@ -95,7 +95,7 @@ architecture = new `agent/vN/` dir + `docs/version_architecture/vN/` +
 
 ## Code Style
 
-Follow existing v1 idiom — pure functions for logic, thin I/O wrappers, tested
+Follow existing v0 idiom — pure functions for logic, thin I/O wrappers, tested
 at the seam:
 
 ```python
@@ -117,7 +117,7 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 
 ## Testing Strategy
 
-- **Framework:** pytest, tests in `agent/v1/tests/`, named `test_*.py`.
+- **Framework:** pytest, tests in `agent/v0/tests/`, named `test_*.py`.
 - **Unit tests** for every pure decision function (grounding, joiner routing,
   status classification, metrics rows, parsers). No LLM calls in unit tests.
 - **Smoke runs** (`--ids` with 2–4 questions) validate integration against live
@@ -130,9 +130,9 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 ## Boundaries
 
 - **Always:** run pytest before commit; changelog entry in the in-progress
-  `docs/version_architecture/v1/v1.x.md` in the same turn as any code change;
+  `docs/version_architecture/v0/v0.x.md` in the same turn as any code change;
   smoke-test behavior changes with `--ids` before claiming done; keep test runs
-  out of `log/v1/`.
+  out of `log/v0/`.
 - **Ask first:** full 56-Q runs (user triggers; real cost); model swaps;
   new dependencies; changing datasets/ or botsv3content/; deleting files not
   authored this session.
@@ -143,8 +143,8 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 
 ## Success Criteria
 
-1. `python -m pytest agent/v1/tests/ -q` — all green.
-2. Full run of vNext scores > 8,300 pts (v1.1 baseline) on the scoreboard.
+1. `python -m pytest agent/v0/tests/ -q` — all green.
+2. Full run of vNext scores > 8,300 pts (v0.1 baseline) on the scoreboard.
 3. Every answered question's `metrics.json` row has `grounded: true` or an
    explicit fallback record — zero silent fabrications.
 4. Run completes without manual resume (no encoding/persistence crashes).
@@ -153,7 +153,7 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
 
 ## Open Questions
 
-- **Extractor over-trims answer components (deferred, run_1.2 Q209)**. `FYODOR-L` extracted
+- **Extractor over-trims answer components (deferred, run_0.2 Q209)**. `FYODOR-L` extracted
   to `fyodor` — dropped the `-L` suffix the SH's evidence actually contained. User directive:
   do NOT patch this by adding more special-case suffix-stripping instructions to the
   extractor prompt (that's how Q202's `v3`-vs-`E5-2676` ambiguity happened — competing
@@ -167,7 +167,7 @@ def decide_joiner_answer(answer, task_results, question_text, *, plan_round, max
   tokens?** Every Senior tool call currently prefaces with a spoken-out `Intention: ...` line
   before the call. Unverified whether this improves tool-call accuracy/reasoning (a
   lightweight chain-of-thought anchor) or is pure token overhead with no behavior change.
-  **Verify after run_1.2 finishes**: A/B a handful of questions with the preamble stripped
+  **Verify after run_0.2 finishes**: A/B a handful of questions with the preamble stripped
   from `splunk_agent.py`'s system prompt vs kept — same questions, compare tool-call
   correctness (right SPL/right sourcetype first try) and token count. Small sample (3-5
   questions), not a full run. Decide keep/cut based on result.

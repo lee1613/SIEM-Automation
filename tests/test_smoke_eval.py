@@ -14,7 +14,7 @@ def test_committed_smoke_comparison_is_in_sync():
 
 def test_insights_follow_the_numbers():
     spec = {
-        "questions": ["Q216"], "baseline_run": "run_1.2",
+        "questions": ["Q216"], "baseline_run": "run_0.2",
         "same_senior": ["old", "new"], "best": "new",
         "arms": [{"id": i, "version": i, "loop": i, "senior": "m"} for i in ("old", "new")],
     }

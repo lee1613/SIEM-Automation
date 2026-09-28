@@ -15,7 +15,7 @@ STEP_LABELS = {
     "architecture": "2. The Architecture",
     "trajectory": "3. Watch It Reason",
     "score": "4. The Score",
-    "smoke": "5. v1.4 on the Hard Questions",
+    "smoke": "5. v0.4 on the Hard Questions",
 }
 
 TIER_COLORS = {"sh": "blue", "senior": "green", "extractor": "orange"}
@@ -194,7 +194,7 @@ def load_smoke() -> dict:
 
 
 def render_smoke_step() -> None:
-    st.header("5. v1.4 on the Hard Questions")
+    st.header("5. v0.4 on the Hard Questions")
     try:
         smoke = load_smoke()
     except FileNotFoundError:
@@ -203,7 +203,7 @@ def render_smoke_step() -> None:
 
     st.markdown(
         f"""
-v1.4 replaces plan-and-execute with a **bounded conversation**: a few seniors keep their
+v0.4 replaces plan-and-execute with a **bounded conversation**: a few seniors keep their
 investigation alive across rounds, file a templated report each round, and SH grades every
 report (scope, progress, readiness, premise verification) before routing it: continue,
 critique, clarify, retire, or answer.
