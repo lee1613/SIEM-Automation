@@ -1,0 +1,842 @@
+[
+  {
+    "qid": "Q216",
+    "senior": "s1",
+    "id": "p1",
+    "kind": "coverage",
+    "text": "Monero mining in source=cisconvmflowdata can surface three ways: (a) a miner process name in pn — searched via `stats count by pn` (all 60 values read; lead: the value rendered 'iexeoler.exe', 15 events, not yet retrievable by literal filter); (b) mining-pool destination ports in dp (3333/4444/5555/7777/14444/45700) — NOT YET searched; (c) pool IPs/domains in da/dh — NOT YET searched. The miner's records must come from one of these.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s1",
+    "evidence": "Complete dp enumeration (`| stats count dc(sa) as endpoints values(pn) as processes by dp | sort dp`, 22 rows all returned) shows port 3333 — the Monero stratum port — carries exactly one flow, and it belongs to powershell.exe. The process-name route (route a) found only non-mining candidates; the pool-port route (route b) found the mining flow.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s1",
+        "quote": "{\"dp\": \"3333\", \"count\": \"1\", \"endpoints\": \"1\", \"processes\": \"powershell.exe\"}",
+        "evidence": "Complete dp enumeration (`| stats count dc(sa) as endpoints values(pn) as processes by dp | sort dp`, 22 rows all returned) shows port 3333 — the Monero stratum port — carries exactly one flow, and it belongs to powershell.exe. The process-name route (route a) found only non-mining candidates; the pool-port route (route b) found the mining flow."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "112",
+      "3": "112",
+      "4": "112",
+      "5": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s1",
+    "id": "p2",
+    "kind": "selection",
+    "text": "The value rendered 'iexeoler.exe' (15 events) is the prime miner lead because it is a rare misspelling masquerading as iexplore.exe; hdoor.exe was ruled out (internal port-scan behavior). This selection is unconfirmed — the 15 events' destinations/ports/duration have not been read.",
+    "load_bearing": false,
+    "round_first_seen": 1,
+    "status": "REFUTED",
+    "verified_by": "s1",
+    "evidence": "The masquerading process iexeplorer.exe (stored spelling, retrieved via pn=iexe*) talks only to INTERNAL host 192.168.9.30 on port 8080 — a host also reached by chrome.exe, powershell.exe, putty.exe and scanned by hdoor.exe on 21/22/3306. That is C2/staging traffic, not Monero mining. The miner is powershell.exe on 192.168.70.186, the only process with a flow on stratum port 3333.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "REFUTED",
+        "by": "s1",
+        "quote": "{\"pn\": \"iexeplorer.exe\", \"dp\": \"8080\", \"da\": \"192.168.9.30\", \"sa\": \"192.168.8.103\", \"count\": \"15\", \"first_start\": \"1534763140\", \"last_end\": \"1534764826\"}",
+        "evidence": "The masquerading process iexeplorer.exe (stored spelling, retrieved via pn=iexe*) talks only to INTERNAL host 192.168.9.30 on port 8080 — a host also reached by chrome.exe, powershell.exe, putty.exe and scanned by hdoor.exe on 21/22/3306. That is C2/staging traffic, not Monero mining. The miner is powershell.exe on 192.168.70.186, the only process with a flow on stratum port 3333."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "112",
+      "3": "112",
+      "4": "112",
+      "5": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s1",
+    "id": "p3",
+    "kind": "definition",
+    "text": "The 'seconds generating Monero' is a duration computed in SPL from the miner's flow records using fss/fes; whether it is the wall-clock span max(fes)-min(fss) or the sum of per-flow durations sum(fes-fss) is unresolved and changes the answer.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This is a verbatim result from the Cisco NVM mining-flow measurement itself, showing the duration in seconds computed from the flow timing fields named in the premise.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s1",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 4,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "`dp=3333 | stats min(fss) max(fes) ... | eval duration_seconds=flow_end-flow_start` -> fss=1534762025, fes=1534762137, **duration_seconds=112** (text: 10:47:05 -> 10:48:57).",
+        "evidence": "This is a verbatim result from the Cisco NVM mining-flow measurement itself, showing the duration in seconds computed from the flow timing fields named in the premise."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": "112",
+      "3": "112",
+      "4": "112",
+      "5": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p4",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation could surface either as a process-associated flow set or as outbound traffic to a Monero stratum port; this senior tested both routes in that feed and found only one Monero-stratum flow on dp=3333.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This directly states the representations of Monero generation considered in the Cisco NVM feed and that no other matching indicators were found there.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Coverage: the only Monero-generation indicators in this feed are the single stratum-3333 flow and the Coinhive browser flows; no other pool port, pool domain, or miner process exists.",
+        "evidence": "This directly states the representations of Monero generation considered in the Cisco NVM feed and that no other matching indicators were found there."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p5",
+    "kind": "selection",
+    "text": "Selection: The measured duration should come from the only flow in the feed matching Monero stratum behavior, because the report identifies dp=3333 as the only Monero port present and ties that sole flow to powershell.exe on 192.168.70.186, while the iexeplorer.exe lead was excluded as internal non-pool traffic.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This identifies why the chosen flow, and not another candidate, is the one to measure.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Selection: the stratum flow is the mining act — only flow on the Monero stratum port in the entire feed, from the APT-compromised endpoint 192.168.70.186 (powershell.exe, FyodorMalteskesko) to 45.77.53.176",
+        "evidence": "This identifies why the chosen flow, and not another candidate, is the one to measure."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p6",
+    "kind": "definition",
+    "text": "Definition: The question asks for how many seconds the endpoint generates Monero, so the measure is the elapsed duration of the Monero-generating Cisco NVM flow itself, taken from its start and end timing fields and rounded to the nearest second.",
+    "load_bearing": true,
+    "round_first_seen": 4,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This states the measurement definition in the named feed and ties it to the timing fields on the mining flow.",
+    "history": [
+      {
+        "round": 4,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Definition: duration = fes-fss on the mining flow, computed in SPL, corroborated by fst/fet (10:47:05 -> 10:48:57 = 1m52s).",
+        "evidence": "This states the measurement definition in the named feed and ties it to the timing fields on the mining flow."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p7",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation could appear as outbound flows to Monero stratum pool ports, or as process-linked flows whose timing and destination behavior match mining; to answer confidently, both the tested indicators and the absence of rival mining-matching flows in this feed must be shown from results.",
+    "load_bearing": true,
+    "round_first_seen": 5,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies additional coverage that other common mining-port representations were checked and absent in the feed.",
+    "history": [
+      {
+        "round": 5,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Pool ports on BOTH port fields (dp/sp IN 4444,5555,7777,9999,14433,14441,14442,14444,45700,8333,8899,3334) -> 0 events.",
+        "evidence": "This verifies additional coverage that other common mining-port representations were checked and absent in the feed."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p8",
+    "kind": "selection",
+    "text": "Selection: The measured duration should come from the only flow in the feed that matches Monero-generation behavior, not from adjacent C2/beacon or staging traffic to the same destination or from a suspicious process on a non-mining internal port.",
+    "load_bearing": true,
+    "round_first_seen": 5,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the non-selected alternative belongs to a different endpoint and behavior, supporting why it is not the answer.",
+    "history": [
+      {
+        "round": 5,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "The Coinhive flows are a different host (192.168.247.131, BudStoll, chrome.exe) passively loading a cryptojacked webpage: six fragmented flows (2s/4s/12s/13s/124s/1603s) on ordinary port 443 with kilobyte volumes.",
+        "evidence": "This verifies the non-selected alternative belongs to a different endpoint and behavior, supporting why it is not the answer."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p9",
+    "kind": "definition",
+    "text": "Definition: The question asks for how many seconds the endpoint generates Monero, so in Cisco NVM flow data this must be measured as the elapsed time of the flow or flow set that constitutes Monero mining activity, using the feed's start/end timing fields rather than unrelated host activity windows.",
+    "load_bearing": true,
+    "round_first_seen": 5,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the duration should be taken from one mining flow rather than aggregated across multiple mining flows.",
+    "history": [
+      {
+        "round": 5,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 8,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Because the feed contains exactly one Monero-mining flow — the sole flow on stratum port 3333 in all 78,459 events — there is nothing to sum: that single flow's own Cisco NVM timing fields (fes−fss = 1534762137−1534762025) are the entire mining session",
+        "evidence": "This verifies the duration should be taken from one mining flow rather than aggregated across multiple mining flows."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p10",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation could appear either as a dedicated mining-pool/stratum flow or as Monero-labeled browser cryptojacking traffic, and the senior tested both in this feed.",
+    "load_bearing": true,
+    "round_first_seen": 8,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This directly settles coverage in the named Cisco NVM feed by stating the tested Monero representations and the only candidates that appeared.",
+    "history": [
+      {
+        "round": 8,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "(1) Coverage — every Monero-generation representation in this feed was tested: complete dp enumeration (22 values, only 3333 is a pool port, 1 flow), 11 other pool ports on both dp and sp (0 events), dh regex over pool/xmr/monero/stratum/mine/coin/hash (10 rows: Coinhive family plus four non-mining keyword matches — game, ad networks, Skype), raw-text regex monero/xmr/stratum (0 events), complete pn enumeration (60 values, no miner name). Nothing appeared besides the dp=3333 stratum flow and the six Coinhive browser flows.",
+        "evidence": "This directly settles coverage in the named Cisco NVM feed by stating the tested Monero representations and the only candidates that appeared."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p11",
+    "kind": "selection",
+    "text": "Selection: The duration to report should come from the single dp=3333 stratum flow on 192.168.70.186 rather than the Coinhive browser flows, because the latter are on a different endpoint and do not fit the question's one-endpoint single-duration shape.",
+    "load_bearing": true,
+    "round_first_seen": 8,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This quote explains why the chosen flow, and not the Coinhive alternatives, is the one matching the question's endpoint and duration shape.",
+    "history": [
+      {
+        "round": 8,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "(2) Selection — the stratum flow is the APT mining act: only flow on the Monero stratum port in the feed, from compromised endpoint 192.168.70.186 (powershell.exe, FyodorMalteskesko) to 45.77.53.176 (same IP as its 95-byte C2 beacons and the watering hole), 5,782,875 bytes in / 177 out. The Coinhive flows are a different host (192.168.247.131, chrome.exe, BudStoll) on ordinary 443 with kilobyte volumes, six fragmented flows (2/4/12/13/124/1603s) — browser cryptojacking with no single duration; 1603, 1667 and 1758 are its numbers and none fits a single-endpoint single-duration reading.",
+        "evidence": "This quote explains why the chosen flow, and not the Coinhive alternatives, is the one matching the question's endpoint and duration shape."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p12",
+    "kind": "definition",
+    "text": "Definition: For this question, 'for how many seconds does the endpoint generate Monero' means the duration of the Cisco NVM flow records that constitute the mining act itself, not the sum or span of unrelated non-selected Monero-labeled browser flows.",
+    "load_bearing": true,
+    "round_first_seen": 8,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This directly defines the requested measurement from the flow's timing fields and ties it to the literal value 112.",
+    "history": [
+      {
+        "round": 8,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 10,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "(3) Definition — \"for how many seconds\" is the duration of the mining flow itself, from the Cisco NVM timing fields on that flow: fes-fss = 1534762137-1534762025 = 112, corroborated by fst/fet (10:47:05 -> 10:48:57 = 1m52s); with exactly one mining flow, flow-duration and sum-across-flows coincide.",
+        "evidence": "This directly defines the requested measurement from the flow's timing fields and ties it to the literal value 112."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p13",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation could appear as a stratum/pool-port flow, a Monero/pool-named destination or raw text match, or a miner-identified process, and s1's Round 4 report states that after testing those representations nothing fit besides the single dp=3333 flow and separate Coinhive browser flows.",
+    "load_bearing": true,
+    "round_first_seen": 10,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the remaining coverage premise by stating what candidate representations were checked in the Cisco NVM feed and that only one mining-shaped flow remained.",
+    "history": [
+      {
+        "round": 10,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 16,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Coverage, restated from existing results: the full 22-row dp enumeration of all 78,459 events shows dp=3333 is the only canonical pool-port flow (4444/5555/7777 absent), and `sa=192.168.70.186 pn=powershell.exe | stats by da` returned exactly one row — 45.77.53.176 on ports 3333+443 only. Only 3333 is mining-shaped.",
+        "evidence": "This verifies the remaining coverage premise by stating what candidate representations were checked in the Cisco NVM feed and that only one mining-shaped flow remained."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p14",
+    "kind": "selection",
+    "text": "Selection: The duration to report should come from the single dp=3333 stratum flow on 192.168.70.186 rather than the Coinhive-derived durations because the report identifies the Coinhive activity as six fragmented browser flows on a different endpoint and the dp=3333 flow as the only Monero stratum flow in the feed.",
+    "load_bearing": true,
+    "round_first_seen": 10,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the selection premise by distinguishing the chosen dp=3333 flow from the competing 443 set and broader spans using the report's own results.",
+    "history": [
+      {
+        "round": 10,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 16,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Why that one flow and not the 443 beacons or any span: the 443 set is 3,814 sub-second beacons (median 1s, max 31s) spread over ~2 hours — C2 check-in shape, not generation; the 3333 flow is a single sustained 112-second connection with 5.7MB inbound on the canonical Monero Stratum port — the only mining-shaped flow.",
+        "evidence": "This verifies the selection premise by distinguishing the chosen dp=3333 flow from the competing 443 set and broader spans using the report's own results."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p15",
+    "kind": "definition",
+    "text": "Definition: For this question, 'for how many seconds does the endpoint generate Monero' is measured as the Cisco NVM flow duration of the mining flow itself, using fes-fss on that flow; with exactly one mining flow, that equals the total generation duration in the feed.",
+    "load_bearing": true,
+    "round_first_seen": 10,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the remaining definition premise with a direct result-backed statement of how the duration is measured from the Cisco NVM timing fields.",
+    "history": [
+      {
+        "round": 10,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 16,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "The Cisco NVM timing computation, as query output: `duration_seconds = fes - fss = 1534762137 - 1534762025 = 112`.",
+        "evidence": "This verifies the remaining definition premise with a direct result-backed statement of how the duration is measured from the Cisco NVM timing fields."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "s2",
+    "id": "p16",
+    "kind": "coverage",
+    "text": "Monero generation in cisconvmflowdata can appear as (a) flows to canonical pool ports 3333/4444/5555/7777, (b) flows of a miner process name on any port, (c) flows to a pool IP on 443/80. Searched: (a) top dp limit=20 -> only 3333, 1 event, powershell.exe; (b) top pn limit=20 -> no miner-typical name, tail below 67 events unread; (c) only 45.77.53.176 examined (4,832 events, 3 source IPs, 2 process names). Not yet searched: full da enumeration, rare pn tail.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Full-feed port enumeration (| stats count values(sa) values(pn) sum(eval(fes-fss)) by dp | sort count, all 22 rows read): dp=3333 is the ONLY canonical Monero pool-port flow in all 78,459 events; 4444/5555/7777 do not appear at all. Rival dp=8080 (26 events, 399s) resolved to internal-to-internal 192.168.8.103/111 -> 192.168.9.30 with chrome.exe/iexeplorer.exe/powershell.exe - not a pool. Other rare ports: 21/3306 hdoor.exe (1s each), 4287 CrashPlanService, 9997 splunkd, 5353/53/67/68 DNS/DHCP, 22 ssh/putty/hdoor.exe on other endpoints. Long-duration (>=60s) flows from 192.168.70.186 are all Microsoft/Google/CDN cloud services by normal processes.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "\"dp\": \"3333\", \"count\": \"1\", \"endpoints\": \"192.168.70.186\", \"processes\": \"powershell.exe\", \"total_dur\": \"112\"",
+        "evidence": "Full-feed port enumeration (| stats count values(sa) values(pn) sum(eval(fes-fss)) by dp | sort count, all 22 rows read): dp=3333 is the ONLY canonical Monero pool-port flow in all 78,459 events; 4444/5555/7777 do not appear at all. Rival dp=8080 (26 events, 399s) resolved to internal-to-internal 192.168.8.103/111 -> 192.168.9.30 with chrome.exe/iexeplorer.exe/powershell.exe - not a pool. Other rare ports: 21/3306 hdoor.exe (1s each), 4287 CrashPlanService, 9997 splunkd, 5353/53/67/68 DNS/DHCP, 22 ssh/putty/hdoor.exe on other endpoints. Long-duration (>=60s) flows from 192.168.70.186 are all Microsoft/Google/CDN cloud services by normal processes."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "112",
+      "2": "112",
+      "3": "112",
+      "4": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s2",
+    "id": "p17",
+    "kind": "selection",
+    "text": "The 112s candidate is the sole dp=3333 flow (powershell.exe, 192.168.70.186 -> 45.77.53.176, fss=1534762025, fes=1534762137). Other candidate flow sets - powershell.exe's other flows to 45.77.53.176 on 443/80, and any rare-named process's flows to an unenumerated IP - are not yet ruled out.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "sa=192.168.70.186 pn=powershell.exe | stats by da returned exactly one row: the miner process contacts only 45.77.53.176, on ports 3333 and 443. Split by dp: dp=3333 is 1 flow, 112s, 5,782,875B in / 177B out; dp=443 is 3,814 flows averaging 0.9s with obc=95-255B and ibc=0 (raw events read) - C2 beaconing, not mining. Both carry the same process hash ph=D3F8FADE829D2B7BD596C4504A6DAE5C034E789B6A3DEFBE013BDA7D14466677. The 112s pool flow is therefore the mining act; the 443 beacons are C2 and are excluded.",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 2,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "\"da\": \"45.77.53.176\", \"count\": \"3815\", \"sum_dur\": \"3564\", \"bytes_in\": \"14810538\", \"bytes_out\": \"2394160\", \"values(dp)\": [\"3333\", \"443\"]",
+        "evidence": "sa=192.168.70.186 pn=powershell.exe | stats by da returned exactly one row: the miner process contacts only 45.77.53.176, on ports 3333 and 443. Split by dp: dp=3333 is 1 flow, 112s, 5,782,875B in / 177B out; dp=443 is 3,814 flows averaging 0.9s with obc=95-255B and ibc=0 (raw events read) - C2 beaconing, not mining. Both carry the same process hash ph=D3F8FADE829D2B7BD596C4504A6DAE5C034E789B6A3DEFBE013BDA7D14466677. The 112s pool flow is therefore the mining act; the 443 beacons are C2 and are excluded."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "112",
+      "2": "112",
+      "3": "112",
+      "4": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s2",
+    "id": "p18",
+    "kind": "definition",
+    "text": "Duration = fes - fes is wrong; Duration = fes - fss (Cisco NVM flow end epoch minus start epoch) over the flow set that represents Monero generation; 'the endpoint' means one source IP (192.168.70.186), so flow sets spanning multiple sa values do not fit the wording.",
+    "load_bearing": true,
+    "round_first_seen": 1,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Query output: index=botsv3 sourcetype=syslog source=cisconvmflowdata sa=192.168.70.186 da=45.77.53.176 dp=3333 | eval duration_seconds=fes-fss | stats ... -> flow_start_epoch=1534762025, flow_end_epoch=1534762137, duration_seconds=112. The Cisco NVM timing fields are fss (flow start epoch) and fes (flow end epoch); duration = fes - fss = 112 seconds for the single mining flow. Flow sets spanning multiple sa values (the 7,841s span over all 45.77.53.176 traffic covers 192.168.105.214, 192.168.24.128, 192.168.70.186) do not fit 'the endpoint' (single).",
+    "history": [
+      {
+        "round": 1,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "\"flow_start_epoch\": \"1534762025\", \"flow_end_epoch\": \"1534762137\", \"duration_seconds\": \"112\"",
+        "evidence": "Query output: index=botsv3 sourcetype=syslog source=cisconvmflowdata sa=192.168.70.186 da=45.77.53.176 dp=3333 | eval duration_seconds=fes-fss | stats ... -> flow_start_epoch=1534762025, flow_end_epoch=1534762137, duration_seconds=112. The Cisco NVM timing fields are fss (flow start epoch) and fes (flow end epoch); duration = fes - fss = 112 seconds for the single mining flow. Flow sets spanning multiple sa values (the 7,841s span over all 45.77.53.176 traffic covers 192.168.105.214, 192.168.24.128, 192.168.70.186) do not fit 'the endpoint' (single)."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "112",
+      "2": "112",
+      "3": "112",
+      "4": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s2",
+    "id": "p19",
+    "kind": "definition",
+    "text": "The 3,814 dp=443 flows from 192.168.70.186 to 45.77.53.176 are C2 beaconing, not Monero generation: raw events show 0-1s durations, ibc=0, obc=95-255 bytes, same powershell.exe process hash as the 3333 flow. Only the dp=3333 flow (112s, 5.7MB in / 177B out) is the Monero-generation act; the question's 'for how many seconds does the endpoint generate Monero' is that flow's fes-fss.",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "s2",
+    "evidence": "Flow-shape stats computed in SPL (sa=192.168.70.186 da=45.77.53.176 | eval dur=fes-fss | stats ... by dp): dp=3333 is 1 flow, 112s, 5,782,875B in / 177B out - a single sustained, heavy-inbound connection on the canonical Monero Stratum port; dp=443 is 3,814 flows averaging 0.905s (median 1s, max 31s) - sub-second beaconing, not generation. Raw events (round 2) confirmed the 443 flows are 0-1s with ibc=0, obc=95-255B, same powershell.exe process hash as the 3333 flow. Only the dp=3333 flow is mining-shaped; the question's duration is that flow's fes-fss = 112.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 3,
+        "status": "VERIFIED",
+        "by": "s2",
+        "quote": "\"dp\": \"3333\", \"flows\": \"1\", \"total_seconds\": \"112\", \"avg_seconds\": \"112\", \"max_seconds\": \"112\", \"median_seconds\": \"112\", \"bytes_in\": \"5782875\", \"bytes_out\": \"177\"",
+        "evidence": "Flow-shape stats computed in SPL (sa=192.168.70.186 da=45.77.53.176 | eval dur=fes-fss | stats ... by dp): dp=3333 is 1 flow, 112s, 5,782,875B in / 177B out - a single sustained, heavy-inbound connection on the canonical Monero Stratum port; dp=443 is 3,814 flows averaging 0.905s (median 1s, max 31s) - sub-second beaconing, not generation. Raw events (round 2) confirmed the 443 flows are 0-1s with ibc=0, obc=95-255B, same powershell.exe process hash as the 3333 flow. Only the dp=3333 flow is mining-shaped; the question's duration is that flow's fes-fss = 112."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "112",
+      "2": "112",
+      "3": "112",
+      "4": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s2",
+    "id": "p20",
+    "kind": "selection",
+    "text": "45.77.53.176 is the attacker C2/pool host for the single endpoint 192.168.70.186 (user FyodorMalteskesko); the feed's other 45.77.53.176 traffic (192.168.105.214, 192.168.24.128, MicrosoftEdgeCP.exe) is unrelated browsing and is excluded by the question's single-endpoint wording.",
+    "load_bearing": false,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This directly supports the selection premise that 45.77.53.176 is the sole external destination for the endpoint's powershell activity relevant to the mining/C2 set in this feed.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s2",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 16,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "`sa=192.168.70.186 pn=powershell.exe | stats by da` → one row: only 45.77.53.176 (3,815 flows, ports 3333+443).",
+        "evidence": "This directly supports the selection premise that 45.77.53.176 is the sole external destination for the endpoint's powershell activity relevant to the mining/C2 set in this feed."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "112",
+      "2": "112",
+      "3": "112",
+      "4": "112"
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p21",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation could appear as canonical pool-port traffic, mixed traffic to the same destination, or broader endpoint traffic; s2 checked each and only the single dp=3333 flow matched mining-shaped behavior.",
+    "load_bearing": true,
+    "round_first_seen": 16,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This directly settles the outstanding coverage premise for the Cisco NVM feed: the candidate space tested in s2's own report yields exactly one mining-matching flow.",
+    "history": [
+      {
+        "round": 16,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 18,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "**Only one mining candidate flow matched: the single dp=3333 flow.**",
+        "evidence": "This directly settles the outstanding coverage premise for the Cisco NVM feed: the candidate space tested in s2's own report yields exactly one mining-matching flow."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p22",
+    "kind": "selection",
+    "text": "Selection: The duration to report should come from the single dp=3333 stratum flow on 192.168.70.186, not the 443 beacon set or broader destination spans, because only dp=3333 is mining-shaped for this endpoint in this feed.",
+    "load_bearing": true,
+    "round_first_seen": 16,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This result-backed contrast settles selection: the reportable duration belongs to the dp=3333 mining flow, not the 443 beacon set.",
+    "history": [
+      {
+        "round": 16,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 18,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "`sa=192.168.70.186 pn=powershell.exe | stats by da` returned exactly one row: da=45.77.53.176, count=3815, values(dp)=[3333,443]. Flow-shape stats by dp: **dp=3333 — 1 flow, 112s, 5,782,875B in / 177B out** (single sustained, heavy-inbound connection on the canonical Monero Stratum port); **dp=443 — 3,814 flows, avg 0.905s, median 1s, max 31s, 9.0MB in / 2.4MB out** (sub-second beaconing spread over ~2 hours — C2 check-in shape, not generation).",
+        "evidence": "This result-backed contrast settles selection: the reportable duration belongs to the dp=3333 mining flow, not the 443 beacon set."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p23",
+    "kind": "definition",
+    "text": "Definition: For this question, 'for how many seconds does the endpoint generate Monero' is the duration of the mining flow itself as measured by Cisco NVM timing fields, here computed as fes-fss on the sole mining-shaped flow.",
+    "load_bearing": true,
+    "round_first_seen": 16,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verbatim timing-field output settles the definition premise: the measurement asked for is the duration of the identified mining flow itself.",
+    "history": [
+      {
+        "round": 16,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 18,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "From `sa=192.168.70.186 da=45.77.53.176 dp=3333 | eval duration_seconds=fes-fss | stats ...`:\n> \"flow_start_epoch\": \"1534762025\", \"flow_end_epoch\": \"1534762137\", \"duration_seconds\": \"112\"\n\nwith flow_start_time=\"Mon Aug 20 10:47:05 2018\", flow_end_time=\"Mon Aug 20 10:48:57 2018\". \"For how many seconds does the endpoint generate Monero\" is satisfied by the Cisco NVM timing-field duration (fes − fss) of that one mining flow.",
+        "evidence": "This verbatim timing-field output settles the definition premise: the measurement asked for is the duration of the identified mining flow itself."
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p24",
+    "kind": "coverage",
+    "text": "Coverage: In Cisco NVM flow logs at source=cisconvmflowdata, Monero generation was checked as canonical pool-port traffic, other traffic to the same suspected pool IP, non-standard rival ports, and long-duration flows from the endpoint, and only the single dp=3333 flow matched a mining candidate.",
+    "load_bearing": true,
+    "round_first_seen": 18,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "history": [
+      {
+        "round": 18,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p25",
+    "kind": "selection",
+    "text": "Selection: The duration to report should come from the single dp=3333 stratum flow from 192.168.70.186 to 45.77.53.176 because the 443 traffic to the same IP is short-lived beaconing and broader spans mix other hosts or non-mining traffic.",
+    "load_bearing": true,
+    "round_first_seen": 18,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "history": [
+      {
+        "round": 18,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "sh",
+    "id": "p26",
+    "kind": "definition",
+    "text": "Definition: For this question, 'for how many seconds does the endpoint generate Monero' is satisfied by the Cisco NVM flow-duration measurement fes-fss on the one mining flow identified in the feed.",
+    "load_bearing": true,
+    "round_first_seen": 18,
+    "status": "UNVERIFIED",
+    "verified_by": "",
+    "evidence": "",
+    "history": [
+      {
+        "round": 18,
+        "status": "UNVERIFIED",
+        "by": "sh",
+        "quote": "",
+        "evidence": ""
+      }
+    ],
+    "candidate_at_each_round": {}
+  },
+  {
+    "qid": "Q216",
+    "senior": "s3",
+    "id": "p27",
+    "kind": "coverage",
+    "text": "Monero-generation duration could appear in cisconvmifdata/cisconvmsysdata only as (a) a duration/seconds/bytes/session field, (b) Monero/pool/mining tokens in raw text, (c) the established endpoint/destination IPs 192.168.70.186 or 45.77.53.176, or (d) a per-activity time interval. All four were queried: fieldsummary on each source shows no such fields; keyword SPL returned 0 events; exact-IP SPL returned 0 events; the only time spans are syslog timestamps of inventory snapshots (13892s and 18724s cadence), which are not activity durations.",
+    "load_bearing": true,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies the sibling-source coverage premise: these sources cannot carry a Monero-generation duration measurement because the necessary field types are absent.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s3",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 21,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "fieldsummary per source -> complete schemas confirm no duration, byte, session, or address field in either feed.",
+        "evidence": "This verifies the sibling-source coverage premise: these sources cannot carry a Monero-generation duration measurement because the necessary field types are absent."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": ""
+    }
+  },
+  {
+    "qid": "Q216",
+    "senior": "s3",
+    "id": "p28",
+    "kind": "selection",
+    "text": "No candidate exists in this scope: both sibling sources were read in full (11 and 8 events) and contain only inventory attributes, so there is no entity to select. The only Cisco NVM feed with flow/session records is cisconvmflowdata, which is outside this round's scope and already yielded the 112-second result elsewhere.",
+    "load_bearing": false,
+    "round_first_seen": 2,
+    "status": "VERIFIED",
+    "verified_by": "sh",
+    "evidence": "This verifies that no competing candidate exists in the sibling Cisco NVM sources, so the alternative scope is retired.",
+    "history": [
+      {
+        "round": 2,
+        "status": "UNVERIFIED",
+        "by": "s3",
+        "quote": "",
+        "evidence": ""
+      },
+      {
+        "round": 21,
+        "status": "VERIFIED",
+        "by": "sh",
+        "quote": "Hypothesis \"answer expected from a sibling Cisco NVM source\" - both siblings read in full (11+8 events) and cannot represent mining or duration.",
+        "evidence": "This verifies that no competing candidate exists in the sibling Cisco NVM sources, so the alternative scope is retired."
+      }
+    ],
+    "candidate_at_each_round": {
+      "1": "",
+      "2": ""
+    }
+  }
+]
