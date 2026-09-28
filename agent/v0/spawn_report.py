@@ -22,7 +22,7 @@ Baseline to beat, measured across all runs logged before v0.3:
     solved 63 / partial 100 / failed 73 / too_big 3   ->  26.4% solved
 
 Usage:
-    python spawn_report.py log/temp/test_20260907_220052
+    python spawn_report.py log/v0/v0.3/intermediate/v0.3_test_20260907_220052
     python spawn_report.py log/v0/run_0.3
 """
 

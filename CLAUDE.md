@@ -116,16 +116,24 @@ When a new version (e.g. `v0.x`) is run **against the full scoreboard**:
 Logging rules:
 - **Only full runs are logged** under `log/v0/run_0.x/` (auto-incrementing). Run with
   `python agent/v0/run_all_v0.py` (no `--ids`/`--limit`).
-- **Test/smoke runs** (`--ids` or `--limit`) are written to `log/temp/` by the runner and
-  are NOT cost-tracked. Once a run is finished it is **filed under its version** in
-  `log/v0/v0.<minor>/`:
-  - a smoke run covering **5 or more questions** sits at the version root
+- **Test/smoke runs** (`--ids` or `--limit`) are written to `log/temp/` by the runner.
+  `log/temp/` is a **staging area only**: as soon as a run finishes, **move it under its
+  version in `log/v0/v0.<minor>/` and commit it in the same turn**. Never leave a finished run
+  in `log/temp/` and never commit anything there.
+  - a run covering **5 or more questions** sits at the version root
     (`log/v0/v0.4/v0.4.1_glm-5.3_smoke5_r1/`) — that is the version's observable record;
   - a run covering **fewer than 5 questions** goes in that version's `intermediate/`
-    subfolder (`log/v0/v0.4/intermediate/v0.4.3_validator_Q216_r2/`).
+    subfolder (`log/v0/v0.4/intermediate/v0.4.3_validator_Q216_r2/`);
+  - name the folder `v0.<minor>.<patch>_<senior-model>_<label>_r<N>`;
+  - console output captured from a background launch (`.out`/`.err`) goes **inside the run's
+    folder** as `console.out` / `console.err` (a full run's resumes go in `console/`), never loose
+    beside it.
 
-  Filing is archival only — nothing reads these paths, and the runner still writes new runs
-  to `log/temp/`. Versions stay separate: v0.3 runs never sit under v0.4.
+  Versions stay separate: v0.3 runs never sit under v0.4.
+- **Everything that cites a run must cite its filed path under `log/v0/`, never `log/temp/`**:
+  root cause analyses (`log/root_cause_analysis/`), result docs, the README (results, lessons
+  learned, trajectory evidence), and the version changelog. File and commit the run before
+  writing about it.
 - Each run produces hierarchical logs: `SH/`, `Senior Splunk/` (and `Junior Splunk/` from
   v0.1), `Extractor/`, a `timeline.md` sequential narrative, and `run_summary.json` (which
   carries `failed_delegations` and each worker's full state).

@@ -1,0 +1,33 @@
+[
+  {
+    "qid": "Q216",
+    "points": 1000,
+    "verdict": "wrong",
+    "earned": 0,
+    "clean_answer": "I now have a complete picture of the Cisco NVM flow population and the mining indicators. Let me compile the final answer.\n\n## Investigation Summary\n\n**Cisco NVM sourcetypes used:** The BOTSv3 flow logs are collected by Splunk Stream (the Cisco Network Visibility Module). The primary flow sourcetype with ports is `stream:tcp`, complemented by `stream:ip`, `stream:udp`, `stream:http`, and `stream:dns`. No JA3 fields exist in this dataset (verified via manifest search — app labels are `ssl`/`http`/`unknown` instead).\n\n**Full unfiltered population (stream:tcp, 84,031 events, 08/20/2018 17:01–23:18 local):**\n- Top destinations: 45.77.53.176 (4,958, 13.9%), 172.16.0.178 (2,876), 172.16.3.197 (2,352), 52.40.10.231:9997 (964, Splunk forwarder), 192.168.9.31 (913), 192.168.9.30 (626)\n- Top ports: 443 (24,107), 80 (6,828), 3306 (2,358), 9997 (1,133), 22 (526), 4287 (238), 25 (170), 50444 (69), 8080 (59)\n- Protocols (stream:ip): UDP (151,637), TCP (33,281), ICMP (328), IGMP (152)\n- Source endpoints: FYODOR-L (192.168.70.186), BTUN-L (192.168.3.130), ABUNGST-L (192.168.24.128), PCERF-L, BSTOLL-L (192.168.247.131), JWORTOS-L, MKRAEUS-L, hoth (192.168.9.30), plus AWS hosts gacrux/matar/mars\n\n**Suspicious mining indicators found:**\n1. **FYODOR-L → 45.77.53.176:3333** — HTTP GET `/images/logos.png` (5.78 MB, content-type image/png) with user-agent `WindowsPowerShell/5.1.17134.112` — a miner binary disguised as a PNG, fetched over the classic Stratum port 3333.\n2. **FYODOR-L → 45.77.53.176:443** — 3,884 SSL flows (many refused), and **ABUNGST-L → 45.77.53.176:443** — 1,071 SSL flows.\n3. **hoth (192.168.9.30) ↔ 45.77.53.176:8088** — bidirectional TCP flows (~2.3 MB in), port 8088 also a common Stratum port.\n4. **BSTOLL-L → Coinhive** — DNS queries for coinhive.com and ws001/ws005/ws011/ws014/ws019.coinhive.com (Monero browser-mining service) with SSL flows to 104.20.208.59, 217.182.164.14, 37.187.165.41, 37.187.166.108, 37.187.167.21, 37.187.167.47.\n\nFINAL ANSWER:\n- **Cisco NVM sourcetype:** `stream:tcp` (primary flow sourcetype; supporting: `stream:ip`, `stream:udp`, `stream:http`, `stream:dns`)\n- **Suspicious endpoint(s):** FYODOR-L (192.168.70.186) — primary miner host; also ABUNGST-L (192.168.24.128), hoth (192.168.9.30), and BSTOLL-L (192.168.247.131) for Coinhive\n- **Suspected mining destination(s):** 45.77.53.176 (ports 3333, 443, 8088 — Stratum/mining pool) and Coinhive domains (coinhive.com, ws001/ws005/ws011/ws014/ws019.coinhive.com → 104.20.208.59, 217.182.164.14, 37.187.165.41, 37.187.166.108, 37.187.167.21, 37.187.167.47)\n- **Times (local +08:00 / UTC):** FYODOR-L→45.77.53.176:443 first 2018-08-20 18:01:45 (10:01:45 UTC), last 19:59:35 (11:59:35 UTC); FYODOR-L→45.77.53.176:3333 logos.png download at 18:47:16 (10:47:16 UTC); ABUNGST-L→45.77.53.176:443 18:01:07–19:59:32; hoth↔45.77.53.176:8088 19:29:21–19:59:51; BSTOLL-L→Coinhive 21:27:31–22:05:21 (13:27:31–14:05:21 UTC)\n\nSPL: `index=botsv3 sourcetype=stream:tcp dest_ip=45.77.53.176 | stats count min(_time) as first_time max(_time) as last_time by src_ip dest_port | convert ctime(first_time) ctime(last_time)` and `index=botsv3 sourcetype=stream:http dest_ip=45.77.53.176 | stats count by src_ip dest_port url http_user_agent` and `index=botsv3 sourcetype=stream:dns query=\"*coinhive*\" | stats count by query answer`",
+    "grounded": true,
+    "hint_cost": 0,
+    "delegations": 9,
+    "statuses": [
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+      "solved",
+      "failed",
+      "failed",
+      "failed",
+      "failed"
+    ],
+    "cap_hits": 2,
+    "latency_s": {
+      "total": 1211.2,
+      "sh": 1211.2,
+      "extract": 0.0
+    },
+    "cost_by_role": {
+      "sh": 0.016445,
+      "senior": 0.0
+    }
+  }
+]

@@ -286,7 +286,7 @@ measured, and these are reads of the same data.
 
 ### 8.2 What the two runs actually said (2026-09-21)
 
-Read off `log/temp/v0.4.2_ledger_Q216_r1/premise_ledger.json` and
+Read off `log/v0/v0.4/intermediate/v0.4.2_ledger_Q216_r1/premise_ledger.json` and
 `.../v0.4.2_ledger_Q216_r2/premise_ledger.json`. Full analysis in
 `docs/version_architecture/v0/v0.4.2.md`.
 

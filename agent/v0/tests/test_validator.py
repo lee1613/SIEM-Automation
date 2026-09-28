@@ -1,7 +1,7 @@
 """The validation agent (v0.4.3, spec 2 §3).
 
 The case built against is Q216 r2's `p1`, verbatim from
-`log/temp/v0.4.2_ledger_Q216_r2/premise_ledger.json`: a coverage premise whose own
+`log/v0/v0.4/intermediate/v0.4.2_ledger_Q216_r2/premise_ledger.json`: a coverage premise whose own
 text says route (c) was "NOT yet searched", marked VERIFIED by its author, quoting
 the result of searching route (c) — 4,832 flows where the answer assumed one.
 """
