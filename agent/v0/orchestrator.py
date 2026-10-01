@@ -20,7 +20,7 @@ import sqlite3
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, TypedDict, cast
 
 from case_file import build_ledger, parse_case_updates, render_ledger, snap_to_ledger
 from executor_graph import build_executor_graph
@@ -36,6 +36,7 @@ from langgraph.types import Command
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 from llm_errors import describe_llm_error, resilient_http_client
 from plan_schema import Plan, load_manifest, render_briefing, render_plan_text, render_scope, to_tasks
+from pydantic import SecretStr
 
 MAX_PLAN_ROUNDS = 3   # max planner→executor→joiner cycles per question
 MAX_WORKERS     = 6   # matches SplunkConnectionPool default size
@@ -44,6 +45,13 @@ SH_TIMEOUT_S     = 90.0  # SH turns are plan/join text only - shorter than a wor
 SH_MAX_RETRIES   = 3
                        # (~4-8 msgs/question => ~3-5 prior questions visible).
                        # Unbounded replay cost $0.95 of SH input on run_0.2's Q202 alone.
+
+
+def _content_str(content) -> str:
+    """A chat message's content is a str or a list of blocks; keep the text of either."""
+    if isinstance(content, str):
+        return content
+    return "".join(b if isinstance(b, str) else b.get("text", "") for b in content)
 
 
 def _window(messages):
@@ -137,8 +145,8 @@ RULES:
   targeted replan.
 - status='too_big' or 'failed': that worker couldn't proceed. Consider whether a different
   sourcetype or narrower query would help.
-- NEVER invent dataset facts. If workers found nothing after thorough investigation, write
-  FINAL ANSWER with your best-effort estimate from memory.
+- NEVER invent dataset facts. If workers found nothing after thorough investigation, answer
+  with the closest value a worker actually reported (see GROUNDING RULE).
 - The FINAL ANSWER line is read by an extractor — give the exact value in the required
   format, nothing else on that line.
 
@@ -360,7 +368,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
     """
 
     # See LLM_TIMEOUT_S note in splunk_agent.py - SDK default is 600s.
-    llm         = ChatOpenAI(api_key=api_key, model=model,
+    llm         = ChatOpenAI(api_key=SecretStr(api_key), model=model,
                              max_completion_tokens=4096, temperature=0,
                              timeout=SH_TIMEOUT_S, max_retries=SH_MAX_RETRIES,
                              http_client=resilient_http_client())
@@ -395,7 +403,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                     "hypothesis [?], refuted [X]; re-verify [?]/[X] findings "
                     "before relying on them):\n" + digest))]
         msgs = [sys_planner] + sys_dataset + extra + _window(state["messages"])
-        plan = planner_llm.invoke(msgs)
+        plan = cast(Plan, planner_llm.invoke(msgs))
         plan_text = render_plan_text(plan)
         # The plan re-enters the persistent thread as text: cross-question
         # memory is a message history, and a pydantic object is not a message.
@@ -590,7 +598,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
         print(f"\n[SH JOINER — round {plan_round}]")
         msgs     = [sys_joiner] + _window(state["messages"]) + [joiner_hm]
         response = llm.invoke(msgs)
-        jtext    = (response.content or "").strip()
+        jtext    = _content_str(response.content).strip()
         print(f"\n[SH JOINER OUTPUT]\n{jtext}\n")
 
         # Option A — FINAL ANSWER
@@ -637,7 +645,7 @@ def build_sh_agent_compiler(api_key: str, model: str, ctx: DelegationContext,
                 }
             answer = decision["answer"]
             if ctx.case_file and ctx.use_case_file:
-                apply_case_updates(ctx.case_file, jtext, source_qid=ctx.current_qid)
+                apply_case_updates(ctx.case_file, jtext, source_qid=ctx.current_qid or "")
             return {
                 "messages":     [joiner_hm, response],
                 "plan_text":    jtext,
@@ -808,6 +816,6 @@ def run_sh(graph, message: str, thread_id: str,
     if not answer:
         for m in reversed(result.get("messages", [])):
             if isinstance(m, AIMessage) and m.content:
-                answer = m.content
+                answer = _content_str(m.content)
                 break
     return answer, result

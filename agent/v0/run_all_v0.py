@@ -1,38 +1,35 @@
 #!/usr/bin/env python3
 """
-v0.1 multi-agent runner for BOTSv3 — LLMCompiler edition.
+v0 multi-agent runner for BOTSv3.
 
-  SH (GPT-5.4, persistent memory, LLMCompiler planner+executor+joiner)
-    -> parallel Senior Splunk workers (zai-org/GLM-5.3 via AI&)
-    -> scoreboard (1x)
+  SH (GPT-5.4, persistent memory)
+    -> Senior Splunk workers (zai-org/GLM-5.3 via AI&)
+    -> LocalScoreboard (exact-match grading against the official CSVs, 1x per question)
 
-There is no extractor tier: the joiner's FINAL ANSWER is already the bare
-value, and over 84 recorded extractions the tier's net score effect was zero.
-
-The SH plans a DAG of tasks and dispatches independent tasks concurrently via
-ThreadPoolExecutor (up to 6 parallel Senior workers, backed by SplunkConnectionPool).
-Dependent tasks ($N refs) wait for their prerequisites before running. The Joiner
-synthesizes all findings or requests one replan round if a critical datum is missing.
+`--loop conversational` (default) runs the SH <-> Senior conversation (sh_loop.py).
+`--loop compiler` runs the v0.3.0 planner/executor/joiner graph (orchestrator.py),
+kept for A/B. There is no extractor tier: the final answer is already the bare value.
 
 Per-step traces (LLM calls, tool calls, node visits) are sent to LangSmith
 automatically when LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set in .env.
-Each run creates its own LangSmith project (botsv3-run_1.x or botsv3-test_<ts>).
+Each run creates its own LangSmith project (botsv3-<run name>).
 
 Usage (from project root or agent/v0/):
-    python agent/v0/run_all_v0.py                 # FULL run  -> log/v0/run_0.<n>/
-    python agent/v0/run_all_v0.py --ids Q1,Q205   # TEST run  -> log/temp/<ts>/
-    python agent/v0/run_all_v0.py --limit 5       # TEST run  -> log/temp/<ts>/
-    python agent/v0/run_all_v0.py --start Q210    # resume a full run from a question id
+    python agent/v0/run_all_v0.py --version 0.5.0   # FULL run  -> log/v0/v0.<minor>/v<version>_<model>_full_r<N>/
+    python agent/v0/run_all_v0.py --ids Q1,Q205     # TEST run  -> log/temp/<ts>/ (file it under its version afterwards)
+    python agent/v0/run_all_v0.py --limit 5         # TEST run  -> log/temp/<ts>/
+    python agent/v0/run_all_v0.py --start Q210 --run-name v0.5/v0.5.0_glm-5.3_full_r1   # resume a full run
 
-Any use of --ids or --limit marks the run as a TEST run (output under log/temp, never
-logged as a versioned run, never cost-tracked).
+A new full run needs --version. Any use of --ids or --limit marks the run as a TEST run.
 """
 
 import argparse
+import io
 import json
 import os
 import subprocess
 import sys
+from typing import cast
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))     # agent/v0
 AGENT_DIR    = os.path.dirname(SCRIPT_DIR)                    # agent
@@ -93,7 +90,7 @@ def force_utf8_stdio() -> None:
     """
     for _stream in (sys.stdout, sys.stderr):
         try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
+            cast(io.TextIOWrapper, _stream).reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
 
@@ -250,7 +247,12 @@ def main():
                         help="Name of the env var holding the Senior API key "
                              f"(default: {SENIOR_API_KEY_ENV}; use OPENAI_API_KEY for an OpenAI Senior).")
     parser.add_argument("--run-name", default=None,
-                        help="Reuse an existing temp run dir (e.g. test_20260630_144242). Appends to its timeline.md.")
+                        help="Reuse an existing run dir and append to it: a test run's log/temp name "
+                             "(e.g. test_20260630_144242) or a full run's path under log/v0 "
+                             "(e.g. v0.4/v0.4.5_glm-5.3_full_r1).")
+    parser.add_argument("--version", default=None,
+                        help="The code's version, e.g. 0.5.0. Required to start a new full run: it goes to "
+                             "log/v0/v0.<minor>/v<version>_<senior-model>_full_r<N>/.")
     parser.add_argument("--recon", action="store_true",
                         help="Run the Phase-0 recon pass before the question loop (seeds the case file).")
     parser.add_argument("--hints", action="store_true",
@@ -289,11 +291,13 @@ def main():
         id_filter = {s.strip() for s in args.ids.split(",") if s.strip()}
     full_run = (id_filter is None) and (args.limit is None)
 
-    # --start on a full run without --run-name would allocate a NEW run_0.x dir,
+    # --start on a full run without --run-name would allocate a NEW full-run dir,
     # stranding the prior segment's results, checkpoints, and SH memory.
     if full_run and args.start and not args.run_name:
-        sys.exit("--start on a full run requires --run-name <existing run dir> "
-                 "so the resumed segment lands in the same run (e.g. --run-name run_0.2).")
+        sys.exit("--start on a full run requires --run-name <existing run dir> so the resumed "
+                 "segment lands in the same run (e.g. --run-name v0.4/v0.4.5_glm-5.3_full_r1).")
+    if full_run and not args.run_name and not args.version:
+        sys.exit("A new full run needs --version (e.g. --version 0.5.0) to be filed under its version.")
 
     selected = []
     started  = args.start is None
@@ -311,7 +315,8 @@ def main():
     if args.limit is not None:
         selected = selected[:args.limit]
 
-    logger  = RunLogger(full_run=full_run, version_major=0, run_name=args.run_name)
+    logger  = RunLogger(full_run=full_run, version_major=0, run_name=args.run_name,
+                        version=args.version, senior_model=senior_model)
     case_file = CaseFile(os.path.join(logger.run_dir, "case_file.json"))
     tracker = UsageTracker()
 
@@ -357,9 +362,10 @@ def main():
     from langchain_openai import ChatOpenAI
     from llm_errors import resilient_http_client
     from plan_schema import load_manifest, render_briefing
+    from pydantic import SecretStr
 
     sh_llm = ChatOpenAI(
-        api_key=OPENAI_API_KEY, model=SH_MODEL, max_completion_tokens=4096,
+        api_key=SecretStr(OPENAI_API_KEY), model=SH_MODEL, max_completion_tokens=4096,
         temperature=0, timeout=90.0, max_retries=3,
         http_client=resilient_http_client(),
     ).with_structured_output(SHTurn, method="json_schema", strict=True)
@@ -375,7 +381,7 @@ def main():
     sh_history: dict = resume.load_history(logger.run_dir)
     # The summarizer: one call per finished question, costed under role `memory`.
     memory_llm = ChatOpenAI(
-        api_key=OPENAI_API_KEY, model=sh_memory.SUMMARIZER_MODEL,
+        api_key=SecretStr(OPENAI_API_KEY), model=sh_memory.SUMMARIZER_MODEL,
         max_completion_tokens=4096, temperature=0, timeout=120.0, max_retries=3,
         http_client=resilient_http_client(),
     ).with_structured_output(sh_memory.Digest, method="json_schema", strict=True)

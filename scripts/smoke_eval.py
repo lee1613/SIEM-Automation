@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Smoke-test comparison for the demo: the same hard questions across architectures.
 
-Smoke runs live in `log/temp/` and are not versioned (CLAUDE.md), so this does not
-touch the full-run leaderboard. Instead:
+Smoke runs are filed under their version in `log/v0/` (CLAUDE.md), separately from the
+full-run leaderboard. This:
 
   --write   copy each arm's per-question rows out of its run dirs' metrics.json into
             datasets/evaluation/smoke/<arm>.json (committed), then regenerate
             datasets/evaluation/smoke_comparison.json from those rows.
   --check   regenerate the comparison from the committed rows and exit 1 if the
-            committed smoke_comparison.json differs (CI). Needs no log/temp.
+            committed smoke_comparison.json differs (CI). Reads no run logs.
 
 Arms, questions and the baseline full run are hand-curated in
 datasets/evaluation/smoke/arms.json. Cost is our own PRICES_PER_1M pricing, not
@@ -26,7 +26,6 @@ REPO = run_eval.REPO
 SMOKE_DIR = REPO / "datasets" / "evaluation" / "smoke"
 ARMS = SMOKE_DIR / "arms.json"
 OUT = REPO / "datasets" / "evaluation" / "smoke_comparison.json"
-TEMP = REPO / "log" / "temp"
 ANSWER_CHARS = 60
 
 
@@ -45,10 +44,10 @@ def collect(arm: dict, questions: list[str]) -> list[dict]:
     """One arm's rows, from every run dir it names (a killed run can span several)."""
     rows = {}
     for name in arm["runs"]:
-        hits = list(TEMP.glob(f"**/{name}/metrics.json"))
-        if len(hits) != 1:
-            sys.exit(f"{arm['id']}: expected one {name}/metrics.json under log/temp, found {len(hits)}")
-        for r in json.loads(hits[0].read_text(encoding="utf-8")):
+        metrics = run_eval.LOG_ROOT / name / "metrics.json"
+        if not metrics.exists():
+            sys.exit(f"{arm['id']}: {metrics.relative_to(REPO)} not found")
+        for r in json.loads(metrics.read_text(encoding="utf-8")):
             rows[r["qid"]] = _slim(r)
     if sorted(rows) != sorted(questions):
         sys.exit(f"{arm['id']}: runs cover {sorted(rows)}, arms.json wants {sorted(questions)}")
@@ -87,7 +86,7 @@ def build(spec: dict, rows_by_arm: dict) -> dict:
         f"(${old['cost_usd']['total']:.2f} → ${new['cost_usd']['total']:.2f}); the senior's share went "
         f"${old['cost_usd']['senior']:.2f} → ${new['cost_usd']['senior']:.2f}.",
         f"Accuracy: {best['version']} with a {best['senior']} senior solved {best['correct']}/{best['total']} "
-        f"({', '.join(best['solved']) or 'none'}), where the {spec['baseline_run']} full run got "
+        f"({', '.join(best['solved']) or 'none'}), where the {spec['baseline_run'].split('/')[0]} full run got "
         f"{base['correct']}/{base['total']} of these questions right.",
         f"Latency: {new['latency_min'] / old['latency_min']:.1f}× on the same senior "
         f"({old['latency_min']:.1f} → {new['latency_min']:.1f} min), because the conversation is "

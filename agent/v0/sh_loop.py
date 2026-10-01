@@ -44,7 +44,7 @@ from conversation_log import ConversationLog
 from grounding import is_grounded
 from hitl import ABORT, SKIP, RunPaused, resolve_interrupt
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from llm_errors import describe_llm_error
 from premise import PremiseLedger
 from pydantic import ValidationError
@@ -200,9 +200,8 @@ REFERENCE: GRADES — four enums per senior, alongside the route. Each is PASS, 
   R2 progress              Did this round produce information the prior rounds did not have?
   R3 answer readiness      Is there a candidate in submittable shape, or prose / a hedge / nothing?
   R4 premise verification  Is every premise the conclusion or direction rests on backed by a result shown in the report? FAIL when the candidate or the direction depends on a premise nobody tested.
-R4 IS A CEILING THE RUNNER HOLDS, not a free grade. You may write PASS only when that senior has no load-bearing premise still UNVERIFIED and no stamp of yours on its verifications reads false; a REFUTED load-bearing premise forces FAIL. Grade lower than the ceiling whenever you mean it — you may never grade above it, and a turn that does is rejected. Across three earlier runs R4 flipped to PASS on the turn SH stopped investigating, every time, without exception: the ceiling is what that measurement bought.
-
-REFERENCE: THE PREMISE LEDGER. Every premise on this question lives in one ledger, shown to you in full each turn. The seniors file their own; you file the ones they missed, in `new_premises`. YOU DO NOT SETTLE PREMISES. You have no Splunk access, so "SH verified it" has only ever meant "SH read a report and decided" — and in the run this rule comes from, you settled 19 of 28 premises, including every one that lost the question. A premise reaches VERIFIED from the senior whose own search shows it, or from an independent validator, and from nobody else. A premise YOU file therefore starts UNVERIFIED and stays there until a senior settles it: the runner carries it to every active senior as a load-bearing premise filed by others, so FILE IT EARLY.
+R4 IS A CEILING THE RUNNER HOLDS, not a free grade. You may write PASS only when that senior has no load-bearing premise still UNVERIFIED and no stamp of yours on its verifications reads false; a REFUTED load-bearing premise forces FAIL. Grade lower than the ceiling whenever you mean it — you may never grade above it, and a turn that does is rejected.
+REFERENCE: THE PREMISE LEDGER. Every premise on this question lives in one ledger, shown to you in full each turn. The seniors file their own; you file the ones they missed, in `new_premises`. YOU DO NOT SETTLE PREMISES. You have no Splunk access, so "SH verified it" means only "SH read a report and decided". A premise reaches VERIFIED from the senior whose own search shows it, or from an independent validator, and from nobody else. A premise YOU file therefore starts UNVERIFIED and stays there until a senior settles it: the runner carries it to every active senior as a load-bearing premise filed by others, so FILE IT EARLY.
 
 REFERENCE: WHAT A VALIDATOR'S VERDICT MEANS.
   VERIFIED   — your doubt is independently dismissed. The premise stands and you may proceed on it.
@@ -610,7 +609,7 @@ def run_question(*, llm, pool, qid: str, question: str, guidance: str, points: i
     grades: list = []
     counter = 0
 
-    msgs = [SystemMessage(content=SH_SYSTEM_PROMPT)]
+    msgs: list[BaseMessage] = [SystemMessage(content=SH_SYSTEM_PROMPT)]
     if dataset_briefing:
         msgs.append(SystemMessage(content=dataset_briefing))
     # The case file changes between questions, so it goes AFTER the memory: anything
@@ -1187,6 +1186,8 @@ def _run_validators(pool, ledger, pids, *, qid: str, log, spent: list,
                 continue
         else:
             verdict = as_refutation(res["update"])
+            if verdict is None:               # refusal_reason() already ruled this out
+                continue
         notes = ledger.apply([verdict], author=vid, corpus=res["corpus"],
                              round_n=round_n)
         if notes:

@@ -19,7 +19,7 @@ import run_eval  # noqa: E402
 def isolated_artifacts(tmp_path, monkeypatch):
     """A complete on-disk run + generated-artifact workspace for CLI checks."""
     log_root = tmp_path / "log" / "v0"
-    run_dir = log_root / "run_0.9"
+    run_dir = log_root / "v0.9" / "v0.9_full_r1"
     run_dir.mkdir(parents=True)
     (run_dir / "scoreboard_submissions.json").write_text(
         json.dumps(
@@ -55,7 +55,7 @@ def isolated_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(run_eval, "LOG_ROOT", log_root)
     monkeypatch.setattr(run_eval, "EVAL_DIR", eval_dir)
     monkeypatch.setattr(run_eval, "README", readme)
-    assert run_eval.main(["--run", "run_0.9", "--write"]) == 0
+    assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--write"]) == 0
     return eval_dir / "leaderboard.json"
 
 
@@ -74,14 +74,14 @@ def test_is_correct_handles_missing_values():
 
 
 def test_recomputed_verdicts_match_the_recorded_ones():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     assert len(rows) == 56
     for row in rows:
         assert run_eval.is_correct(row["submitted"], row["official"]) is bool(row["correct"]), row["number"]
 
 
 def test_summarize_reproduces_the_published_v12_leaderboard():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     summary = run_eval.summarize(rows)
     assert summary["correct"] == 26
     assert summary["total"] == 56
@@ -93,19 +93,19 @@ def test_summarize_reproduces_the_published_v12_leaderboard():
 
 
 def test_filter_by_tier_selects_only_that_tier():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=1000, ids=None))
     assert (summary["correct"], summary["total"]) == (2, 9)
 
 
 def test_filter_by_ids_is_case_insensitive_and_order_independent():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=None, ids=["q333", "Q332"]))
     assert (summary["correct"], summary["total"]) == (2, 2)
 
 
 def test_filter_by_unknown_id_raises():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["Q999"])
 
@@ -134,7 +134,7 @@ def test_is_correct_handles_non_string_values():
 
 def test_filter_by_tier_and_ids_together_does_not_claim_a_real_question_is_missing():
     """Test that missing-id check runs against full rows before tier narrowing."""
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     # Q200 is a real question but has base_points=100, not 1000.
     # When filtering by tier=1000 and ids=["Q200"], the combined filter matches
     # nothing, but the id error should NOT fire because the id truly exists in
@@ -146,14 +146,14 @@ def test_filter_by_tier_and_ids_together_does_not_claim_a_real_question_is_missi
 
 def test_filter_by_ids_rejects_a_doubled_prefix():
     """Test that removeprefix doesn't strip characters in place of prefix."""
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     # "QQ332" is not a real question id; it should not resolve to 332.
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["QQ332"])
 
 
 def test_load_cost_matches_the_published_v12_total():
-    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.2")
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     assert round(cost["total_usd"], 2) == 31.36
     assert "gpt-5.4-2026-03-05" in cost["models"]
     # Bookkeeping keys must not be reported as if they were models.
@@ -162,20 +162,20 @@ def test_load_cost_matches_the_published_v12_total():
 
 
 def test_load_cost_tolerates_a_run_without_token_usage():
-    # run_0.0 predates cost tracking; the scorer must degrade, not crash.
-    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.0")
+    # v0.0 predates cost tracking; the scorer must degrade, not crash.
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "v0.0" / "v0.0_full_r1")
     assert cost["total_usd"] is None
     assert cost["models"] == {}
 
 
 def test_load_cost_returns_none_when_cost_was_never_tracked():
-    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.0")
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "v0.0" / "v0.0_full_r1")
     assert cost["total_usd"] is None
     assert cost["models"] == {}
 
 
 def test_render_report_says_not_tracked_when_cost_is_unknown():
-    run_dir = REPO / "log" / "v0" / "run_0.2"
+    run_dir = REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1"
     summary = run_eval.summarize(run_eval.load_rows(run_dir))
     text = run_eval.render_report(run_dir, summary, {"models": {}, "total_usd": None})
     assert "not tracked" in text
@@ -189,7 +189,7 @@ def test_historical_versions_match_every_parseable_run_artifact():
     }
     checked = set()
     for version in run_eval.load_versions()["versions"]:
-        run_dir = REPO / "log" / "v0" / f"run_{version['version'].removeprefix('v')}"
+        run_dir = REPO / "log" / "v0" / version["version"] / f"{version['version']}_full_r1"
         if not (run_dir / "scoreboard_submissions.json").exists():
             continue
         summary = run_eval.summarize(run_eval.load_rows(run_dir))
@@ -212,17 +212,20 @@ def test_historical_versions_match_every_parseable_run_artifact():
     assert checked >= {"v0.1", "v0.2"}
 
 
-def test_latest_run_uses_numeric_order_and_ignores_non_numeric_backups(tmp_path, monkeypatch):
+def test_latest_run_is_the_newest_complete_full_run_by_version(tmp_path, monkeypatch):
     monkeypatch.setattr(run_eval, "LOG_ROOT", tmp_path)
-    for name in ("run_0.9", "run_0.10", "run_0.backup"):
-        run_dir = tmp_path / name
-        run_dir.mkdir()
-        (run_dir / "scoreboard_submissions.json").write_text("[]")
-    assert run_eval.latest_run().name == "run_0.10"
+    complete = json.dumps([{}] * run_eval.COMPLETE_RUN_QUESTIONS)
+    runs = {"v0.9/v0.9_full_r1": complete, "v0.10/v0.10_full_r1": complete,
+            "v0.10/v0.10.1_glm_full_r1": "[{}]",          # stopped early: not complete
+            "v0.10/v0.10_full_backup": complete}          # not a full-run folder
+    for rel, rows in runs.items():
+        (tmp_path / rel).mkdir(parents=True)
+        (tmp_path / rel / "scoreboard_submissions.json").write_text(rows)
+    assert run_eval.latest_run().name == "v0.10_full_r1", "0.10 > 0.9 numerically, partial run skipped"
 
 
 def test_render_report_states_accuracy_points_and_cost():
-    run_dir = REPO / "log" / "v0" / "run_0.2"
+    run_dir = REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1"
     text = run_eval.render_report(
         run_dir,
         run_eval.summarize(run_eval.load_rows(run_dir)),
@@ -235,7 +238,7 @@ def test_render_report_states_accuracy_points_and_cost():
 
 
 def test_render_leaderboard_contains_both_tables_and_real_numbers():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     markdown = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
@@ -267,7 +270,7 @@ def test_traced_versions_match_their_run_logs():
 
 def test_readme_leaderboard_block_is_in_sync():
     # Guards the exact invariant CI enforces with --check.
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
     expected = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
@@ -276,13 +279,13 @@ def test_readme_leaderboard_block_is_in_sync():
 
 def test_check_rejects_a_missing_leaderboard_json(isolated_artifacts, capsys):
     isolated_artifacts.unlink()
-    assert run_eval.main(["--run", "run_0.9", "--check"]) == 1
+    assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--check"]) == 1
     assert "leaderboard.json is missing" in capsys.readouterr().err
 
 
 def test_check_rejects_a_malformed_leaderboard_json(isolated_artifacts, capsys):
     isolated_artifacts.write_text("{not json")
-    assert run_eval.main(["--run", "run_0.9", "--check"]) == 1
+    assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--check"]) == 1
     assert "leaderboard.json is malformed" in capsys.readouterr().err
 
 
@@ -290,14 +293,14 @@ def test_check_rejects_a_stale_leaderboard_json(isolated_artifacts, capsys):
     payload = json.loads(isolated_artifacts.read_text())
     payload["points"]["earned"] = 0
     isolated_artifacts.write_text(json.dumps(payload))
-    assert run_eval.main(["--run", "run_0.9", "--check"]) == 1
+    assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--check"]) == 1
     assert "leaderboard.json is stale" in capsys.readouterr().err
 
 
 def test_check_rejects_a_stale_readme_block(isolated_artifacts, capsys):
     readme = isolated_artifacts.parents[2] / "README.md"
     readme.write_text(readme.read_text().replace("100 / 100", "0 / 100"))
-    assert run_eval.main(["--run", "run_0.9", "--check"]) == 1
+    assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--check"]) == 1
     assert "README leaderboard is stale" in capsys.readouterr().err
 
 
@@ -310,7 +313,7 @@ def test_write_artifacts_writes_nothing_when_markers_are_missing(tmp_path, monke
     monkeypatch.setattr(run_eval, "README", readme)
     monkeypatch.setattr(run_eval, "load_versions", lambda: {"versions": []})
 
-    run_dir = tmp_path / "log" / "v0" / "run_0.9"
+    run_dir = tmp_path / "log" / "v0" / "v0.9" / "v0.9_full_r1"
     run_dir.mkdir(parents=True)
     summary = run_eval.summarize(
         [{"number": 1, "submitted": "a", "official": "a", "base_points": 100}]

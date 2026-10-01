@@ -112,15 +112,21 @@ def load_cost(run_dir: Path) -> dict:
     }
 
 
+COMPLETE_RUN_QUESTIONS = 56
+
+
 def latest_run() -> Path:
-    """Highest-numbered scorable run_0.N directory, compared numerically."""
+    """Newest complete full run: log/v0/v0.<minor>/v<version>_..._full_r<N>/ with every
+    question scored, ordered numerically by version, then by N."""
     runs = []
-    for path in LOG_ROOT.glob("run_0.*"):
-        match = re.fullmatch(r"run_0\.(\d+)", path.name)
-        if match and (path / "scoreboard_submissions.json").exists():
-            runs.append((int(match.group(1)), path))
+    for path in LOG_ROOT.glob("*/*_full_r*"):
+        match = re.fullmatch(r"v(\d+(?:\.\d+)*)_(?:.*_)?full_r(\d+)", path.name)
+        submissions = path / "scoreboard_submissions.json"
+        if match and submissions.exists() and len(json.loads(submissions.read_text())) >= COMPLETE_RUN_QUESTIONS:
+            version = tuple(int(part) for part in match.group(1).split("."))
+            runs.append(((version, int(match.group(2))), path))
     if not runs:
-        sys.exit(f"No scorable runs under {LOG_ROOT}")
+        sys.exit(f"No complete full runs under {LOG_ROOT}")
     return max(runs, key=lambda item: item[0])[1]
 
 
@@ -270,7 +276,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score a BOTSv3 agent run offline. No API key, no Splunk, no LLM calls."
     )
-    parser.add_argument("--run", help="Run directory name, e.g. run_0.1 (default: latest scorable run)")
+    parser.add_argument("--run", help="Run directory under log/v0, e.g. v0.2/v0.2_full_r1 "
+                                      "(default: the newest complete full run)")
     parser.add_argument("--tier", type=int, choices=TIERS, help="Score only this point tier")
     parser.add_argument("--ids", help="Comma-separated question ids, e.g. Q332,Q333")
     parser.add_argument("--write", action="store_true", help="Regenerate leaderboard.json and the README table")

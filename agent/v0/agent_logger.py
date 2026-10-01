@@ -4,12 +4,12 @@ Run directory management and narrative logging for the v1 multi-agent run.
 
 Per-step agent traces (LLM calls, tool calls, node visits) are handled by LangSmith.
 This module manages only:
-  - the run directory (log/v0/run_0.<minor>/ or log/temp/<ts>/)
+  - the run directory
   - timeline.md  — human-readable narrative used for docs
   - worker counter — sequential index across all workers in a run
 
-Full runs go to  log/v0/run_0.<minor>/  (auto-incrementing).
-Test runs  go to  log/temp/<timestamp>/  and are never versioned.
+Full runs go to  log/v0/v0.<minor>/v0.<version>_<senior-model>_full_r<N>/  (N auto-increments).
+Test runs  go to  log/temp/<timestamp>/ and are filed under their version when they finish.
 """
 
 import datetime
@@ -23,7 +23,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
 class RunLogger:
     """Owns one run's directory, timeline narrative, and worker counter."""
 
-    def __init__(self, *, full_run: bool, version_major: int = 0, run_name: str | None = None):
+    def __init__(self, *, full_run: bool, version_major: int = 0, run_name: str | None = None,
+                 version: str | None = None, senior_model: str | None = None):
         self.full_run = full_run
         log_root = os.environ.get("SIEM_LOG_ROOT") or os.path.join(PROJECT_ROOT, "log")
 
@@ -31,15 +32,20 @@ class RunLogger:
             # Reuse an existing run dir (append mode).
             self.run_name = run_name
             if full_run:
-                self.run_dir = os.path.join(log_root, f"v{version_major}", run_name)
+                self.run_dir = os.path.normpath(os.path.join(log_root, f"v{version_major}", run_name))
             else:
                 self.run_dir = os.path.join(log_root, "temp", run_name)
             append = True
         elif full_run:
-            vdir = os.path.join(log_root, f"v{version_major}")
-            minor = self._next_minor(vdir, version_major)
-            self.run_name = f"run_{version_major}.{minor}"
-            self.run_dir  = os.path.join(vdir, self.run_name)
+            if not version:
+                raise ValueError("a new full run needs its version (e.g. --version 0.5.0)")
+            minor = ".".join(version.split(".")[:2])
+            model = (senior_model or "senior").rsplit("/", 1)[-1].lower()
+            stem = f"v{version}_{model}_full"
+            vdir = os.path.join(log_root, f"v{version_major}", f"v{minor}")
+            rep = self._next_rep(vdir, stem)
+            self.run_name = f"v{minor}/{stem}_r{rep}"
+            self.run_dir  = os.path.join(vdir, f"{stem}_r{rep}")
             append = False
         else:
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -78,17 +84,10 @@ class RunLogger:
                 f.write(f"\n---\n\n## ↩ Resumed: {datetime.datetime.now().isoformat(timespec='seconds')}\n\n")
 
     @staticmethod
-    def _next_minor(vdir: str, major: int) -> int:
-        if not os.path.isdir(vdir):
-            return 0
-        prefix = f"run_{major}."
-        minors = []
-        for name in os.listdir(vdir):
-            if name.startswith(prefix):
-                tail = name[len(prefix):]
-                if tail.isdigit():
-                    minors.append(int(tail))
-        return (max(minors) + 1) if minors else 0
+    def _next_rep(vdir: str, stem: str) -> int:
+        taken = [int(m.group(1)) for n in (os.listdir(vdir) if os.path.isdir(vdir) else [])
+                 if (m := re.fullmatch(re.escape(stem) + r"_r(\d+)", n))]
+        return max(taken, default=0) + 1
 
     def next_worker(self, role: str, qid: str) -> int:
         """Reserve and return the next global sequential index for this role."""
