@@ -159,7 +159,10 @@ correctly, in the same turn the run finishes:
 
 ## README shows the latest result, RCA and forecast
 
-After every full run (and after an RCA that changes the plan), update `README.md` so it shows:
+`README.md` follows the Best-README-Template layout (shields badges, back-to-top links). The generated
+leaderboard tables live in `docs/leaderboard.md` (`python3 scripts/run_eval.py --write`), and the long
+write-ups live in `docs/overview.md`; the README keeps the status badges and a short "Latest Result"
+block. The released / in-progress / next badges are derived: run `python3 scripts/update_status.py --write` after adding a result doc or a new `docs/version_architecture/v0/v0.x.md` (CI runs `--check`). After every full run (and after an RCA that changes the plan), update `README.md` so it shows:
 
 1. **The most advanced full run's result** and its version (score, points, cost, latency).
 2. **The latest root cause analysis**: its categories and a link to its `log/root_cause_analysis/` file.

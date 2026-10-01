@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Gate Walkthrough</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: one figure, a control row, and a detail panel that follows the active node. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #1f2933; --muted: #5b6672; --line: #c5cbd3;
+  --ok: #1a7f37; --warn: #9a6700; --active: #0b5cad; --active-bg: #e4eefb;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1419; --panel: #161c23; --fg: #e6edf3; --muted: #8b98a5; --line: #3a4552;
+  --ok: #3fb950; --warn: #e3b341; --active: #6cb6ff; --active-bg: #12253a; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1419; --panel: #161c23; --fg: #e6edf3; --muted: #8b98a5; --line: #3a4552;
+  --ok: #3fb950; --warn: #e3b341; --active: #6cb6ff; --active-bg: #12253a; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); padding-inline: 16px; padding-block: 24px; }
+main { max-width: 980px; margin: 0 auto; display: grid; gap: 20px; }
+h1 { font-size: 1.5rem; margin: 0; text-wrap: balance; }
+p.lede { margin: 6px 0 0; color: var(--muted); max-width: 65ch; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.scroll { overflow-x: auto; }
+svg { display: block; min-width: 760px; width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: 13px; padding-top: 8px; }
+.node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.6; cursor: pointer; transition: fill .15s, stroke .15s; }
+.node.gate rect { stroke-dasharray: 5 4; }
+.node text { fill: var(--fg); pointer-events: none; }
+.node .sub { fill: var(--muted); font-size: 11px; }
+.node .name { font-size: 14px; font-weight: 600; }
+.node.active rect { fill: var(--active-bg); stroke: var(--active); }
+.node.done rect { stroke: var(--fg); }
+.node.out-ok.active rect, .node.out-ok.done rect { stroke: var(--ok); }
+.node.out-warn.active rect, .node.out-warn.done rect { stroke: var(--warn); }
+.node:focus-visible rect { outline: 2px solid var(--active); outline-offset: 2px; }
+.edge { fill: none; stroke: var(--line); stroke-width: 1.6; }
+.edge.on { stroke: var(--fg); }
+.edge.on.ok { stroke: var(--ok); } .edge.on.warn { stroke: var(--warn); }
+.lbl { fill: var(--muted); font-size: 11px; text-anchor: middle; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button { font: inherit; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--active); background: var(--active-bg); }
+button:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.detail { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 8.5em; }
+.detail h2 { margin: 0 0 4px; font-size: 1.05rem; }
+.detail p { margin: 0 0 8px; max-width: 70ch; }
+.detail code { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.step { color: var(--muted); font-size: 13px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Evidence Gate Walkthrough</h1>
+    <p class="lede">How one question moves through SIEM Automation, and why an answer is only submitted when the gate passes. Pick an outcome, step through, or click any node.</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Outcome">
+    <button id="o-pass" aria-pressed="true">Evidence verified</button>
+    <button id="o-fail" aria-pressed="false">Evidence missing</button>
+    <span style="flex:1"></span>
+    <button id="prev" aria-label="Previous step">&larr; Back</button>
+    <button id="next">Next step &rarr;</button>
+    <span class="step" id="count"></span>
+  </div>
+
+  <figure>
+    <div class="scroll">
+      <svg viewBox="0 0 1000 300" role="img" aria-label="A question goes to SH, which spawns Seniors that search Splunk. Their premises go to the evidence gate. If every load-bearing premise is verified the answer is submitted; otherwise the case escalates to an analyst.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+        <g style="color: var(--line)">
+          <line id="e0" class="edge" x1="110" y1="140" x2="158" y2="140" marker-end="url(#ah)"/>
+          <line id="e1" class="edge" x1="300" y1="125" x2="378" y2="125" marker-end="url(#ah)"/>
+          <line id="e2" class="edge" x1="378" y1="155" x2="302" y2="155" marker-end="url(#ah)"/>
+          <line id="e3" class="edge" x1="520" y1="140" x2="598" y2="140" marker-end="url(#ah)"/>
+          <polyline id="e4" class="edge" points="230,180 230,262 675,262 675,182" marker-end="url(#ah)"/>
+          <polyline id="e5" class="edge ok" points="750,125 790,125 790,85 828,85" marker-end="url(#ah)"/>
+          <polyline id="e6" class="edge warn" points="750,155 790,155 790,195 828,195" marker-end="url(#ah)"/>
+        </g>
+        <text class="lbl" x="339" y="118">spawn</text><text class="lbl" x="339" y="172">report</text>
+        <text class="lbl" x="559" y="132">premises</text><text class="lbl" x="452" y="254">SH asks to ANSWER</text>
+        <text class="lbl" x="770" y="75">pass</text><text class="lbl" x="770" y="213">fail</text>
+
+        <g class="node" id="n-q" tabindex="0" role="button" aria-label="Question"><rect x="10" y="110" width="100" height="60" rx="8"/><text class="name" x="60" y="136" text-anchor="middle">Question</text><text class="sub" x="60" y="154" text-anchor="middle">BOTSv3 CTF</text></g>
+        <g class="node" id="n-sh" tabindex="0" role="button" aria-label="SH orchestrator"><rect x="160" y="100" width="140" height="80" rx="8"/><text class="name" x="230" y="132" text-anchor="middle">SH</text><text class="sub" x="230" y="150" text-anchor="middle">orchestrator</text><text class="sub" x="230" y="166" text-anchor="middle">memory across questions</text></g>
+        <g class="node" id="n-sen" tabindex="0" role="button" aria-label="Seniors"><rect x="380" y="100" width="140" height="80" rx="8"/><text class="name" x="450" y="132" text-anchor="middle">Seniors</text><text class="sub" x="450" y="150" text-anchor="middle">up to 6 in parallel</text><text class="sub" x="450" y="166" text-anchor="middle">run SPL on Splunk</text></g>
+        <g class="node gate" id="n-gate" tabindex="0" role="button" aria-label="Evidence gate"><rect x="600" y="100" width="150" height="80" rx="8"/><text class="name" x="675" y="132" text-anchor="middle">Evidence gate</text><text class="sub" x="675" y="150" text-anchor="middle">premise ledger</text><text class="sub" x="675" y="166" text-anchor="middle">+ blind validator</text></g>
+        <g class="node out-ok" id="n-ok" tabindex="0" role="button" aria-label="Answer submitted"><rect x="830" y="50" width="160" height="70" rx="8"/><text class="name" x="910" y="80" text-anchor="middle">Answer submitted</text><text class="sub" x="910" y="99" text-anchor="middle">exact-match scoreboard</text></g>
+        <g class="node out-warn" id="n-esc" tabindex="0" role="button" aria-label="Escalate to analyst"><rect x="830" y="160" width="160" height="70" rx="8"/><text class="name" x="910" y="190" text-anchor="middle">Escalate to analyst</text><text class="sub" x="910" y="209" text-anchor="middle">evidence package</text></g>
+      </svg>
+    </div>
+    <figcaption>SH is the only agent that may answer. The gate sits between SH's request and the scoreboard, and its failure path leads to a person.</figcaption>
+  </figure>
+
+  <section class="detail" aria-live="polite">
+    <h2 id="d-title"></h2>
+    <p id="d-body"></p>
+    <code id="d-code"></code>
+  </section>
+</main>
+<script>
+const INFO = {
+  q:   ["Question", "One BOTSv3 forensic question, graded by exact match against the official answer. Nothing about the answer key reaches the agent.", "datasets/botsv3_questions.json"],
+  sh:  ["SH, the orchestrator", "Plans the investigation, grades every Senior report, routes each Senior and keeps a memory of earlier questions. SH never queries Splunk itself, and only SH may answer. A runner-enforced procedure rejects any turn that breaks a numbered step.", "agent/v0/sh_loop.py"],
+  sen: ["Seniors, the workers", "Up to six workers, each on its own thread, run SPL against Splunk (index=botsv3) and file structured findings with submit_finding. Each report is stamped with its round and the SPL that ran.", "agent/v0/senior_session.py"],
+  gate:["Evidence gate", "Every premise must carry a quote that appears in tool output the Senior really received. A blind validator re-checks the load-bearing premises without seeing the question or the candidate answer. The runner refuses ANSWER while one is UNVERIFIED (step F2) or REFUTED.", "agent/v0/premise.py, agent/v0/validator.py"],
+  ok:  ["Answer submitted", "All load-bearing premises are VERIFIED. An extractor reduces the answer to a bare value and the scoreboard compares it exactly. v0.4.5 answered correctly 86% of the time when it submitted.", "agent/local_scoreboard.py"],
+  esc: ["Escalate to an analyst", "A premise is still UNVERIFIED, SH declines, or the budget ran out. Today the case leaves with SH's conversation, the SPL that ran and the premise ledger in the run logs. v0.5.1 packages that as escalations/<QID>.json, assembled by code, and the run continues with the next question.", "docs/version_architecture/v0/v0.5.1.md"]
+};
+const FLOW = {
+  pass: [["q"],["sh"],["sen"],["gate"],["ok"]],
+  fail: [["q"],["sh"],["sen"],["gate"],["esc"]]
+};
+const EDGES = { q:["e0"], sh:["e0","e1"], sen:["e1","e2","e3"], gate:["e3","e4"], ok:["e5"], esc:["e6"] };
+let mode = "pass", step = 0;
+const $ = id => document.getElementById(id);
+function render() {
+  const seq = FLOW[mode].map(s => s[0]);
+  const cur = seq[step];
+  document.querySelectorAll(".node").forEach(n => n.classList.remove("active", "done"));
+  document.querySelectorAll(".edge").forEach(e => e.classList.remove("on"));
+  seq.slice(0, step + 1).forEach((k, i) => {
+    $("n-" + k).classList.add(i === step ? "active" : "done");
+    EDGES[k].forEach(e => $(e).classList.add("on"));
+  });
+  const [t, b, c] = INFO[cur];
+  $("d-title").textContent = t; $("d-body").textContent = b; $("d-code").textContent = c;
+  $("count").textContent = (step + 1) + " / " + seq.length;
+  $("prev").disabled = step === 0; $("next").disabled = step === seq.length - 1;
+  $("o-pass").setAttribute("aria-pressed", mode === "pass"); $("o-fail").setAttribute("aria-pressed", mode === "fail");
+}
+function pick(key) {
+  if (key === "ok") mode = "pass"; else if (key === "esc") mode = "fail";
+  step = Math.max(0, FLOW[mode].map(s => s[0]).indexOf(key)); render();
+}
+$("o-pass").onclick = () => { mode = "pass"; step = 0; render(); };
+$("o-fail").onclick = () => { mode = "fail"; step = 0; render(); };
+$("prev").onclick = () => { step = Math.max(0, step - 1); render(); };
+$("next").onclick = () => { step = Math.min(FLOW[mode].length - 1, step + 1); render(); };
+for (const k of ["q","sh","sen","gate","ok","esc"]) {
+  const n = $("n-" + k);
+  n.addEventListener("click", () => pick(k));
+  n.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(k); } });
+}
+render();
+</script>
+</body>
+</html>
