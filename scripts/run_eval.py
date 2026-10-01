@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 LOG_ROOT = REPO / "log" / "v0"
 TIERS = (100, 500, 1000)
 EVAL_DIR = REPO / "datasets" / "evaluation"
-README = REPO / "README.md"
+LEADERBOARD_DOC = REPO / "docs" / "leaderboard.md"
 BLOCK_RE = re.compile(
     r"(?<=<!-- LEADERBOARD:START -->\n).*?(?=\n<!-- LEADERBOARD:END -->)", re.DOTALL
 )
@@ -42,7 +42,7 @@ def load_rows(run_dir: Path) -> list[dict]:
             f"{path} not found. Only runs with a submissions file can be scored "
             f"(run_0.0 predates it)."
         )
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def filter_rows(rows: list[dict], tier: int | None, ids: list[str] | None) -> list[dict]:
@@ -96,7 +96,7 @@ def load_cost(run_dir: Path) -> dict:
     path = run_dir / "run_summary.json"
     if not path.exists():
         return {"models": {}, "total_usd": None}
-    usage = json.loads(path.read_text()).get("token_usage") or {}
+    usage = json.loads(path.read_text(encoding="utf-8")).get("token_usage") or {}
     if not usage:
         return {"models": {}, "total_usd": None}
     models = {
@@ -116,15 +116,18 @@ COMPLETE_RUN_QUESTIONS = 56
 
 
 def latest_run() -> Path:
-    """Newest complete full run: log/v0/v0.<minor>/v<version>_..._full_r<N>/ with every
-    question scored, ordered numerically by version, then by N."""
+    """Newest complete full run with every question scored, ordered numerically by version,
+    then by N: log/v0/v0.<minor>/v<version>_..._full_r<N>/, or a pre-v0.3 log/v0/run_0.<minor>/
+    (those keep their original folder names)."""
     runs = []
-    for path in LOG_ROOT.glob("*/*_full_r*"):
+    for path in [*LOG_ROOT.glob("*/*_full_r*"), *LOG_ROOT.glob("run_*")]:
         match = re.fullmatch(r"v(\d+(?:\.\d+)*)_(?:.*_)?full_r(\d+)", path.name)
+        legacy = re.fullmatch(r"run_(\d+(?:\.\d+)*)", path.name)
         submissions = path / "scoreboard_submissions.json"
-        if match and submissions.exists() and len(json.loads(submissions.read_text())) >= COMPLETE_RUN_QUESTIONS:
-            version = tuple(int(part) for part in match.group(1).split("."))
-            runs.append(((version, int(match.group(2))), path))
+        if (match or legacy) and submissions.exists() \
+                and len(json.loads(submissions.read_text(encoding="utf-8"))) >= COMPLETE_RUN_QUESTIONS:
+            version = tuple(int(part) for part in (match or legacy).group(1).split("."))
+            runs.append(((version, int(match.group(2)) if match else 0), path))
     if not runs:
         sys.exit(f"No complete full runs under {LOG_ROOT}")
     return max(runs, key=lambda item: item[0])[1]
@@ -152,7 +155,7 @@ def render_report(run_dir: Path, summary: dict, cost: dict) -> str:
 
 
 def load_versions() -> dict:
-    return json.loads((EVAL_DIR / "versions.json").read_text())
+    return json.loads((EVAL_DIR / "versions.json").read_text(encoding="utf-8"))
 
 
 def render_leaderboard_markdown(summary: dict, versions: list[dict]) -> str:
@@ -190,15 +193,15 @@ def render_leaderboard_markdown(summary: dict, versions: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def extract_block(readme_text: str) -> str | None:
-    match = BLOCK_RE.search(readme_text)
+def extract_block(doc_text: str) -> str | None:
+    match = BLOCK_RE.search(doc_text)
     return match.group(0).strip() if match else None
 
 
-def replace_block(readme_text: str, markdown: str) -> str:
-    if not BLOCK_RE.search(readme_text):
-        sys.exit("README.md is missing the <!-- LEADERBOARD:START/END --> markers.")
-    return BLOCK_RE.sub(lambda _: markdown.strip(), readme_text)
+def replace_block(doc_text: str, markdown: str) -> str:
+    if not BLOCK_RE.search(doc_text):
+        sys.exit("docs/leaderboard.md is missing the <!-- LEADERBOARD:START/END --> markers.")
+    return BLOCK_RE.sub(lambda _: markdown.strip(), doc_text)
 
 
 def build_leaderboard_payload(run_dir: Path, summary: dict, cost: dict) -> dict:
@@ -220,14 +223,14 @@ def build_leaderboard_payload(run_dir: Path, summary: dict, cost: dict) -> dict:
 def write_artifacts(run_dir: Path, summary: dict, cost: dict) -> None:
     payload = build_leaderboard_payload(run_dir, summary, cost)
     markdown = render_leaderboard_markdown(summary, payload["versions"])
-    new_readme = replace_block(README.read_text(), markdown)  # can sys.exit — do first
+    new_doc = replace_block(LEADERBOARD_DOC.read_text(encoding="utf-8"), markdown)  # can sys.exit — do first
 
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
     (EVAL_DIR / "leaderboard.json").write_text(
-        json.dumps(payload, indent=2) + "\n"
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
     )
-    README.write_text(new_readme)
-    print(f"Wrote {EVAL_DIR / 'leaderboard.json'} and refreshed the README leaderboard block.")
+    LEADERBOARD_DOC.write_text(new_doc, encoding="utf-8")
+    print(f"Wrote {EVAL_DIR / 'leaderboard.json'} and refreshed {LEADERBOARD_DOC.name}.")
 
 
 def check_artifacts(run_dir: Path, summary: dict, cost: dict) -> int:
@@ -235,7 +238,7 @@ def check_artifacts(run_dir: Path, summary: dict, cost: dict) -> int:
     failed = False
     leaderboard = EVAL_DIR / "leaderboard.json"
     try:
-        actual_payload = json.loads(leaderboard.read_text())
+        actual_payload = json.loads(leaderboard.read_text(encoding="utf-8"))
     except FileNotFoundError:
         print(
             "leaderboard.json is missing. Run: python3 scripts/run_eval.py --write",
@@ -258,9 +261,9 @@ def check_artifacts(run_dir: Path, summary: dict, cost: dict) -> int:
             failed = True
 
     expected = render_leaderboard_markdown(summary, payload["versions"]).strip()
-    if extract_block(README.read_text()) != expected:
+    if extract_block(LEADERBOARD_DOC.read_text(encoding="utf-8")) != expected:
         print(
-            "README leaderboard is stale. Run: python3 scripts/run_eval.py --write",
+            "docs/leaderboard.md leaderboard table is stale. Run: python3 scripts/run_eval.py --write",
             file=sys.stderr,
         )
         failed = True

@@ -47,14 +47,14 @@ def isolated_artifacts(tmp_path, monkeypatch):
     eval_dir = tmp_path / "datasets" / "evaluation"
     eval_dir.mkdir(parents=True)
     (eval_dir / "versions.json").write_text('{"versions": []}\n')
-    readme = tmp_path / "README.md"
-    readme.write_text(
+    doc = tmp_path / "leaderboard.md"
+    doc.write_text(
         "intro\n<!-- LEADERBOARD:START -->\nold\n<!-- LEADERBOARD:END -->\noutro\n"
     )
 
     monkeypatch.setattr(run_eval, "LOG_ROOT", log_root)
     monkeypatch.setattr(run_eval, "EVAL_DIR", eval_dir)
-    monkeypatch.setattr(run_eval, "README", readme)
+    monkeypatch.setattr(run_eval, "LEADERBOARD_DOC", doc)
     assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--write"]) == 0
     return eval_dir / "leaderboard.json"
 
@@ -74,14 +74,14 @@ def test_is_correct_handles_missing_values():
 
 
 def test_recomputed_verdicts_match_the_recorded_ones():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     assert len(rows) == 56
     for row in rows:
         assert run_eval.is_correct(row["submitted"], row["official"]) is bool(row["correct"]), row["number"]
 
 
 def test_summarize_reproduces_the_published_v12_leaderboard():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(rows)
     assert summary["correct"] == 26
     assert summary["total"] == 56
@@ -93,19 +93,19 @@ def test_summarize_reproduces_the_published_v12_leaderboard():
 
 
 def test_filter_by_tier_selects_only_that_tier():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=1000, ids=None))
     assert (summary["correct"], summary["total"]) == (2, 9)
 
 
 def test_filter_by_ids_is_case_insensitive_and_order_independent():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     summary = run_eval.summarize(run_eval.filter_rows(rows, tier=None, ids=["q333", "Q332"]))
     assert (summary["correct"], summary["total"]) == (2, 2)
 
 
 def test_filter_by_unknown_id_raises():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["Q999"])
 
@@ -134,7 +134,7 @@ def test_is_correct_handles_non_string_values():
 
 def test_filter_by_tier_and_ids_together_does_not_claim_a_real_question_is_missing():
     """Test that missing-id check runs against full rows before tier narrowing."""
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     # Q200 is a real question but has base_points=100, not 1000.
     # When filtering by tier=1000 and ids=["Q200"], the combined filter matches
     # nothing, but the id error should NOT fire because the id truly exists in
@@ -146,14 +146,14 @@ def test_filter_by_tier_and_ids_together_does_not_claim_a_real_question_is_missi
 
 def test_filter_by_ids_rejects_a_doubled_prefix():
     """Test that removeprefix doesn't strip characters in place of prefix."""
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     # "QQ332" is not a real question id; it should not resolve to 332.
     with pytest.raises(SystemExit):
         run_eval.filter_rows(rows, tier=None, ids=["QQ332"])
 
 
 def test_load_cost_matches_the_published_v12_total():
-    cost = run_eval.load_cost(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    cost = run_eval.load_cost(REPO / "log" / "v0" / "run_0.2")
     assert round(cost["total_usd"], 2) == 31.36
     assert "gpt-5.4-2026-03-05" in cost["models"]
     # Bookkeeping keys must not be reported as if they were models.
@@ -175,7 +175,7 @@ def test_load_cost_returns_none_when_cost_was_never_tracked():
 
 
 def test_render_report_says_not_tracked_when_cost_is_unknown():
-    run_dir = REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1"
+    run_dir = REPO / "log" / "v0" / "run_0.2"
     summary = run_eval.summarize(run_eval.load_rows(run_dir))
     text = run_eval.render_report(run_dir, summary, {"models": {}, "total_usd": None})
     assert "not tracked" in text
@@ -189,7 +189,7 @@ def test_historical_versions_match_every_parseable_run_artifact():
     }
     checked = set()
     for version in run_eval.load_versions()["versions"]:
-        run_dir = REPO / "log" / "v0" / version["version"] / f"{version['version']}_full_r1"
+        run_dir = REPO / "log" / "v0" / ("run_" + version["version"].removeprefix("v"))
         if not (run_dir / "scoreboard_submissions.json").exists():
             continue
         summary = run_eval.summarize(run_eval.load_rows(run_dir))
@@ -225,7 +225,7 @@ def test_latest_run_is_the_newest_complete_full_run_by_version(tmp_path, monkeyp
 
 
 def test_render_report_states_accuracy_points_and_cost():
-    run_dir = REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1"
+    run_dir = REPO / "log" / "v0" / "run_0.2"
     text = run_eval.render_report(
         run_dir,
         run_eval.summarize(run_eval.load_rows(run_dir)),
@@ -238,7 +238,7 @@ def test_render_report_states_accuracy_points_and_cost():
 
 
 def test_render_leaderboard_contains_both_tables_and_real_numbers():
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     markdown = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
@@ -268,13 +268,14 @@ def test_traced_versions_match_their_run_logs():
         assert round(seconds / 60) == version["latency_min"], version["version"]
 
 
-def test_readme_leaderboard_block_is_in_sync():
+def test_leaderboard_doc_block_is_in_sync():
     # Guards the exact invariant CI enforces with --check.
-    rows = run_eval.load_rows(REPO / "log" / "v0" / "v0.2" / "v0.2_full_r1")
+    rows = run_eval.load_rows(REPO / "log" / "v0" / "run_0.2")
     expected = run_eval.render_leaderboard_markdown(
         run_eval.summarize(rows), run_eval.load_versions()["versions"]
     )
-    assert run_eval.extract_block((REPO / "README.md").read_text()) == expected.strip()
+    doc = REPO / "docs" / "leaderboard.md"
+    assert run_eval.extract_block(doc.read_text(encoding="utf-8")) == expected.strip()
 
 
 def test_check_rejects_a_missing_leaderboard_json(isolated_artifacts, capsys):
@@ -297,20 +298,20 @@ def test_check_rejects_a_stale_leaderboard_json(isolated_artifacts, capsys):
     assert "leaderboard.json is stale" in capsys.readouterr().err
 
 
-def test_check_rejects_a_stale_readme_block(isolated_artifacts, capsys):
-    readme = isolated_artifacts.parents[2] / "README.md"
-    readme.write_text(readme.read_text().replace("100 / 100", "0 / 100"))
+def test_check_rejects_a_stale_leaderboard_block(isolated_artifacts, capsys):
+    doc = isolated_artifacts.parents[2] / "leaderboard.md"
+    doc.write_text(doc.read_text().replace("100 / 100", "0 / 100"))
     assert run_eval.main(["--run", "v0.9/v0.9_full_r1", "--check"]) == 1
-    assert "README leaderboard is stale" in capsys.readouterr().err
+    assert "leaderboard table is stale" in capsys.readouterr().err
 
 
 def test_write_artifacts_writes_nothing_when_markers_are_missing(tmp_path, monkeypatch):
     eval_dir = tmp_path / "evaluation"  # deliberately not created
-    readme = tmp_path / "README.md"
-    readme.write_text("no markers here\n")
+    doc = tmp_path / "leaderboard.md"
+    doc.write_text("no markers here\n")
 
     monkeypatch.setattr(run_eval, "EVAL_DIR", eval_dir)
-    monkeypatch.setattr(run_eval, "README", readme)
+    monkeypatch.setattr(run_eval, "LEADERBOARD_DOC", doc)
     monkeypatch.setattr(run_eval, "load_versions", lambda: {"versions": []})
 
     run_dir = tmp_path / "log" / "v0" / "v0.9" / "v0.9_full_r1"
@@ -333,3 +334,15 @@ def test_replace_block_is_idempotent():
     assert run_eval.replace_block(once, "new") == once
     assert "old" not in once
     assert "intro" in once and "outro" in once
+
+
+def test_latest_run_finds_the_pre_v0_3_run_folders(tmp_path, monkeypatch):
+    # Full runs before v0.3 keep their original folder names (run_0.0 to run_0.2).
+    monkeypatch.setattr(run_eval, "LOG_ROOT", tmp_path)
+    complete = json.dumps([{}] * run_eval.COMPLETE_RUN_QUESTIONS)
+    runs = {"run_0.1": complete, "run_0.2": complete,
+            "v0.4/v0.4.5_full_r1": "[{}]"}                # stopped early: not complete
+    for rel, rows in runs.items():
+        (tmp_path / rel).mkdir(parents=True)
+        (tmp_path / rel / "scoreboard_submissions.json").write_text(rows)
+    assert run_eval.latest_run().name == "run_0.2"
