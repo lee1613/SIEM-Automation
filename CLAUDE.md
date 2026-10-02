@@ -24,6 +24,11 @@ A SIEM agent that answers the BOTSv3 capture-the-flag questions against Splunk (
 | `agent/v0/sh_memory.py` | Per-question summaries that serve as SH's cross-question memory |
 | `agent/v0/agent_logger.py` | Hierarchical `RunLogger` + `LogCapture` |
 | `agent/v0/usage_tracker.py` | Token and cost tracking; `PRICES_PER_1M` |
+| `scripts/run_eval.py` | Offline scorer; `--write` regenerates `docs/leaderboard.md`, `--check` runs in CI |
+| `scripts/update_status.py` | Derives the README released / in-progress / next badges from the docs; `--write` / `--check` |
+| `scripts/smoke_eval.py` | Builds the committed smoke comparison; `--check` runs in CI |
+| `docs/overview.md` | The README's detail: current performance, root cause categories, forecast, architecture notes |
+| `docs/leaderboard.md` | Generated leaderboard tables (never hand-edited) |
 | `datasets/botsv3_questions.json` | Questions read by the runner |
 | `datasets/botsv3/ctf_questions.csv`, `ctf_answers.csv` | Official questions and answers; `LocalScoreboard` grades from these |
 | `datasets/botsv3/ctf_hints.csv` | Official hints (bought with `--hints`) |
@@ -34,13 +39,17 @@ A SIEM agent that answers the BOTSv3 capture-the-flag questions against Splunk (
 
 ```
 agent/                         code: splunk_agent.py (v0.0.0), local_scoreboard.py, v0/ (multi-agent + tests)
-datasets/                      questions, answers, hints, field manifests
+datasets/                      questions, answers, hints, field manifests, evaluation/ (generated)
+scripts/                       run_eval.py, smoke_eval.py, update_status.py (CI runs their --check)
+tests/                         tests for scripts/
 docs/
   version_architecture/v0/     one architecture doc per version (changelog while in progress)
   scoreboard_result/v0/        one result doc per full run, plus that run's raw data beside it
                                (v0.0.0_full_run.json / .log back v0.0.0.md)
   superpowers/{plans,specs}/   design plans and specs
   agents/                      tooling notes for coding agents
+  images/, architecture-diagram.html   the architecture diagram (README image; GitHub Pages page)
+  overview.md, leaderboard.md  README detail; generated leaderboard
   *.md                         setup, runbook, architecture and handover notes
 log/
   v0/v0.<minor>/               filed runs: full runs, 5+ question smoke runs, intermediate/ (see Logging)
@@ -99,6 +108,8 @@ Every code change, however small, gets an entry in `docs/version_architecture/v0
 written **in the same turn as the change**. A sentence is enough for a mechanical change. For anything that
 affects correctness, architecture or the scoring pipeline, say what changed, why, and how it was verified.
 If the doc doesn't exist yet, create it with a `## Changelog` section (template: `v0.2.md`).
+A design-only spec for a later version (for example `v0.5.1.md`) is its own architecture doc with its own
+`## Changelog`; code changes are logged in the changelog of the version that is in progress.
 
 ### When a version's first full run completes
 
@@ -110,7 +121,7 @@ In the same turn:
    correctly and the run's cost (from `run_summary.json`, per the Run policy). Cite the run by its filed
    `log/v0/` path.
 3. **Root cause analysis** — see below.
-4. **README** — see below.
+4. **README and overview** — see "README and docs/overview.md" below.
 
 ## Logging
 
@@ -157,15 +168,27 @@ correctly, in the same turn the run finishes:
   with questions and points, and what resolves each one.
 - Runs under 5 questions are not analysed here; their findings go in the version's changelog.
 
-## README shows the latest result, RCA and forecast
+## README and docs/overview.md
 
-`README.md` follows the Best-README-Template layout (shields badges, back-to-top links). The generated
-leaderboard tables live in `docs/leaderboard.md` (`python3 scripts/run_eval.py --write`), and the long
-write-ups live in `docs/overview.md`; the README keeps the status badges and a short "Latest Result"
-block. The released / in-progress / next badges are derived: run `python3 scripts/update_status.py --write` after adding a result doc or a new `docs/version_architecture/v0/v0.x.md` (CI runs `--check`). After every full run (and after an RCA that changes the plan), update `README.md` so it shows:
+`README.md` follows the Best-README-Template layout (shields badges, back-to-top links) and stays short. Each
+figure has one source:
 
-1. **The most advanced full run's result** and its version (score, points, cost, latency).
-2. **The latest root cause analysis**: its categories and a link to its `log/root_cause_analysis/` file.
-3. **The anticipated result once those root causes are resolved**, labelled as a forecast with its basis —
-   the prediction for the next patch version that carries the fixes (the RCA of v0.5.0 is resolved by
-   v0.5.1, so the README forecasts v0.5.1).
+| What | Lives in | Kept current by |
+|---|---|---|
+| Version badges (released, in progress, next) | README | `python3 scripts/update_status.py --write` |
+| Leaderboard tables | `docs/leaderboard.md` | add the run's row to `datasets/evaluation/versions.json`, then `python3 scripts/run_eval.py --write` |
+| Current performance, root cause categories, forecast | `docs/overview.md` | by hand, after every full run and after an RCA that changes the plan |
+| Architecture diagram | `docs/images/architecture.svg` (README) and `docs/architecture-diagram.html` (GitHub Pages) | redrawn with the Cocoon-AI architecture-diagram skill when the architecture changes |
+
+CI runs `run_eval.py --check`, `smoke_eval.py --check` and `update_status.py --check`, so a stale table or
+badge fails the build.
+
+After every full run (and after an RCA that changes the plan):
+
+1. Update `docs/overview.md` with **the most advanced full run's result** and its version (score, points, cost,
+   latency), **the latest root cause analysis** (its categories, linking its `log/root_cause_analysis/` file)
+   and **the forecast** for the next patch version that carries the fixes, labelled as a forecast with its
+   basis (the RCA of v0.5.0 is resolved by v0.5.1, so the forecast is for v0.5.1).
+2. Update the README "Latest Result" table to match that run, and keep its links to the RCA file and to the
+   overview forecast current. The README does not restate RCA categories or forecast figures.
+3. Run the two generator scripts above and commit what they write.

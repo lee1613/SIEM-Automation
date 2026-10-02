@@ -3,9 +3,6 @@
 
 <!-- PROJECT SHIELDS -->
 [![CI][ci-shield]][ci-url]
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 
 <!-- PROJECT HEADER -->
@@ -60,10 +57,10 @@
 ## About The Project
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="A question goes to SH, which spawns Seniors that search Splunk. Their premises go to the evidence gate. If every load-bearing premise is verified the answer is submitted; otherwise the case escalates to an analyst with an evidence package." width="100%">
+  <img src="docs/images/architecture.svg" alt="A question goes to SH, which spawns Seniors that run SPL on Splunk. Their premises go to the evidence gate (premise ledger plus blind validator). If every load-bearing premise is verified the answer is submitted; otherwise the case escalates to a human analyst with an evidence package." width="100%">
 </p>
 
-An answer is submitted only when it passes the evidence gate. Anything else goes to a person with its evidence trail.
+An answer is submitted only when it passes the evidence gate. Anything else goes to a person with its evidence trail. [Open the full diagram](https://lee1613.github.io/SIEM-Automation/architecture-diagram.html), which exports to PNG or PDF.
 
 Agent demos fail in production in a predictable way: they answer confidently when they should not. This project is a worked example of the opposite design. An orchestrator (**SH**) plans each investigation and holds memory across questions. Specialist workers (**Seniors**) run the Splunk searches. Nothing is answered until the evidence passes a gate, and when it cannot, the case goes to a person instead of becoming a guess.
 
@@ -90,9 +87,7 @@ Latest full run: **v0.4.5** (2026-09-24 to 2026-09-25), stopped by the operator 
 | Precision when it answers | **86%** (the v0.2 baseline on the same 50 questions: 49%) |
 | Cost / latency | **$44.95** / 11.3 h summed question time |
 
-Why the 26 wrong answers failed, from the [root cause analysis](log/root_cause_analysis/v0.4.md): a held-but-unsubmitted answer (7 questions), an earlier question's wrong conclusion carried forward (6), the right evidence never found (7), the right evidence with the wrong value (4), and no working web search (2).
-
-**Forecast, not a measurement:** v0.5.1 resolves the three largest causes. Expected **31-37 / 56** (central 34/56, about 11,300 points) at about **$50-60**, from v0.5.0's central forecast of 25/56 plus the recoveries listed in the [overview](docs/overview.md#forecast-for-v051-resolving-the-latest-root-causes).
+Why the 26 wrong answers failed is in the [root cause analysis](log/root_cause_analysis/v0.4.md). The forecast for v0.5.1 (a forecast, not a measurement) and its basis are in the [overview](docs/overview.md#forecast-for-v051-resolving-the-latest-root-causes).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -200,12 +195,6 @@ The code is distributed under the MIT License. See [`LICENSE`](LICENSE) for more
 <!-- MARKDOWN LINKS & IMAGES -->
 [ci-shield]: https://img.shields.io/github/actions/workflow/status/lee1613/SIEM-Automation/ci.yml?style=for-the-badge&label=CI
 [ci-url]: https://github.com/lee1613/SIEM-Automation/actions/workflows/ci.yml
-[forks-shield]: https://img.shields.io/github/forks/lee1613/SIEM-Automation.svg?style=for-the-badge
-[forks-url]: https://github.com/lee1613/SIEM-Automation/network/members
-[stars-shield]: https://img.shields.io/github/stars/lee1613/SIEM-Automation.svg?style=for-the-badge
-[stars-url]: https://github.com/lee1613/SIEM-Automation/stargazers
-[issues-shield]: https://img.shields.io/github/issues/lee1613/SIEM-Automation.svg?style=for-the-badge
-[issues-url]: https://github.com/lee1613/SIEM-Automation/issues
 [license-shield]: https://img.shields.io/github/license/lee1613/SIEM-Automation.svg?style=for-the-badge
 [license-url]: https://github.com/lee1613/SIEM-Automation/blob/main/LICENSE
 [released-shield]: https://img.shields.io/badge/released-v0.4.5%20%C2%B7%2024%2F50-2ea44f?style=for-the-badge
